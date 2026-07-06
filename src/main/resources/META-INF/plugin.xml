@@ -1,0 +1,23 @@
+<idea-plugin>
+    <id>com.taiwei.ai-agent</id>
+    <name>太微</name>
+    <vendor email="support@example.com" url="https://github.com/example/ai-agent">taiwei</vendor>
+
+    <description><![CDATA[
+        太微 - AI 编程助手 IntelliJ IDEA 插件。<br>
+        一个智能助手插件，帮助开发者更高效地编写代码。
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 注册右侧工具窗口 -->
+        <toolWindow id="太微"
+                    anchor="right"
+                    factoryClass="com.taiwei.aiagent.window.ChatWindowFactory"
+                    icon="/icons/taiwei.svg"/>
+
+        <!-- 注册配置服务 -->
+        <applicationService serviceImplementation="com.taiwei.aiagent.settings.AiAgentSettings"/>
+    </extensions>
+</idea-plugin>

@@ -1,0 +1,78 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij' version '1.17.4'
+}
+
+group = 'com.taiwei'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    maven { url 'https://maven.aliyun.com/repository/public' }
+    maven { url 'https://maven.aliyun.com/repository/central' }
+    mavenCentral()
+}
+
+intellij {
+    version = '2024.1'
+    type = 'IC'
+    plugins = []
+    downloadSources = false
+}
+
+tasks {
+    runIde {
+        // 复用已运行的沙箱 IDE，不启动新实例
+        autoReloadPlugins.set(false)
+        
+        // 使用系统 JDK 运行沙箱，避免中文乱码和图标显示问题
+        jvmArgs = [
+            '-Dfile.encoding=UTF-8',
+            '-Dsun.jnu.encoding=UTF-8',
+            '-Dsun.java2d.renderer=sun.java2d.pisces.PiscesRenderingEngine',
+            '-Dawt.useSystemAAFontSettings=lcd',
+            '-Dswing.aatext=true'
+        ]
+    }
+
+    // 禁用 instrumentCode 任务以避免 JDK 路径问题
+    instrumentCode {
+        enabled = false
+    }
+
+    patchPluginXml {
+        sinceBuild.set('241')
+        untilBuild.set('261.*')
+    }
+
+    signPlugin {
+        certificateChain.set(System.getenv('CERTIFICATE_CHAIN'))
+        privateKey.set(System.getenv('PRIVATE_KEY'))
+        password.set(System.getenv('PRIVATE_KEY_PASSWORD'))
+    }
+
+    publishPlugin {
+        token.set(System.getenv('PUBLISH_TOKEN'))
+    }
+}
+
+dependencies {
+    // HTTP 客户端（用于调用 LLM API）
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:okhttp-sse:4.12.0'
+
+    // JSON 处理
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
