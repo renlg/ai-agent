@@ -19,5 +19,11 @@
 
         <!-- 注册配置服务 -->
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.AiAgentSettings"/>
+
+        <!-- 注册 Settings 配置页面（Tools → 太微） -->
+        <applicationConfigurable parentId="tools"
+                                 instance="com.taiwei.aiagent.settings.AiAgentConfigurable"
+                                 id="com.taiwei.aiagent.settings"
+                                 displayName="太微"/>
     </extensions>
 </idea-plugin>

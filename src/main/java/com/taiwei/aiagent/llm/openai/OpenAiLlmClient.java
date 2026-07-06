@@ -1,6 +1,7 @@
 package com.taiwei.aiagent.llm.openai;
 
 import com.google.gson.*;
+import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.llm.LlmClient;
 import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.llm.LlmStreamListener;
@@ -23,6 +24,8 @@ import java.util.concurrent.TimeUnit;
  */
 public class OpenAiLlmClient implements LlmClient {
 
+    private static final Logger LOG = Logger.getInstance(OpenAiLlmClient.class);
+
     private final String baseUrl;
     private final String apiKey;
     private final String model;
@@ -33,6 +36,7 @@ public class OpenAiLlmClient implements LlmClient {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
         this.apiKey = apiKey;
         this.model = model;
+        LOG.info("OpenAiLlmClient 创建 - baseUrl=" + this.baseUrl + ", model=" + model);
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
@@ -43,6 +47,8 @@ public class OpenAiLlmClient implements LlmClient {
 
     @Override
     public LlmResponse chat(List<ChatMessage> messages, List<Tool> tools) {
+        String url = baseUrl + "chat/completions";
+        LOG.info("LLM 请求 - url=" + url + ", model=" + model);
         JsonObject requestBody = buildRequestBody(messages, tools, false);
 
         Request request = buildRequest(requestBody);

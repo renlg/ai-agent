@@ -6,6 +6,7 @@
 // 全局状态
 let isProcessing = false;
 let currentAssistantMessage = null;
+let currentModelIndex = 0;
 
 /**
  * 页面初始化
@@ -27,13 +28,141 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.height = 'auto';
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
     });
+
+    // 等待 Bridge 就绪后加载模型列表（带重试）
+    waitForBridge();
 });
+
+/**
+ * 等待 JS Bridge 就绪（带重试机制）
+ */
+function waitForBridge(retries) {
+    if (retries === undefined) retries = 0;
+    
+    if (window.aiAgent && window.aiAgent.getModels) {
+        console.log('Bridge 已就绪，加载模型列表');
+        loadModelList();
+    } else if (retries < 20) {
+        setTimeout(function() { waitForBridge(retries + 1); }, 100);
+    } else {
+        console.error('Bridge 加载超时（2秒），请刷新页面');
+    }
+}
+
+/**
+ * 切换模型下拉框的展开/收起
+ */
+function toggleModelDropdown() {
+    const selector = document.getElementById('modelSelector');
+    if (!selector) return;
+    
+    if (selector.classList.contains('open')) {
+        selector.classList.remove('open');
+    } else {
+        loadModelList(function() {
+            selector.classList.add('open');
+        });
+    }
+}
+
+// 点击下拉框外部时自动关闭
+document.addEventListener('click', function(e) {
+    const selector = document.getElementById('modelSelector');
+    if (selector && !selector.contains(e.target)) {
+        selector.classList.remove('open');
+    }
+});
+
+/**
+ * 加载模型列表到自定义下拉框
+ */
+function loadModelList(callback) {
+    if (!window.aiAgent || !window.aiAgent.getModels) {
+        console.warn('Bridge 未就绪，无法加载模型列表');
+        if (callback) callback();
+        return;
+    }
+
+    window.aiAgent.getModels(function(response) {
+        try {
+            const data = JSON.parse(response);
+            const menu = document.getElementById('modelDropdownMenu');
+            const label = document.getElementById('modelSelectLabel');
+            if (!menu || !label) return;
+
+            const models = data.models || [];
+
+            // 清空并重新填充
+            menu.innerHTML = '';
+            let activeName = '默认模型';
+
+            models.forEach(function(m) {
+                const item = document.createElement('div');
+                item.className = 'model-dropdown-item' + (m.active ? ' active' : '');
+                item.innerHTML = '<span class="item-name">' + escapeHtml(m.name) + '</span>'
+                    + '<span class="item-model">' + escapeHtml(m.model) + '</span>';
+                item.onclick = function(e) {
+                    e.stopPropagation();
+                    switchModel(m.index);
+                    document.getElementById('modelSelector').classList.remove('open');
+                };
+                menu.appendChild(item);
+                if (m.active) {
+                    activeName = m.name;
+                    currentModelIndex = m.index;
+                }
+            });
+
+            label.textContent = activeName;
+            console.log('模型列表已更新，共 ' + models.length + ' 个模型');
+        } catch (e) {
+            console.error('解析模型列表失败:', e);
+        }
+        if (callback) callback();
+    });
+}
+
+/**
+ * 切换模型
+ */
+function switchModel(modelIndex) {
+    const idx = parseInt(modelIndex);
+    if (idx === currentModelIndex) return;
+
+    if (window.aiAgent && window.aiAgent.switchModel) {
+        window.aiAgent.switchModel(idx, function(response) {
+            try {
+                const data = JSON.parse(response);
+                if (data.ok) {
+                    currentModelIndex = idx;
+                    console.log('已切换模型到: ' + data.name);
+                    // 更新按钮显示文本
+                    const label = document.getElementById('modelSelectLabel');
+                    if (label) label.textContent = data.name;
+                    // 刷新下拉列表中的 active 状态
+                    loadModelList();
+                } else {
+                    console.error('切换模型失败:', data.error);
+                    appendErrorMessage('切换模型失败: ' + data.error);
+                    loadModelList();
+                }
+            } catch (e) {
+                console.error('解析切换模型响应失败:', e);
+                loadModelList();
+            }
+        });
+    } else {
+        console.error('Bridge 不支持模型切换');
+    }
+}
 
 /**
  * JS Bridge 就绪回调（由 Java 端注入后调用）
  */
 function onBridgeReady() {
-    console.log('太微 Bridge 已就绪');
+    console.log('太微 onBridgeReady 回调触发');
+    // Bridge 就绪后自动加载模型列表
+    loadModelList();
 }
 
 /**

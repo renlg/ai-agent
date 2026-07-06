@@ -7,9 +7,12 @@ import com.intellij.openapi.components.Storage;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * AI Agent 插件配置
- * 持久化存储 API Key、模型地址等设置
+ * 支持多模型配置，可自由切换
  */
 @State(
         name = "AiAgentSettings",
@@ -33,31 +36,63 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         this.state = state;
     }
 
-    // ========== 便捷访问方法 ==========
+    // ========== 模型列表操作 ==========
 
-    public String getBaseUrl() {
-        return state.baseUrl;
+    public List<ModelConfig> getModelConfigs() {
+        return state.modelConfigs;
     }
 
-    public void setBaseUrl(String baseUrl) {
-        state.baseUrl = baseUrl;
+    public void setModelConfigs(List<ModelConfig> configs) {
+        state.modelConfigs = configs;
     }
 
-    public String getApiKey() {
-        return state.apiKey;
+    public void addModelConfig(ModelConfig config) {
+        state.modelConfigs.add(config);
     }
 
-    public void setApiKey(String apiKey) {
-        state.apiKey = apiKey;
+    public void removeModelConfig(int index) {
+        if (index >= 0 && index < state.modelConfigs.size()) {
+            state.modelConfigs.remove(index);
+            // 如果删除的是当前选中的，重置为第一个
+            if (state.activeModelIndex >= state.modelConfigs.size()) {
+                state.activeModelIndex = Math.max(0, state.modelConfigs.size() - 1);
+            }
+        }
     }
 
-    public String getModel() {
-        return state.model;
+    public void updateModelConfig(int index, ModelConfig config) {
+        if (index >= 0 && index < state.modelConfigs.size()) {
+            state.modelConfigs.set(index, config);
+        }
     }
 
-    public void setModel(String model) {
-        state.model = model;
+    public ModelConfig getActiveModelConfig() {
+        if (state.modelConfigs.isEmpty()) {
+            return new ModelConfig(); // 返回默认
+        }
+        int idx = state.activeModelIndex;
+        if (idx < 0 || idx >= state.modelConfigs.size()) {
+            idx = 0;
+            state.activeModelIndex = 0;
+        }
+        return state.modelConfigs.get(idx);
     }
+
+    public int getActiveModelIndex() {
+        return state.activeModelIndex;
+    }
+
+    public void setActiveModelIndex(int index) {
+        if (index >= 0 && index < state.modelConfigs.size()) {
+            state.activeModelIndex = index;
+        } else {
+            // 索引无效时打印警告，方便排查
+            com.intellij.openapi.diagnostic.Logger.getInstance(AiAgentSettings.class)
+                    .warn("setActiveModelIndex 失败: index=" + index + ", 模型数量=" + state.modelConfigs.size());
+        }
+    }
+
+    // ========== 全局参数 ==========
 
     public int getMaxTokens() {
         return state.maxTokens;
@@ -75,26 +110,56 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         state.temperature = temperature;
     }
 
+    // ========== 便捷方法（兼容旧代码） ==========
+
+    public String getBaseUrl() {
+        return getActiveModelConfig().baseUrl;
+    }
+
+    public String getApiKey() {
+        return getActiveModelConfig().apiKey;
+    }
+
+    public String getModel() {
+        return getActiveModelConfig().modelName;
+    }
+
+    /**
+     * 单个模型配置
+     */
+    public static class ModelConfig {
+        public String name = "qwen3-max";          // 显示名称
+        public String baseUrl = "http://39.107.128.199:3000/v1";
+        public String apiKey = "sk-36CIQjNXGkMaVn0PC57de032B6Ed454cB0B2BfDc52D96e42";
+        public String modelName = "qwen3-max";
+
+        public ModelConfig() {}
+
+        public ModelConfig(String name, String baseUrl, String apiKey, String modelName) {
+            this.name = name;
+            this.baseUrl = baseUrl;
+            this.apiKey = apiKey;
+            this.modelName = modelName;
+        }
+
+        public ModelConfig copy() {
+            return new ModelConfig(name, baseUrl, apiKey, modelName);
+        }
+    }
+
     /**
      * 配置状态（会被序列化到 XML）
      */
     public static class State {
         /**
-         * API 基础地址
-         * 默认 OpenAI，可改为 DeepSeek、通义千问等兼容接口
+         * 模型配置列表
          */
-        public String baseUrl = "https://api.openai.com/v1/";
+        public List<ModelConfig> modelConfigs = new ArrayList<>();
 
         /**
-         * API Key
+         * 当前选中的模型索引
          */
-        public String apiKey = "";
-
-        /**
-         * 模型名称
-         * 如 gpt-4o, deepseek-chat, qwen-turbo 等
-         */
-        public String model = "gpt-4o";
+        public int activeModelIndex = 0;
 
         /**
          * 最大输出 Token 数
@@ -105,5 +170,10 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 温度参数（0-2）
          */
         public double temperature = 0.7;
+
+        public State() {
+            // 默认添加一个模型
+            modelConfigs.add(new ModelConfig());
+        }
     }
 }

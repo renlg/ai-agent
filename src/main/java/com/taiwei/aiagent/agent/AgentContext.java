@@ -1,5 +1,6 @@
 package com.taiwei.aiagent.agent;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.agent.prompt.PromptManager;
 import com.taiwei.aiagent.llm.LlmClient;
@@ -21,8 +22,9 @@ public class AgentContext {
     private final Project project;
     private final Conversation conversation;
     private final ToolRegistry toolRegistry;
-    private final LlmClient llmClient;
     private final PromptManager promptManager;
+
+    private static final Logger LOG = Logger.getInstance(AgentContext.class);
 
     /**
      * Agent 循环最大迭代次数（防止无限循环）
@@ -31,16 +33,6 @@ public class AgentContext {
 
     public AgentContext(Project project) {
         this.project = project;
-
-        // 初始化配置
-        AiAgentSettings settings = AiAgentSettings.getInstance();
-
-        // 创建 LLM 客户端
-        this.llmClient = new OpenAiLlmClient(
-                settings.getBaseUrl(),
-                settings.getApiKey(),
-                settings.getModel()
-        );
 
         // 初始化 Prompt 管理器
         this.promptManager = new PromptManager(project);
@@ -51,6 +43,28 @@ public class AgentContext {
         // 注册工具
         this.toolRegistry = new ToolRegistry();
         registerDefaultTools();
+    }
+
+    /**
+     * 根据当前设置创建 LLM 客户端
+     */
+    private LlmClient createLlmClient() {
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        String baseUrl = settings.getBaseUrl();
+        String apiKey = settings.getApiKey();
+        String model = settings.getModel();
+        int activeIndex = settings.getActiveModelIndex();
+        LOG.info("创建 LLM 客户端 - activeIndex=" + activeIndex
+                + ", baseUrl=" + baseUrl + ", model=" + model);
+        return new OpenAiLlmClient(baseUrl, apiKey, model);
+    }
+
+    /**
+     * 切换模型（重新创建 LLM 客户端）
+     */
+    public void switchModel(int modelIndex) {
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        settings.setActiveModelIndex(modelIndex);
     }
 
     /**
@@ -84,8 +98,12 @@ public class AgentContext {
         return toolRegistry;
     }
 
+    /**
+     * 动态获取 LLM 客户端（每次从最新配置创建）
+     * 确保切换模型或修改配置后，LLM 调用使用最新的 baseUrl/apiKey/model
+     */
     public LlmClient getLlmClient() {
-        return llmClient;
+        return createLlmClient();
     }
 
     public PromptManager getPromptManager() {

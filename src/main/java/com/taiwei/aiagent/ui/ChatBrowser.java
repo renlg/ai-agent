@@ -7,8 +7,11 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.io.File;
-import java.net.URL;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.stream.Collectors;
 
 /**
  * JCEF 浏览器组件
@@ -37,62 +40,78 @@ public class ChatBrowser implements Disposable {
 
     /**
      * 加载前端 HTML 页面
+     * 将所有 CSS/JS 资源内联到 HTML 中，通过 loadHTML 加载
+     * （JCEF 无法通过 loadURL 正确解析 classpath 中的相对路径资源）
      */
     private void loadHtmlPage() {
-        // 获取 html/index.html 的路径
-        URL htmlUrl = getClass().getClassLoader().getResource("html/index.html");
+        try {
+            // 读取所有资源
+            String html = readResource("html/index.html");
+            String css = readResource("html/css/style.css");
+            String markdownJs = readResource("html/js/markdown.js");
+            String chatJs = readResource("html/js/chat.js");
+            String appJs = readResource("html/js/app.js");
 
-        if (htmlUrl != null) {
-            String url = htmlUrl.toExternalForm();
-            LOG.info("加载页面: " + url);
-            jbCefBrowser.loadURL(url);
-        } else {
-            // 如果找不到资源，显示错误信息
-            LOG.warn("未找到 html/index.html 资源，显示内联页面");
-            loadInlineHtml();
+            // 内联 CSS
+            html = html.replace(
+                    "<link rel=\"stylesheet\" href=\"css/style.css\">",
+                    "<style>" + "\n" + css + "\n" + "</style>"
+            );
+
+            // 内联 JS
+            html = html.replace(
+                    "<script src=\"js/markdown.js\">" + "</script>",
+                    "<script>" + "\n" + markdownJs + "\n" + "</script>"
+            );
+            html = html.replace(
+                    "<script src=\"js/app.js\">" + "</script>",
+                    "<script>" + "\n" + appJs + "\n" + "</script>"
+            );
+            html = html.replace(
+                    "<script src=\"js/chat.js\">" + "</script>",
+                    "<script>" + "\n" + chatJs + "\n" + "</script>"
+            );
+
+            LOG.info("加载内联 HTML 页面");
+            jbCefBrowser.loadHTML(html);
+
+        } catch (Exception e) {
+            LOG.error("加载 HTML 页面失败", e);
+            loadFallbackHtml();
         }
     }
 
     /**
-     * 加载内联 HTML（备用方案）
+     * 从 classpath 读取资源文件内容
      */
-    private void loadInlineHtml() {
-        String html = """
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                            background: var(--bg, #ffffff);
-                            color: var(--text, #333333);
-                            margin: 0;
-                            padding: 20px;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            height: 100vh;
-                        }
-                        .error {
-                            text-align: center;
-                            padding: 20px;
-                            border: 1px solid #ddd;
-                            border-radius: 8px;
-                            max-width: 400px;
-                        }
-                        .error h2 { color: #e74c3c; }
-                    </style>
-                </head>
-                <body>
-                    <div class="error">
-                        <h2>页面加载失败</h2>
-                        <p>无法找到前端页面资源。</p>
-                        <p>请确保 html/index.html 存在于 resources 目录中。</p>
-                    </div>
-                </body>
-                </html>
-                """;
+    private String readResource(String path) {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+            if (is == null) {
+                LOG.warn("资源未找到: " + path);
+                return "";
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                return reader.lines().collect(Collectors.joining("\n"));
+            }
+        } catch (Exception e) {
+            LOG.warn("读取资源失败: " + path, e);
+            return "";
+        }
+    }
+
+    /**
+     * 加载备用 HTML（当资源文件读取失败时）
+     */
+    private void loadFallbackHtml() {
+        String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+                + "<style>body{font-family:sans-serif;display:flex;align-items:center;"
+                + "justify-content:center;height:100vh;}"
+                + ".error{text-align:center;padding:20px;border:1px solid #ddd;"
+                + "border-radius:8px;max-width:400px;}"
+                + ".error h2{color:#e74c3c;}" + "</style></head>"
+                + "<body><div class='error'><h2>页面加载失败</h2>"
+                + "<p>无法加载太微前端页面资源。</p>"
+                + "<p>请查看 IDE 日志获取详细信息。</p></div></body></html>";
         jbCefBrowser.loadHTML(html);
     }
 

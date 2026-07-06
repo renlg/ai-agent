@@ -24,8 +24,17 @@ tasks {
         // 复用已运行的沙箱 IDE，不启动新实例
         autoReloadPlugins.set(false)
         
+        // 启动时自动打开当前项目，避免每次都选项目
+        args = [project.rootDir.absolutePath]
+        
+        // 使用固定的沙箱配置目录，避免 clean 后配置丢失
+        // 通过 systemProperty 指定 config 和 system 目录位置
+        systemProperty 'idea.config.path', System.getProperty("user.home") + '/.taiwei-ide-sandbox/config'
+        systemProperty 'idea.system.path', System.getProperty("user.home") + '/.taiwei-ide-sandbox/system'
+        systemProperty 'idea.plugins.path', System.getProperty("user.home") + '/.taiwei-ide-sandbox/plugins'
+        
         // 使用系统 JDK 运行沙箱，避免中文乱码和图标显示问题
-        jvmArgs = [
+        jvmArgs += [
             '-Dfile.encoding=UTF-8',
             '-Dsun.jnu.encoding=UTF-8',
             '-Dsun.java2d.renderer=sun.java2d.pisces.PiscesRenderingEngine',

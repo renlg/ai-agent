@@ -74,6 +74,7 @@ public class AgentService {
      */
     private void executeAgentLoop(AgentListener listener) {
         LlmClient llmClient = context.getLlmClient();
+        LOG.info("Agent 循环使用模型: " + llmClient.getModelName());
         ToolRegistry registry = context.getToolRegistry();
         List<Tool> tools = registry.getAllTools();
         int maxIterations = context.getMaxIterations();
