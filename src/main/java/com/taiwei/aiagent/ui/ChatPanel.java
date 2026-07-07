@@ -528,41 +528,55 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Chat Display Rendering ==========
 
     private void refreshChatDisplay() {
+        String chatBg = colorToHex(CHAT_BG);
+        String textCol = colorToHex(TEXT_COLOR);
+        String secondaryCol = colorToHex(SECONDARY_TEXT);
+        String dividerCol = colorToHex(DIVIDER_COLOR);
+        String userCol = colorToHex(USER_MSG_BORDER);
+        String assistantCol = colorToHex(ASSISTANT_MSG_BORDER);
+        String toolCol = colorToHex(TOOL_MSG_BORDER);
+        String errorCol = colorToHex(ERROR_MSG_BORDER);
+        String codeBg = colorToHex(new JBColor(new Color(0xF5, 0xF5, 0xF5), new Color(0x3C, 0x3C, 0x3C)));
+        String codeBorder = colorToHex(new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x4A, 0x4A, 0x4A)));
+
         StringBuilder sb = new StringBuilder();
-        sb.append("<html><head><style type=\"text/css\">");
-        sb.append(buildChatCss());
-        sb.append("</style></head><body>");
+        sb.append("<html><body")
+                .append(" style=\"font-family: SansSerif; font-size: 14px;")
+                .append(" margin-top: 8px; margin-right: 14px; margin-bottom: 8px; margin-left: 14px;")
+                .append(" background-color: ").append(chatBg).append(";")
+                .append(" color: ").append(textCol).append(";")
+                .append(" line-height: 1.6;\">");
 
         for (int i = 0; i < chatEntries.size(); i++) {
             ChatEntry entry = chatEntries.get(i);
             if (i > 0) {
-                sb.append("<hr>");
+                sb.append("<hr color=\"").append(dividerCol).append("\" size=\"1\" noshade>");
             }
             switch (entry.type) {
                 case USER:
-                    sb.append("<div class=\"msg user-msg\">");
-                    sb.append("<div class=\"sender user-label\">\u4f60</div>");
-                    sb.append("<div class=\"msg-body\">");
+                    sb.append("<div style=\"margin: 10px 0; padding: 6px 8px 6px 12px; border-left: 4px solid ").append(userCol).append(";\">");
+                    sb.append("<div style=\"font-size: 12px; font-weight: bold; color: ").append(userCol).append("; margin-bottom: 4px;\">\u4f60</div>");
+                    sb.append("<div style=\"font-size: 14px; color: ").append(textCol).append("; line-height: 1.6;\">");
                     sb.append(escapeHtml(entry.content));
                     sb.append("</div></div>");
                     break;
                 case ASSISTANT:
-                    sb.append("<div class=\"msg assistant-msg\">");
-                    sb.append("<div class=\"sender assistant-label\">AI</div>");
-                    sb.append("<div class=\"msg-body\">");
-                    sb.append(MarkdownRenderer.render(entry.content));
+                    sb.append("<div style=\"margin: 10px 0; padding: 6px 8px 6px 12px; border-left: 4px solid ").append(assistantCol).append(";\">");
+                    sb.append("<div style=\"font-size: 12px; font-weight: bold; color: ").append(assistantCol).append("; margin-bottom: 4px;\">AI</div>");
+                    sb.append("<div style=\"font-size: 14px; color: ").append(textCol).append("; line-height: 1.6;\">");
+                    sb.append(inlineMarkdownStyles(MarkdownRenderer.render(entry.content), codeBg, codeBorder, userCol));
                     sb.append("</div></div>");
                     break;
                 case TOOL_CALL:
-                    sb.append("<div class=\"msg tool-msg\">");
-                    sb.append("<div class=\"sender tool-label\">\u5de5\u5177 \u00b7 ");
+                    sb.append("<div style=\"margin: 10px 0; padding: 6px 8px 6px 12px; border-left: 4px solid ").append(toolCol).append(";\">");
+                    sb.append("<div style=\"font-size: 12px; font-weight: bold; color: ").append(toolCol).append("; margin-bottom: 4px;\">\u5de5\u5177 \u00b7 ");
                     sb.append(escapeHtml(entry.toolName)).append("</div>");
-                    sb.append("<div class=\"msg-body\">");
+                    sb.append("<div style=\"font-size: 14px; color: ").append(textCol).append("; line-height: 1.6;\">");
                     if (entry.toolArgs != null && !entry.toolArgs.isEmpty()) {
                         String args = entry.toolArgs.length() > 100
                                 ? entry.toolArgs.substring(0, 100) + "..."
                                 : entry.toolArgs;
-                        sb.append("<code>").append(escapeHtml(args)).append("</code>");
+                        sb.append("<code style=\"font-family: Monospaced; font-size: 12px; background-color: ").append(codeBg).append("; padding: 2px 4px;\">").append(escapeHtml(args)).append("</code>");
                         sb.append("<br>");
                     }
                     if (entry.toolResult != null) {
@@ -576,12 +590,12 @@ public class ChatPanel extends JPanel implements Disposable {
                     sb.append("</div></div>");
                     break;
                 case THINKING:
-                    sb.append("<div class=\"thinking\"><i>\u601d\u8003\u4e2d...</i></div>");
+                    sb.append("<div style=\"margin: 10px 0; padding-left: 12px; color: ").append(secondaryCol).append("; font-size: 13px;\"><i>\u601d\u8003\u4e2d...</i></div>");
                     break;
                 case ERROR:
-                    sb.append("<div class=\"msg error-msg\">");
-                    sb.append("<div class=\"sender error-label\">\u9519\u8bef</div>");
-                    sb.append("<div class=\"msg-body\">");
+                    sb.append("<div style=\"margin: 10px 0; padding: 6px 8px 6px 12px; border-left: 4px solid ").append(errorCol).append(";\">");
+                    sb.append("<div style=\"font-size: 12px; font-weight: bold; color: ").append(errorCol).append("; margin-bottom: 4px;\">\u9519\u8bef</div>");
+                    sb.append("<div style=\"font-size: 14px; color: ").append(textCol).append("; line-height: 1.6;\">");
                     sb.append(escapeHtml(entry.content));
                     sb.append("</div></div>");
                     break;
@@ -598,68 +612,34 @@ public class ChatPanel extends JPanel implements Disposable {
         });
     }
 
-    private String buildChatCss() {
-        String chatBg = colorToHex(CHAT_BG);
-        String textCol = colorToHex(TEXT_COLOR);
-        String secondaryCol = colorToHex(SECONDARY_TEXT);
-        String dividerCol = colorToHex(DIVIDER_COLOR);
-        String userCol = colorToHex(USER_MSG_BORDER);
-        String assistantCol = colorToHex(ASSISTANT_MSG_BORDER);
-        String toolCol = colorToHex(TOOL_MSG_BORDER);
-        String errorCol = colorToHex(ERROR_MSG_BORDER);
-        String codeBg = colorToHex(new JBColor(new Color(0xF5, 0xF5, 0xF5), new Color(0x3C, 0x3C, 0x3C)));
-        String codeBorder = colorToHex(new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x4A, 0x4A, 0x4A)));
+    private String inlineMarkdownStyles(String html, String codeBg, String codeBorder, String linkCol) {
+        if (html == null || html.isEmpty()) return html;
 
-        return "body { font-family: SansSerif; font-size: 14px; "
-                + "margin-top: 8px; margin-right: 14px; margin-bottom: 8px; margin-left: 14px; "
-                + "background-color: " + chatBg + "; color: " + textCol + "; "
-                + "line-height: 1.6; }"
+        html = html.replace("<pre>",
+                "<pre style=\"background-color: " + codeBg + "; padding: 10px; border: 1px solid " + codeBorder + "; font-family: Monospaced; font-size: 12px;\">");
 
-                + "hr { height: 1px; background-color: " + dividerCol + "; "
-                + "border-style: none; margin-top: 2px; margin-bottom: 2px; }"
+        html = html.replaceAll("<pre([^>]*)><code[^>]*>", "<pre$1>");
+        html = html.replace("</code></pre>", "</pre>");
 
-                + ".msg { margin-top: 10px; margin-bottom: 10px; "
-                + "padding-top: 6px; padding-bottom: 6px; padding-left: 12px; padding-right: 8px; "
-                + "border-left: 4px solid " + textCol + "; }"
+        html = html.replace("<code>",
+                "<code style=\"font-family: Monospaced; font-size: 12px; background-color: " + codeBg + "; padding: 2px 4px;\">");
 
-                + ".user-msg { border-left-color: " + userCol + "; }"
-                + ".assistant-msg { border-left-color: " + assistantCol + "; }"
-                + ".tool-msg { border-left-color: " + toolCol + "; }"
-                + ".error-msg { border-left-color: " + errorCol + "; }"
+        html = html.replace("<a ", "<a style=\"color: " + linkCol + ";\" ");
 
-                + ".sender { font-size: 12px; font-weight: bold; margin-bottom: 4px; }"
-                + ".user-label { color: " + userCol + "; }"
-                + ".assistant-label { color: " + assistantCol + "; }"
-                + ".tool-label { color: " + toolCol + "; }"
-                + ".error-label { color: " + errorCol + "; }"
+        html = html.replace("<table>", "<table style=\"margin: 6px 0;\">");
 
-                + ".msg-body { font-size: 14px; color: " + textCol + "; line-height: 1.6; }"
+        html = html.replace("<th>",
+                "<th style=\"border: 1px solid " + codeBorder + "; padding: 6px 10px; background-color: " + codeBg + ";\">");
 
-                + ".thinking { margin-top: 10px; margin-bottom: 10px; "
-                + "padding-left: 12px; color: " + secondaryCol + "; font-size: 13px; }"
+        html = html.replace("<td>",
+                "<td style=\"border: 1px solid " + codeBorder + "; padding: 6px 10px;\">");
 
-                + "pre { background-color: " + codeBg + "; "
-                + "padding-top: 10px; padding-right: 10px; padding-bottom: 10px; padding-left: 10px; "
-                + "border: 1px solid " + codeBorder + "; "
-                + "font-family: Monospaced; font-size: 12px; }"
+        html = html.replace("<p>", "<p style=\"margin: 4px 0;\">");
 
-                + "code { font-family: Monospaced; font-size: 12px; "
-                + "background-color: " + codeBg + "; "
-                + "padding-top: 2px; padding-right: 4px; padding-bottom: 2px; padding-left: 4px; }"
-                + "pre code { background-color: transparent; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; }"
+        html = html.replace("<ul>", "<ul style=\"margin: 4px 0; padding-left: 20px;\">");
+        html = html.replace("<ol>", "<ol style=\"margin: 4px 0; padding-left: 20px;\">");
 
-                + "a { color: " + userCol + "; }"
-
-                + "table { margin-top: 6px; margin-bottom: 6px; }"
-                + "th { border: 1px solid " + codeBorder + "; "
-                + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; "
-                + "background-color: " + codeBg + "; }"
-                + "td { border: 1px solid " + codeBorder + "; "
-                + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; }"
-
-                + "p { margin-top: 4px; margin-bottom: 4px; }"
-                + "ul { margin-top: 4px; margin-bottom: 4px; padding-left: 20px; }"
-                + "ol { margin-top: 4px; margin-bottom: 4px; padding-left: 20px; }";
+        return html;
     }
 
     private static String colorToHex(Color c) {
