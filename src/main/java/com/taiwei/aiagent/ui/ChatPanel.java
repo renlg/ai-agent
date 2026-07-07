@@ -222,10 +222,17 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Java → JS Push ==========
 
     private void pushToJs(String func, String data) {
-        String js = "if(typeof " + func + "==='function'){" + func + "(" + data + ");}";
-        CefBrowser cef = browser.getCefBrowser();
-        if (cef != null) {
-            cef.executeJavaScript(js, "taiwei-push", 0);
+        Runnable task = () -> {
+            String js = "if(typeof " + func + "==='function'){" + func + "(" + data + ");}";
+            CefBrowser cef = browser.getCefBrowser();
+            if (cef != null) {
+                cef.executeJavaScript(js, "taiwei-push", 0);
+            }
+        };
+        if (SwingUtilities.isEventDispatchThread()) {
+            task.run();
+        } else {
+            SwingUtilities.invokeLater(task);
         }
     }
 

@@ -3,12 +3,14 @@ package com.taiwei.aiagent.agent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.llm.LlmClient;
-import com.taiwei.aiagent.llm.LlmResponse;
+import com.taiwei.aiagent.llm.LlmStreamListener;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.tool.Tool;
 import com.taiwei.aiagent.tool.ToolRegistry;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Agent 核心服务
@@ -136,12 +138,13 @@ public class AgentService {
     }
 
     /**
-     * Agent 核心循环
-     * 反复调用 LLM，直到得到纯文本回答（无工具调用）或达到最大迭代次数
+     * Agent 核心循环（流式）
+     * 使用 SSE 流式调用 LLM，实时推送内容片段到前端
+     * 工具调用在流结束后统一处理，然后继续循环
      */
     private void executeAgentLoop(AgentContext context, AgentListener listener) {
         LlmClient llmClient = context.getLlmClient();
-        LOG.info("Agent 循环使用模型: " + llmClient.getModelName());
+        LOG.info("Agent 循环使用模型（流式）: " + llmClient.getModelName());
         ToolRegistry registry = context.getToolRegistry();
         List<Tool> tools = registry.getAllTools();
         int maxIterations = context.getMaxIterations();
@@ -149,42 +152,80 @@ public class AgentService {
         StringBuilder fullResponse = new StringBuilder();
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
-            LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代");
+            LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代（流式）");
 
-            // 调用 LLM
-            LlmResponse response = llmClient.chat(
+            final StringBuilder iterContent = new StringBuilder();
+            final List<ChatMessage.ToolCall> iterToolCalls = new ArrayList<>();
+            final String[] iterError = {null};
+            final CountDownLatch latch = new CountDownLatch(1);
+
+            llmClient.chatStream(
                     context.getConversation().getMessages(),
-                    tools
+                    tools,
+                    new LlmStreamListener() {
+                        @Override
+                        public void onContent(String delta) {
+                            iterContent.append(delta);
+                            listener.onContent(delta);
+                        }
+
+                        @Override
+                        public void onToolCall(String toolCallId, String functionName, String arguments) {
+                            ChatMessage.ToolCall tc = new ChatMessage.ToolCall();
+                            tc.setId(toolCallId);
+                            tc.setType("function");
+                            ChatMessage.FunctionCall fc = new ChatMessage.FunctionCall();
+                            fc.setName(functionName);
+                            fc.setArguments(arguments);
+                            tc.setFunction(fc);
+                            iterToolCalls.add(tc);
+                        }
+
+                        @Override
+                        public void onComplete() {
+                            latch.countDown();
+                        }
+
+                        @Override
+                        public void onError(String error, Throwable throwable) {
+                            iterError[0] = error;
+                            latch.countDown();
+                        }
+                    }
             );
 
-            if (!response.isSuccess()) {
-                String error = "LLM 调用失败: " + response.getErrorMessage();
-                LOG.warn(error);
-                listener.onError(error);
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                listener.onError("Agent 循环被中断");
+                return;
+            }
+
+            if (iterError[0] != null) {
+                LOG.warn("流式调用错误: " + iterError[0]);
+                listener.onError(iterError[0]);
                 return;
             }
 
             // 情况1: LLM 返回了工具调用
-            if (response.hasToolCalls()) {
-                // 将带工具调用的助手消息加入历史
-                context.getConversation().addAssistantToolCalls(
-                        response.getToolCalls(), response.getContent());
+            if (!iterToolCalls.isEmpty()) {
+                String content = iterContent.length() > 0 ? iterContent.toString() : null;
 
-                // 如果有文本内容也输出
-                if (response.getContent() != null && !response.getContent().isEmpty()) {
-                    listener.onContent(response.getContent());
-                    fullResponse.append(response.getContent());
+                context.getConversation().addAssistantToolCalls(
+                        iterToolCalls.toArray(new ChatMessage.ToolCall[0]), content);
+
+                if (content != null && !content.isEmpty()) {
+                    fullResponse.append(content);
                 }
 
-                // 执行每个工具调用
-                for (ChatMessage.ToolCall toolCall : response.getToolCalls()) {
+                for (ChatMessage.ToolCall toolCall : iterToolCalls) {
                     String toolName = toolCall.getFunction().getName();
                     String args = toolCall.getFunction().getArguments();
 
                     listener.onToolCallStart(toolName, args);
                     LOG.info("调用工具: " + toolName + " 参数: " + args);
 
-                    // 查找并执行工具
                     Tool tool = registry.getTool(toolName);
                     String result;
                     if (tool != null) {
@@ -196,22 +237,18 @@ public class AgentService {
                     listener.onToolCallEnd(toolName, result);
                     LOG.info("工具 " + toolName + " 执行完成");
 
-                    // 将工具结果加入对话历史
                     context.getConversation().addToolResult(result, toolCall.getId());
                 }
 
-                // 继续循环，让 LLM 根据工具结果继续推理
                 continue;
             }
 
             // 情况2: LLM 返回了纯文本回答（Agent 循环结束）
-            String content = response.getContent();
+            String content = iterContent.length() > 0 ? iterContent.toString() : null;
             if (content != null) {
-                listener.onContent(content);
                 fullResponse.append(content);
             }
 
-            // 将助手回答加入历史
             context.getConversation().addAssistantMessage(content);
 
             listener.onComplete(fullResponse.toString());
