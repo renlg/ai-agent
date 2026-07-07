@@ -214,6 +214,11 @@
                     var display = status.length > 100 ? status.substring(0, 100) + '...' : status;
                     statusEl.textContent = display;
                 }
+                // 如果是完成状态，移除进度条
+                if (status.indexOf('\u2705') !== -1) {
+                    var bar = existing.querySelector('.command-progress-bar');
+                    if (bar) bar.remove();
+                }
                 return;
             }
 
@@ -232,7 +237,7 @@
             el.className = 'message tool command-progress';
             el.id = 'progress-' + toolCallId;
             el.innerHTML =
-                '<div class="message-label">&#x1f527; &#x5de5;&#x5177; &middot; <span class="tool-name">run_command</span></div>' +
+                '<div class="message-label">&#x1f527; &#x5de5;&#x5177; &middot; <span class="tool-name">' + MarkdownRenderer.escapeHtml(toolCallId) + '</span></div>' +
                 '<div class="command-progress-bar"><div class="command-progress-indeterminate"></div></div>' +
                 '<div class="command-status-text">' + MarkdownRenderer.escapeHtml(status) + '</div>';
             messagesArea.appendChild(el);

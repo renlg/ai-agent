@@ -513,9 +513,8 @@ public class ChatPanel extends JPanel implements Disposable {
                         }
                     }
 
-                    if (sessionId.equals(agentService.getActiveSessionId())) {
-                        pushToJs("hideProgress", escapeJsString(toolName));
-                    }
+                    pushToJs("showProgress",
+                            escapeJsString(toolName) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
                 }
 
                 @Override
@@ -546,10 +545,9 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onCommandResult(String toolCallId, String result) {
-                    if (sessionId.equals(agentService.getActiveSessionId())) {
-                        pushToJs("hideProgress", escapeJsString(toolCallId));
-                        pushToJs("hideRunButton", escapeJsString(toolCallId));
-                    }
+                    pushToJs("showProgress",
+                            escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
+                    pushToJs("hideRunButton", escapeJsString(toolCallId));
 
                     // 更新 ChatEntry
                     for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
@@ -584,9 +582,7 @@ public class ChatPanel extends JPanel implements Disposable {
                     // 更新会话列表（标题可能已改变）
                     SwingUtilities.invokeLater(() -> pushSessionListToJs());
 
-                    if (sessionId.equals(agentService.getActiveSessionId())) {
-                        pushComplete();
-                    }
+                    pushComplete();
                 }
 
                 @Override
@@ -598,9 +594,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     // 清理待审批命令
                     pendingCommands.clear();
 
-                    if (sessionId.equals(agentService.getActiveSessionId())) {
-                        pushError(error);
-                    }
+                    pushToJs("hideProgress", escapeJsString(sessionId));
+                    pushToJs("hideRunButton", escapeJsString(sessionId));
+                    pushError(error);
                 }
             });
         });
