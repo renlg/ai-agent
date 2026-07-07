@@ -9,17 +9,17 @@ import com.taiwei.aiagent.tool.Tool;
 import com.taiwei.aiagent.tool.ToolRegistry;
 
 import java.util.List;
-import java.util.function.Consumer;
 
 /**
  * Agent 核心服务
  * 实现 Agent 循环：接收用户消息 → 调用 LLM → 执行工具 → 循环直到得到最终回答
+ * 支持多会话管理
  */
 public class AgentService {
 
     private static final Logger LOG = Logger.getInstance(AgentService.class);
 
-    private final AgentContext context;
+    private final SessionManager sessionManager;
 
     /**
      * Agent 事件监听器
@@ -45,34 +45,97 @@ public class AgentService {
     }
 
     public AgentService(Project project) {
-        this.context = new AgentContext(project);
+        this.sessionManager = new SessionManager(project);
     }
 
+    /**
+     * 获取当前活跃会话的上下文（向后兼容）
+     */
     public AgentContext getContext() {
-        return context;
+        return sessionManager.getActiveContext();
+    }
+
+    /**
+     * 获取 SessionManager
+     */
+    public SessionManager getSessionManager() {
+        return sessionManager;
+    }
+
+    /**
+     * 创建新会话
+     *
+     * @return 新会话的 sessionId
+     */
+    public String createSession() {
+        return sessionManager.createSession();
+    }
+
+    /**
+     * 切换到指定会话
+     */
+    public void switchSession(String sessionId) {
+        sessionManager.switchSession(sessionId);
+    }
+
+    /**
+     * 获取当前活跃会话 ID
+     */
+    public String getActiveSessionId() {
+        return sessionManager.getActiveSessionId();
+    }
+
+    /**
+     * 列出所有会话
+     */
+    public List<SessionManager.SessionInfo> listSessions() {
+        return sessionManager.listSessions();
+    }
+
+    /**
+     * 删除指定会话
+     */
+    public void deleteSession(String sessionId) {
+        sessionManager.deleteSession(sessionId);
+    }
+
+    /**
+     * 发送用户消息并执行 Agent 循环（使用当前活跃会话）
+     */
+    public void sendMessage(String userMessage, AgentListener listener) {
+        sendMessage(null, userMessage, listener);
     }
 
     /**
      * 发送用户消息并执行 Agent 循环
      *
+     * @param sessionId   会话 ID，为 null 则使用当前活跃会话
      * @param userMessage 用户消息
      * @param listener    事件监听器
      */
-    public void sendMessage(String userMessage, AgentListener listener) {
+    public void sendMessage(String sessionId, String userMessage, AgentListener listener) {
+        AgentContext ctx;
+        if (sessionId != null && !sessionId.isEmpty()) {
+            sessionManager.getOrCreateSession(sessionId);
+            ctx = sessionManager.getContext(sessionId);
+        } else {
+            ctx = sessionManager.getActiveContext();
+        }
+
         // 添加用户消息到对话历史
-        context.getConversation().addUserMessage(userMessage);
+        ctx.getConversation().addUserMessage(userMessage);
 
         listener.onThinking();
 
         // 启动 Agent 循环
-        executeAgentLoop(listener);
+        executeAgentLoop(ctx, listener);
     }
 
     /**
      * Agent 核心循环
      * 反复调用 LLM，直到得到纯文本回答（无工具调用）或达到最大迭代次数
      */
-    private void executeAgentLoop(AgentListener listener) {
+    private void executeAgentLoop(AgentContext context, AgentListener listener) {
         LlmClient llmClient = context.getLlmClient();
         LOG.info("Agent 循环使用模型: " + llmClient.getModelName());
         ToolRegistry registry = context.getToolRegistry();
@@ -160,9 +223,9 @@ public class AgentService {
     }
 
     /**
-     * 重置会话
+     * 重置当前活跃会话
      */
     public void resetConversation() {
-        context.resetConversation();
+        getContext().resetConversation();
     }
 }

@@ -40,6 +40,27 @@ function createAssistantMessage() {
 }
 
 /**
+ * 渲染历史助手消息（非流式，直接显示完整内容）
+ */
+function appendHistoryAssistantMessage(content) {
+    const chatArea = document.getElementById('chatArea');
+    const msgEl = document.createElement('div');
+    msgEl.className = 'message assistant';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    if (typeof renderMarkdownContent === 'function') {
+        bubble.innerHTML = renderMarkdownContent(content);
+    } else {
+        bubble.textContent = content;
+    }
+    msgEl.appendChild(bubble);
+
+    chatArea.appendChild(msgEl);
+    scrollToBottom();
+}
+
+/**
  * 渲染 Markdown 内容到助手消息
  */
 function renderMarkdown(msgRef) {

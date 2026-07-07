@@ -10,84 +10,109 @@
 </head>
 <body>
     <div id="app">
-        <!-- 顶部标题栏 -->
-        <header class="header">
-            <div class="header-title">
-                <svg class="logo-icon" width="24" height="24" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-                    <defs><linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#6366f1"/><stop offset="100%" style="stop-color:#8b5cf6"/></linearGradient></defs>
-                    <line x1="8" y1="1" x2="8" y2="3" stroke="url(#hg)" stroke-width="1" stroke-linecap="round"/>
-                    <circle cx="8" cy="1" r="0.7" fill="url(#hg)"/>
-                    <rect x="3" y="3" width="10" height="7" rx="2" fill="url(#hg)"/>
-                    <circle cx="5.8" cy="6.2" r="1.2" fill="white"/><circle cx="10.2" cy="6.2" r="1.2" fill="white"/>
-                    <circle cx="6" cy="6.2" r="0.5" fill="#1e1b4b"/><circle cx="10.4" cy="6.2" r="0.5" fill="#1e1b4b"/>
-                    <rect x="6" y="8" width="4" height="0.8" rx="0.4" fill="white" opacity="0.8"/>
-                    <rect x="4" y="11" width="8" height="4" rx="1.5" fill="url(#hg)" opacity="0.85"/>
-                    <circle cx="8" cy="13" r="0.8" fill="white" opacity="0.5"/>
-                </svg>
-                <span>太微</span>
-            </div>
-            <button class="btn-clear" onclick="clearChat()" title="清空对话">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5a5.5 5.5 0 110-11 5.5 5.5 0 010 11zM5.5 5.5l5 5m0-5l-5 5" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                </svg>
-            </button>
-        </header>
-
-        <!-- 消息列表 -->
-        <main class="chat-area" id="chatArea">
-            <div class="welcome-message">
-                <svg class="welcome-icon" width="64" height="64" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-                    <defs><linearGradient id="wg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#6366f1"/><stop offset="100%" style="stop-color:#8b5cf6"/></linearGradient></defs>
-                    <line x1="8" y1="1" x2="8" y2="3" stroke="url(#wg)" stroke-width="1" stroke-linecap="round"/>
-                    <circle cx="8" cy="1" r="0.7" fill="url(#wg)"/>
-                    <rect x="3" y="3" width="10" height="7" rx="2" fill="url(#wg)"/>
-                    <circle cx="5.8" cy="6.2" r="1.2" fill="white"/><circle cx="10.2" cy="6.2" r="1.2" fill="white"/>
-                    <circle cx="6" cy="6.2" r="0.5" fill="#1e1b4b"/><circle cx="10.4" cy="6.2" r="0.5" fill="#1e1b4b"/>
-                    <rect x="6" y="8" width="4" height="0.8" rx="0.4" fill="white" opacity="0.8"/>
-                    <rect x="4" y="11" width="8" height="4" rx="1.5" fill="url(#wg)" opacity="0.85"/>
-                    <circle cx="8" cy="13" r="0.8" fill="white" opacity="0.5"/>
-                </svg>
-                <h2>欢迎使用太微</h2>
-                <p>我是你的 AI 编程助手，可以帮你：</p>
-                <ul>
-                    <li>📖 阅读和分析代码</li>
-                    <li>✏️ 创建和修改文件</li>
-                    <li>🔍 搜索项目代码</li>
-                    <li>⚡ 执行终端命令</li>
-                </ul>
-                <p class="hint">在下方输入你的需求开始对话</p>
-            </div>
-        </main>
-
-        <!-- 输入区域 -->
-        <footer class="input-area">
-            <div class="input-wrapper">
-                <!-- 模型选择下拉框（左下角，向上展开） -->
-                <div class="model-selector" id="modelSelector">
-                    <div class="model-select-btn" onclick="toggleModelDropdown()">
-                        <span id="modelSelectLabel" class="model-select-label">默认模型</span>
-                        <svg class="dropdown-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 15l-6-6-6 6"/>
-                        </svg>
-                    </div>
-                    <div class="model-dropdown-menu" id="modelDropdownMenu">
-                        <!-- 动态填充 -->
-                    </div>
-                </div>
-                <textarea
-                    id="messageInput"
-                    class="message-input"
-                    placeholder="输入你的需求... (Enter 发送, Shift+Enter 换行)"
-                    rows="3"
-                ></textarea>
-                <button class="btn-send" id="sendBtn" onclick="sendMessage()">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+        <!-- 会话侧边栏 -->
+        <aside class="session-sidebar" id="sessionSidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">会话列表</span>
+                <button class="btn-new-session" onclick="createNewSession()" title="新建会话">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
                     </svg>
                 </button>
             </div>
-            <div class="input-hint">太微可能会犯错，请检查重要信息</div>
-        </footer>
+            <div class="session-list" id="sessionList">
+                <!-- 动态填充 -->
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 顶部标题栏 -->
+            <header class="header">
+                <div class="header-left">
+                    <button class="btn-sidebar-toggle" onclick="toggleSidebar()" title="会话列表">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 12h18M3 6h18M3 18h18"/>
+                        </svg>
+                    </button>
+                    <div class="header-title">
+                        <svg class="logo-icon" width="24" height="24" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                            <defs><linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#6366f1"/><stop offset="100%" style="stop-color:#8b5cf6"/></linearGradient></defs>
+                            <line x1="8" y1="1" x2="8" y2="3" stroke="url(#hg)" stroke-width="1" stroke-linecap="round"/>
+                            <circle cx="8" cy="1" r="0.7" fill="url(#hg)"/>
+                            <rect x="3" y="3" width="10" height="7" rx="2" fill="url(#hg)"/>
+                            <circle cx="5.8" cy="6.2" r="1.2" fill="white"/><circle cx="10.2" cy="6.2" r="1.2" fill="white"/>
+                            <circle cx="6" cy="6.2" r="0.5" fill="#1e1b4b"/><circle cx="10.4" cy="6.2" r="0.5" fill="#1e1b4b"/>
+                            <rect x="6" y="8" width="4" height="0.8" rx="0.4" fill="white" opacity="0.8"/>
+                            <rect x="4" y="11" width="8" height="4" rx="1.5" fill="url(#hg)" opacity="0.85"/>
+                            <circle cx="8" cy="13" r="0.8" fill="white" opacity="0.5"/>
+                        </svg>
+                        <span>太微</span>
+                    </div>
+                </div>
+                <button class="btn-clear" onclick="clearChat()" title="清空对话">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5a5.5 5.5 0 110-11 5.5 5.5 0 010 11zM5.5 5.5l5 5m0-5l-5 5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                    </svg>
+                </button>
+            </header>
+
+            <!-- 消息列表 -->
+            <main class="chat-area" id="chatArea">
+                <div class="welcome-message">
+                    <svg class="welcome-icon" width="64" height="64" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                        <defs><linearGradient id="wg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#6366f1"/><stop offset="100%" style="stop-color:#8b5cf6"/></linearGradient></defs>
+                        <line x1="8" y1="1" x2="8" y2="3" stroke="url(#wg)" stroke-width="1" stroke-linecap="round"/>
+                        <circle cx="8" cy="1" r="0.7" fill="url(#wg)"/>
+                        <rect x="3" y="3" width="10" height="7" rx="2" fill="url(#wg)"/>
+                        <circle cx="5.8" cy="6.2" r="1.2" fill="white"/><circle cx="10.2" cy="6.2" r="1.2" fill="white"/>
+                        <circle cx="6" cy="6.2" r="0.5" fill="#1e1b4b"/><circle cx="10.4" cy="6.2" r="0.5" fill="#1e1b4b"/>
+                        <rect x="6" y="8" width="4" height="0.8" rx="0.4" fill="white" opacity="0.8"/>
+                        <rect x="4" y="11" width="8" height="4" rx="1.5" fill="url(#wg)" opacity="0.85"/>
+                        <circle cx="8" cy="13" r="0.8" fill="white" opacity="0.5"/>
+                    </svg>
+                    <h2>欢迎使用太微</h2>
+                    <p>我是你的 AI 编程助手，可以帮你：</p>
+                    <ul>
+                        <li>📖 阅读和分析代码</li>
+                        <li>✏️ 创建和修改文件</li>
+                        <li>🔍 搜索项目代码</li>
+                        <li>⚡ 执行终端命令</li>
+                    </ul>
+                    <p class="hint">在下方输入你的需求开始对话</p>
+                </div>
+            </main>
+
+            <!-- 输入区域 -->
+            <footer class="input-area">
+                <div class="input-wrapper">
+                    <!-- 模型选择下拉框（左下角，向上展开） -->
+                    <div class="model-selector" id="modelSelector">
+                        <div class="model-select-btn" onclick="toggleModelDropdown()">
+                            <span id="modelSelectLabel" class="model-select-label">默认模型</span>
+                            <svg class="dropdown-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 15l-6-6-6 6"/>
+                            </svg>
+                        </div>
+                        <div class="model-dropdown-menu" id="modelDropdownMenu">
+                            <!-- 动态填充 -->
+                        </div>
+                    </div>
+                    <textarea
+                        id="messageInput"
+                        class="message-input"
+                        placeholder="输入你的需求... (Enter 发送, Shift+Enter 换行)"
+                        rows="3"
+                    ></textarea>
+                    <button class="btn-send" id="sendBtn" onclick="sendMessage()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-hint">太微可能会犯错，请检查重要信息</div>
+            </footer>
+        </div>
     </div>
 
     <script src="js/app.js"></script>

@@ -25,9 +25,20 @@ public class Conversation {
      */
     private String systemPrompt;
 
+    /**
+     * 会话标题（自动从第一条用户消息生成）
+     */
+    private String title;
+
+    /**
+     * 会话创建时间戳
+     */
+    private final long createdAt;
+
     public Conversation() {
         this.id = UUID.randomUUID().toString();
         this.messages = new ArrayList<>();
+        this.createdAt = System.currentTimeMillis();
     }
 
     public Conversation(String systemPrompt) {
@@ -43,6 +54,9 @@ public class Conversation {
      */
     public void addUserMessage(String content) {
         messages.add(ChatMessage.user(content));
+        if (title == null && content != null && !content.isEmpty()) {
+            title = content.length() > 30 ? content.substring(0, 30) + "..." : content;
+        }
     }
 
     /**
@@ -110,6 +124,18 @@ public class Conversation {
 
     public void setSystemPrompt(String systemPrompt) {
         this.systemPrompt = systemPrompt;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public long getCreatedAt() {
+        return createdAt;
     }
 
     public int getMessageCount() {
