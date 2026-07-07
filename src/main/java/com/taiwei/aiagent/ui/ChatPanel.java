@@ -541,24 +541,24 @@ public class ChatPanel extends JPanel implements Disposable {
 
     private void refreshChatDisplay() {
         StringBuilder sb = new StringBuilder();
-        sb.append("<html><head><style>");
+        sb.append("<html><head><style type=\"text/css\">");
         sb.append(buildChatCss());
         sb.append("</style></head><body>");
 
         for (ChatEntry entry : chatEntries) {
             switch (entry.type) {
                 case USER:
-                    sb.append("<div class='user-msg'>");
+                    sb.append("<div class=\"user-msg\">");
                     sb.append(escapeHtml(entry.content));
                     sb.append("</div>");
                     break;
                 case ASSISTANT:
-                    sb.append("<div class='assistant-msg'>");
+                    sb.append("<div class=\"assistant-msg\">");
                     sb.append(MarkdownRenderer.render(entry.content));
                     sb.append("</div>");
                     break;
                 case TOOL_CALL:
-                    sb.append("<div class='tool-call'>");
+                    sb.append("<div class=\"tool-call\">");
                     sb.append("<b>").append(escapeHtml(entry.toolName)).append("</b>");
                     if (entry.toolArgs != null && !entry.toolArgs.isEmpty()) {
                         String args = entry.toolArgs.length() > 100
@@ -577,10 +577,10 @@ public class ChatPanel extends JPanel implements Disposable {
                     sb.append("</div>");
                     break;
                 case THINKING:
-                    sb.append("<div class='thinking'><i>thinking...</i></div>");
+                    sb.append("<div class=\"thinking\"><i>thinking...</i></div>");
                     break;
                 case ERROR:
-                    sb.append("<div class='error-msg'>").append(escapeHtml(entry.content)).append("</div>");
+                    sb.append("<div class=\"error-msg\">").append(escapeHtml(entry.content)).append("</div>");
                     break;
             }
         }
@@ -611,38 +611,66 @@ public class ChatPanel extends JPanel implements Disposable {
         String toolBorderCol = colorToHex(TOOL_BUBBLE_BORDER);
         String errorBorderCol = colorToHex(ERROR_BUBBLE_BORDER);
 
-        return "body { font-family: 'Segoe UI', 'Noto Sans CJK SC', 'PingFang SC', SansSerif; "
-                + "font-size: 13px; margin: 12px; "
+        String bdr = "1px solid ";
+
+        return "body { font-family: SansSerif; font-size: 13px; "
+                + "margin-top: 12px; margin-right: 12px; margin-bottom: 12px; margin-left: 12px; "
                 + "background-color: " + chatBg + "; color: " + textCol + "; }"
-                + ".user-msg { margin: 10px 0 10px 60px; padding: 10px 14px; "
+
+                + ".user-msg { "
+                + "margin-top: 10px; margin-bottom: 10px; margin-left: 60px; "
+                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
                 + "background-color: " + userBg + "; "
-                + "border: 1px solid " + userBorderCol + "; "
+                + "border: " + bdr + userBorderCol + "; "
                 + "color: " + userTextCol + "; }"
-                + ".assistant-msg { margin: 10px 60px 10px 0; padding: 10px 14px; "
+
+                + ".assistant-msg { "
+                + "margin-top: 10px; margin-right: 60px; margin-bottom: 10px; "
+                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
                 + "background-color: " + assistantBg + "; "
-                + "border: 1px solid " + assistantBorderCol + "; "
+                + "border: " + bdr + assistantBorderCol + "; "
                 + "color: " + textCol + "; }"
-                + ".tool-call { margin: 4px 60px 4px 20px; padding: 6px 10px; "
+
+                + ".tool-call { "
+                + "margin-top: 4px; margin-right: 60px; margin-bottom: 4px; margin-left: 20px; "
+                + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; "
                 + "background-color: " + toolBg + "; "
-                + "border: 1px solid " + toolBorderCol + "; "
+                + "border: " + bdr + toolBorderCol + "; "
                 + "font-size: 12px; color: " + toolTextCol + "; }"
-                + ".thinking { margin: 10px 60px 10px 0; padding: 10px 14px; "
+
+                + ".thinking { "
+                + "margin-top: 10px; margin-right: 60px; margin-bottom: 10px; "
+                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
                 + "color: " + textCol + "; }"
-                + ".error-msg { margin: 10px 0; padding: 10px 14px; "
+
+                + ".error-msg { "
+                + "margin-top: 10px; margin-bottom: 10px; "
+                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
                 + "background-color: " + errorBg + "; "
-                + "border: 1px solid " + errorBorderCol + "; "
+                + "border: " + bdr + errorBorderCol + "; "
                 + "color: " + errorTextCol + "; }"
-                + "pre { background-color: " + assistantBg + "; padding: 10px; "
-                + "border: 1px solid " + assistantBorderCol + "; "
-                + "font-family: 'JetBrains Mono', 'Consolas', Monospaced; font-size: 12px; }"
-                + "code { font-family: 'JetBrains Mono', 'Consolas', Monospaced; font-size: 12px; }"
-                + "pre code { padding: 0; }"
+
+                + "pre { "
+                + "background-color: " + assistantBg + "; "
+                + "padding-top: 10px; padding-right: 10px; padding-bottom: 10px; padding-left: 10px; "
+                + "border: " + bdr + assistantBorderCol + "; "
+                + "font-family: Monospaced; font-size: 12px; }"
+
+                + "code { font-family: Monospaced; font-size: 12px; }"
+                + "pre code { padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; }"
+
                 + "a { color: #1E88E5; }"
-                + "table { border-collapse: collapse; margin: 6px 0; }"
-                + "th, td { border: 1px solid " + borderCol + "; padding: 6px 10px; }"
-                + "th { background-color: " + assistantBg + "; }"
-                + "p { margin: 4px 0; }"
-                + "ul, ol { margin: 4px 0; padding-left: 20px; }";
+
+                + "table { margin-top: 6px; margin-bottom: 6px; }"
+                + "th { border: " + bdr + borderCol + "; "
+                + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; "
+                + "background-color: " + assistantBg + "; }"
+                + "td { border: " + bdr + borderCol + "; "
+                + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; }"
+
+                + "p { margin-top: 4px; margin-bottom: 4px; }"
+                + "ul { margin-top: 4px; margin-bottom: 4px; padding-left: 20px; }"
+                + "ol { margin-top: 4px; margin-bottom: 4px; padding-left: 20px; }";
     }
 
     private static String colorToHex(Color c) {

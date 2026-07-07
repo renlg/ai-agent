@@ -35,6 +35,22 @@ public class MarkdownRenderer {
             return "";
         }
         Node document = PARSER.parse(markdown);
-        return RENDERER.render(document);
+        String html = RENDERER.render(document);
+        return sanitizeForEditorPane(html);
+    }
+
+    private static String sanitizeForEditorPane(String html) {
+        html = html.replace("<del>", "<s>").replace("</del>", "</s>");
+
+        html = html.replaceAll("<input\\s+type=\"checkbox\"\\s+checked[^>]*/>", "\u2611 ");
+        html = html.replaceAll("<input\\s+type=\"checkbox\"[^>]*/>", "\u2610 ");
+
+        html = html.replace("<thead>", "").replace("</thead>", "");
+        html = html.replace("<tbody>", "").replace("</tbody>", "");
+
+        html = html.replaceAll(" class=\"task-list\"", "");
+        html = html.replaceAll(" class=\"task-list-item\"", "");
+
+        return html;
     }
 }
