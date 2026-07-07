@@ -25,7 +25,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class ChatPanel extends JPanel implements Disposable {
@@ -38,10 +40,8 @@ public class ChatPanel extends JPanel implements Disposable {
     private JBCefBrowser browser;
     private JBCefJSQuery jsQuery;
 
-    private boolean isProcessing = false;
-    private final List<ChatEntry> chatEntries = new ArrayList<>();
+    private final Map<String, SessionState> sessionStates = new HashMap<>();
     private final Runnable settingsChangeListener = this::onSettingsChanged;
-    private volatile int currentGeneration = 0;
 
     public ChatPanel(Project project) {
         this.project = project;
@@ -281,6 +281,17 @@ public class ChatPanel extends JPanel implements Disposable {
                 first = false;
             }
         }
+
+        // 如果当前会话正在处理中，追加流式内容到前端显示
+        String activeId = agentService.getActiveSessionId();
+        SessionState state = sessionStates.get(activeId);
+        if (state != null && state.isProcessing && state.accumulatedContent.length() > 0) {
+            if (!first) json.append(",");
+            json.append("{\"role\":\"assistant\",\"content\":")
+                    .append(escapeJsString(state.accumulatedContent.toString()))
+                    .append("}");
+        }
+
         json.append("]");
         pushToJs("loadHistory", escapeJsString(json.toString()));
     }
@@ -314,17 +325,20 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Send Message ==========
 
     private void sendMessage(String text) {
-        if (text == null || text.trim().isEmpty() || isProcessing) return;
-
-        isProcessing = true;
-        chatEntries.add(ChatEntry.user(text));
+        if (text == null || text.trim().isEmpty()) return;
 
         String sessionId = agentService.getActiveSessionId();
+        if (sessionId == null) return;
+
+        SessionState sessionState = sessionStates.computeIfAbsent(sessionId, k -> new SessionState());
+        if (sessionState.isProcessing) return;
+
+        sessionState.isProcessing = true;
+        sessionState.accumulatedContent = new StringBuilder();
+        sessionState.chatEntries.add(ChatEntry.user(text));
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            final int generation = ++currentGeneration;
             agentService.sendMessage(sessionId, text, new AgentService.AgentListener() {
-                final StringBuilder accumulatedContent = new StringBuilder();
 
                 @Override
                 public void onThinking() {
@@ -332,41 +346,44 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onContent(String content) {
-                    if (generation != currentGeneration) return;
-                    accumulatedContent.append(content);
+                    sessionState.accumulatedContent.append(content);
 
                     boolean replaced = false;
-                    for (int i = chatEntries.size() - 1; i >= 0; i--) {
-                        if (chatEntries.get(i).type == ChatEntry.Type.THINKING) {
-                            chatEntries.set(i, ChatEntry.assistant(accumulatedContent.toString()));
+                    for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
+                        if (sessionState.chatEntries.get(i).type == ChatEntry.Type.THINKING) {
+                            sessionState.chatEntries.set(i, ChatEntry.assistant(sessionState.accumulatedContent.toString()));
                             replaced = true;
                             break;
                         }
                     }
                     if (!replaced) {
-                        for (int i = chatEntries.size() - 1; i >= 0; i--) {
-                            if (chatEntries.get(i).type == ChatEntry.Type.ASSISTANT) {
-                                chatEntries.get(i).content = accumulatedContent.toString();
+                        for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
+                            if (sessionState.chatEntries.get(i).type == ChatEntry.Type.ASSISTANT) {
+                                sessionState.chatEntries.get(i).content = sessionState.accumulatedContent.toString();
                                 break;
                             }
                         }
                     }
 
-                    pushContent(content);
+                    // 仅当当前活跃会话是本 listener 对应的会话时才推送到前端
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushContent(content);
+                    }
                 }
 
                 @Override
                 public void onToolCallStart(String toolName, String arguments) {
-                    if (generation != currentGeneration) return;
-                    chatEntries.add(ChatEntry.toolCall(toolName, arguments));
-                    pushToolCallStart(toolName, arguments);
+                    sessionState.chatEntries.add(ChatEntry.toolCall(toolName, arguments));
+
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushToolCallStart(toolName, arguments);
+                    }
                 }
 
                 @Override
                 public void onToolCallEnd(String toolName, String result) {
-                    if (generation != currentGeneration) return;
-                    for (int i = chatEntries.size() - 1; i >= 0; i--) {
-                        ChatEntry entry = chatEntries.get(i);
+                    for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
+                        ChatEntry entry = sessionState.chatEntries.get(i);
                         if (entry.type == ChatEntry.Type.TOOL_CALL
                                 && toolName.equals(entry.toolName)
                                 && entry.toolResult == null) {
@@ -374,43 +391,44 @@ public class ChatPanel extends JPanel implements Disposable {
                             break;
                         }
                     }
-                    pushToolCallEnd(toolName, result);
+
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushToolCallEnd(toolName, result);
+                    }
                 }
 
                 @Override
                 public void onComplete(String fullResponse) {
-                    if (generation != currentGeneration) return;
-                    chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
+                    sessionState.isProcessing = false;
+                    sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
 
                     boolean hasAssistant = false;
-                    for (ChatEntry entry : chatEntries) {
+                    for (ChatEntry entry : sessionState.chatEntries) {
                         if (entry.type == ChatEntry.Type.ASSISTANT) {
                             hasAssistant = true;
                         }
                     }
                     if (!hasAssistant && fullResponse != null && !fullResponse.isEmpty()) {
-                        chatEntries.add(ChatEntry.assistant(fullResponse));
+                        sessionState.chatEntries.add(ChatEntry.assistant(fullResponse));
                     }
 
-                    SwingUtilities.invokeLater(() -> {
-                        isProcessing = false;
-                        pushSessionListToJs();
-                    });
+                    // 更新会话列表（标题可能已改变）
+                    SwingUtilities.invokeLater(() -> pushSessionListToJs());
 
-                    pushComplete();
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushComplete();
+                    }
                 }
 
                 @Override
                 public void onError(String error) {
-                    if (generation != currentGeneration) return;
-                    chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
-                    chatEntries.add(ChatEntry.error(error));
+                    sessionState.isProcessing = false;
+                    sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
+                    sessionState.chatEntries.add(ChatEntry.error(error));
 
-                    SwingUtilities.invokeLater(() -> {
-                        isProcessing = false;
-                    });
-
-                    pushError(error);
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushError(error);
+                    }
                 }
             });
         });
@@ -419,32 +437,33 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Session Management ==========
 
     private void createNewSession() {
-        currentGeneration++;
-        agentService.createSession();
-        chatEntries.clear();
+        String newId = agentService.createSession();
+        sessionStates.put(newId, new SessionState());
         pushSessionListToJs();
         pushToJs("clearMessages", "");
     }
 
     private void switchToSession(String sessionId) {
-        currentGeneration++;
         agentService.switchSession(sessionId);
-        chatEntries.clear();
         pushHistoryToJs();
         pushSessionListToJs();
     }
 
     private void deleteSession(String sessionId) {
-        currentGeneration++;
+        sessionStates.remove(sessionId);
         agentService.deleteSession(sessionId);
-        chatEntries.clear();
         pushHistoryToJs();
         pushSessionListToJs();
     }
 
     private void clearChat() {
         agentService.resetConversation();
-        chatEntries.clear();
+        String activeId = agentService.getActiveSessionId();
+        SessionState state = sessionStates.get(activeId);
+        if (state != null) {
+            state.chatEntries.clear();
+            state.accumulatedContent = new StringBuilder();
+        }
         pushToJs("clearMessages", "");
     }
 
@@ -464,6 +483,15 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     // ========== Inner Classes ==========
+
+    /**
+     * 按会话追踪的状态：包含聊天条目、处理状态和累积内容
+     */
+    private static class SessionState {
+        List<ChatEntry> chatEntries = new ArrayList<>();
+        volatile boolean isProcessing = false;
+        StringBuilder accumulatedContent = new StringBuilder();
+    }
 
     private static class ChatEntry {
         enum Type { USER, ASSISTANT, TOOL_CALL, THINKING, ERROR }
