@@ -17,6 +17,8 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,8 +29,7 @@ public class ChatPanel extends JPanel implements Disposable {
     private final Project project;
     private final AgentService agentService;
 
-    private DefaultListModel<SessionItem> sessionListModel;
-    private JList<SessionItem> sessionList;
+    private JPanel tabContainer;
 
     private JEditorPane chatDisplay;
     private JScrollPane chatScrollPane;
@@ -39,8 +40,9 @@ public class ChatPanel extends JPanel implements Disposable {
     private boolean isProcessing = false;
     private final List<ChatEntry> chatEntries = new ArrayList<>();
 
-    private static final JBColor USER_BUBBLE_BG = new JBColor(new Color(0xDC, 0xF8, 0xC6), new Color(0x2E, 0x4D, 0x2E));
-    private static final JBColor ASSISTANT_BUBBLE_BG = new JBColor(new Color(0xF0, 0xF0, 0xF0), new Color(0x3C, 0x3C, 0x3C));
+    // Message bubble colors
+    private static final JBColor USER_BUBBLE_BG = new JBColor(new Color(0xE3, 0xF2, 0xFD), new Color(0x1A, 0x3A, 0x5C));
+    private static final JBColor ASSISTANT_BUBBLE_BG = new JBColor(new Color(0xF5, 0xF5, 0xF5), new Color(0x3C, 0x3C, 0x3C));
     private static final JBColor TOOL_BUBBLE_BG = new JBColor(new Color(0xFF, 0xF3, 0xE0), new Color(0x4D, 0x3E, 0x1E));
     private static final JBColor ERROR_BUBBLE_BG = new JBColor(new Color(0xFF, 0xEB, 0xEE), new Color(0x4D, 0x1E, 0x1E));
     private static final JBColor CHAT_BG = new JBColor(Color.WHITE, new Color(0x2B, 0x2B, 0x2B));
@@ -48,33 +50,109 @@ public class ChatPanel extends JPanel implements Disposable {
     private static final JBColor BORDER_COLOR = new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x55, 0x55, 0x55));
     private static final JBColor TOOL_TEXT_COLOR = new JBColor(new Color(0x79, 0x55, 0x48), new Color(0xBC, 0xAA, 0xA4));
     private static final JBColor ERROR_TEXT_COLOR = new JBColor(new Color(0xC6, 0x28, 0x28), new Color(0xEF, 0x9A, 0x9A));
+    private static final JBColor USER_TEXT_COLOR = new JBColor(new Color(0x0D, 0x47, 0xA1), new Color(0x90, 0xCA, 0xF9));
+
+    // Bubble border colors (slightly darker than bg for subtle shadow effect)
+    private static final JBColor USER_BUBBLE_BORDER = new JBColor(new Color(0xBB, 0xDE, 0xFB), new Color(0x2A, 0x5A, 0x8C));
+    private static final JBColor ASSISTANT_BUBBLE_BORDER = new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x4A, 0x4A, 0x4A));
+    private static final JBColor TOOL_BUBBLE_BORDER = new JBColor(new Color(0xFF, 0xCC, 0x80), new Color(0x6D, 0x5E, 0x3E));
+    private static final JBColor ERROR_BUBBLE_BORDER = new JBColor(new Color(0xEF, 0x9A, 0x9A), new Color(0x6D, 0x3E, 0x3E));
+
+    // Tab bar colors
+    private static final JBColor TAB_ACTIVE_BG = new JBColor(new Color(0xE3, 0xF2, 0xFD), new Color(0x1E, 0x3A, 0x5F));
+    private static final JBColor TAB_INACTIVE_BG = new JBColor(new Color(0xEE, 0xEE, 0xEE), new Color(0x38, 0x38, 0x38));
+    private static final JBColor TAB_HOVER_BG = new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x42, 0x42, 0x42));
+    private static final JBColor TAB_ACTIVE_TEXT = new JBColor(new Color(0x15, 0x65, 0xC0), new Color(0x90, 0xCA, 0xF9));
+    private static final JBColor TAB_INACTIVE_TEXT = new JBColor(new Color(0x75, 0x75, 0x75), new Color(0x99, 0x99, 0x99));
+    private static final JBColor TAB_BAR_BG = new JBColor(new Color(0xFA, 0xFA, 0xFA), new Color(0x30, 0x30, 0x30));
+    private static final JBColor TAB_ACTIVE_BORDER = new JBColor(new Color(0x90, 0xCA, 0xF9), new Color(0x3D, 0x7E, 0xBB));
+
+    // Input area colors
+    private static final JBColor INPUT_BG = new JBColor(Color.WHITE, new Color(0x36, 0x36, 0x36));
+    private static final JBColor INPUT_BORDER = new JBColor(new Color(0xBB, 0xDE, 0xFB), new Color(0x4A, 0x6A, 0x8A));
+
+    // Accent / button colors
+    private static final JBColor ACCENT_COLOR = new JBColor(new Color(0x1E, 0x88, 0xE5), new Color(0x42, 0xA5, 0xF5));
+    private static final JBColor SEND_BTN_BG = new JBColor(new Color(0x1E, 0x88, 0xE5), new Color(0x3D, 0x8C, 0xD4));
+    private static final JBColor SEND_BTN_HOVER = new JBColor(new Color(0x19, 0x76, 0xD2), new Color(0x33, 0x7A, 0xB7));
+    private static final JBColor NEW_BTN_HOVER_BG = new JBColor(new Color(0xE3, 0xF2, 0xFD), new Color(0x1A, 0x3A, 0x5C));
+
+    // Fonts
+    private static final Font CHAT_FONT = new Font("SansSerif", Font.PLAIN, 13);
+    private static final Font TAB_FONT = new Font("SansSerif", Font.PLAIN, 12);
+    private static final Font INPUT_FONT = new Font("SansSerif", Font.PLAIN, 13);
+    private static final Font SEND_FONT = new Font("SansSerif", Font.BOLD, 18);
 
     public ChatPanel(Project project) {
         this.project = project;
         this.agentService = new AgentService(project);
         setLayout(new BorderLayout());
+        setBackground(CHAT_BG);
         initUI();
         loadSessions();
     }
 
     private void initUI() {
-        JToolBar toolBar = new JToolBar();
-        toolBar.setFloatable(false);
-        toolBar.setBorder(JBUI.Borders.empty(2, 4));
+        add(createTopBar(), BorderLayout.NORTH);
 
-        JButton newSessionBtn = new JButton("新建会话");
+        chatDisplay = new JEditorPane();
+        chatDisplay.setContentType("text/html");
+        chatDisplay.setEditable(false);
+        chatDisplay.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+        chatDisplay.setBackground(CHAT_BG);
+        chatDisplay.setFont(CHAT_FONT);
+
+        chatScrollPane = new JScrollPane(chatDisplay);
+        chatScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        chatScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        chatScrollPane.getViewport().setBackground(CHAT_BG);
+        chatScrollPane.setBorder(JBUI.Borders.empty());
+
+        add(chatScrollPane, BorderLayout.CENTER);
+        add(createInputPanel(), BorderLayout.SOUTH);
+    }
+
+    // ========== Top Bar: Session Tabs + Actions ==========
+
+    private JPanel createTopBar() {
+        JPanel topBar = new JPanel(new BorderLayout());
+        topBar.setBackground(TAB_BAR_BG);
+        topBar.setOpaque(true);
+        topBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR),
+                JBUI.Borders.empty(5, 8, 5, 8)
+        ));
+
+        tabContainer = new JPanel();
+        tabContainer.setLayout(new BoxLayout(tabContainer, BoxLayout.X_AXIS));
+        tabContainer.setBackground(TAB_BAR_BG);
+        tabContainer.setOpaque(true);
+
+        JScrollPane tabScrollPane = new JScrollPane(tabContainer);
+        tabScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        tabScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        tabScrollPane.getViewport().setBackground(TAB_BAR_BG);
+        tabScrollPane.setBorder(JBUI.Borders.empty());
+        tabScrollPane.setOpaque(false);
+
+        topBar.add(tabScrollPane, BorderLayout.CENTER);
+
+        JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        rightPanel.setBackground(TAB_BAR_BG);
+        rightPanel.setOpaque(true);
+
+        JButton newSessionBtn = new JButton("+ \u65b0\u5efa");
+        styleFlatButton(newSessionBtn);
         newSessionBtn.addActionListener(e -> createNewSession());
-        toolBar.add(newSessionBtn);
+        rightPanel.add(newSessionBtn);
 
-        toolBar.addSeparator();
-
-        JButton clearBtn = new JButton("清空对话");
+        JButton clearBtn = new JButton("\u6e05\u7a7a");
+        styleFlatButton(clearBtn);
         clearBtn.addActionListener(e -> clearChat());
-        toolBar.add(clearBtn);
-
-        toolBar.addSeparator();
+        rightPanel.add(clearBtn);
 
         modelSelector = new JComboBox<>();
+        modelSelector.setFont(TAB_FONT);
         loadModelList();
         modelSelector.addActionListener(e -> {
             int idx = modelSelector.getSelectedIndex();
@@ -82,76 +160,162 @@ public class ChatPanel extends JPanel implements Disposable {
                 AiAgentSettings.getInstance().setActiveModelIndex(idx);
             }
         });
-        toolBar.add(modelSelector);
+        rightPanel.add(modelSelector);
 
-        add(toolBar, BorderLayout.NORTH);
+        topBar.add(rightPanel, BorderLayout.EAST);
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-        splitPane.setDividerLocation(180);
-        splitPane.setLeftComponent(createSessionPanel());
-        splitPane.setRightComponent(createChatAndInputPanel());
-
-        add(splitPane, BorderLayout.CENTER);
+        return topBar;
     }
 
-    private JPanel createSessionPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setPreferredSize(new Dimension(180, 0));
-        panel.setBorder(JBUI.Borders.empty());
+    private void styleFlatButton(JButton btn) {
+        btn.setFont(TAB_FONT);
+        btn.setForeground(ACCENT_COLOR);
+        btn.setBackground(TAB_BAR_BG);
+        btn.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ACCENT_COLOR, 1),
+                JBUI.Borders.empty(2, 10)
+        ));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        btn.setFocusPainted(false);
+        btn.setContentAreaFilled(false);
 
-        sessionListModel = new DefaultListModel<>();
-        sessionList = new JList<>(sessionListModel);
-        sessionList.setCellRenderer(new SessionCellRenderer());
-        sessionList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        sessionList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                SessionItem item = sessionList.getSelectedValue();
-                if (item != null) {
-                    switchToSession(item.id);
+        btn.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                btn.setContentAreaFilled(true);
+                btn.setBackground(NEW_BTN_HOVER_BG);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                btn.setContentAreaFilled(false);
+            }
+        });
+    }
+
+    // ========== Tab Rendering ==========
+
+    private void rebuildTabs() {
+        tabContainer.removeAll();
+        List<SessionManager.SessionInfo> sessions = agentService.listSessions();
+        String activeId = agentService.getActiveSessionId();
+
+        for (int i = 0; i < sessions.size(); i++) {
+            SessionManager.SessionInfo info = sessions.get(i);
+            String title = info.getTitle() != null && !info.getTitle().isEmpty()
+                    ? info.getTitle() : "\u65b0\u4f1a\u8bdd";
+            boolean isActive = info.getId().equals(activeId);
+            if (i > 0) {
+                tabContainer.add(Box.createHorizontalStrut(4));
+            }
+            tabContainer.add(createTab(info.getId(), title, isActive));
+        }
+
+        tabContainer.add(Box.createHorizontalStrut(8));
+        tabContainer.revalidate();
+        tabContainer.repaint();
+    }
+
+    private JPanel createTab(String sessionId, String title, boolean isActive) {
+        JPanel tab = new JPanel(new BorderLayout(4, 0)) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(getBackground());
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+                g2.dispose();
+            }
+        };
+        tab.setOpaque(false);
+        tab.setBackground(isActive ? TAB_ACTIVE_BG : TAB_INACTIVE_BG);
+        tab.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(
+                        isActive ? TAB_ACTIVE_BORDER : BORDER_COLOR, 1, true
+                ),
+                JBUI.Borders.empty(4, 12, 4, 6)
+        ));
+        tab.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        tab.setMaximumSize(new Dimension(200, 30));
+
+        JLabel label = new JLabel(truncateTitle(title, 12));
+        label.setFont(TAB_FONT);
+        label.setForeground(isActive ? TAB_ACTIVE_TEXT : TAB_INACTIVE_TEXT);
+        label.setOpaque(false);
+        tab.add(label, BorderLayout.CENTER);
+
+        JLabel closeBtn = new JLabel(" \u00d7");
+        closeBtn.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        closeBtn.setForeground(isActive ? TAB_ACTIVE_TEXT : TAB_INACTIVE_TEXT);
+        closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        closeBtn.setToolTipText("\u5173\u95ed\u4f1a\u8bdd");
+        closeBtn.setOpaque(false);
+        Color closeNormal = isActive ? TAB_ACTIVE_TEXT : TAB_INACTIVE_TEXT;
+        closeBtn.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                e.consume();
+                deleteSession(sessionId);
+            }
+
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                closeBtn.setForeground(ERROR_TEXT_COLOR);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                closeBtn.setForeground(closeNormal);
+            }
+        });
+        tab.add(closeBtn, BorderLayout.EAST);
+
+        tab.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                switchToSession(sessionId);
+            }
+
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (!isActive) {
+                    tab.setBackground(TAB_HOVER_BG);
                 }
             }
-        });
 
-        JPopupMenu popup = new JPopupMenu();
-        JMenuItem deleteItem = new JMenuItem("删除会话");
-        deleteItem.addActionListener(e -> {
-            SessionItem item = sessionList.getSelectedValue();
-            if (item != null) {
-                deleteSession(item.id);
+            @Override
+            public void mouseExited(MouseEvent e) {
+                tab.setBackground(isActive ? TAB_ACTIVE_BG : TAB_INACTIVE_BG);
             }
         });
-        popup.add(deleteItem);
-        sessionList.setComponentPopupMenu(popup);
 
-        JScrollPane scrollPane = new JScrollPane(sessionList);
-        panel.add(scrollPane, BorderLayout.CENTER);
-
-        return panel;
+        return tab;
     }
 
-    private JPanel createChatAndInputPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
+    private static String truncateTitle(String title, int maxLen) {
+        if (title.length() <= maxLen) return title;
+        return title.substring(0, maxLen) + "...";
+    }
 
-        chatDisplay = new JEditorPane();
-        chatDisplay.setContentType("text/html");
-        chatDisplay.setEditable(false);
-        chatDisplay.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
-        chatDisplay.setBackground(CHAT_BG);
+    // ========== Bottom: Input Area ==========
 
-        chatScrollPane = new JScrollPane(chatDisplay);
-        chatScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        chatScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        chatScrollPane.getViewport().setBackground(CHAT_BG);
-
-        panel.add(chatScrollPane, BorderLayout.CENTER);
-
-        JPanel inputPanel = new JPanel(new BorderLayout(4, 0));
-        inputPanel.setBorder(JBUI.Borders.empty(4));
+    private JPanel createInputPanel() {
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setBackground(CHAT_BG);
+        panel.setOpaque(true);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COLOR),
+                JBUI.Borders.empty(8, 12)
+        ));
 
         inputArea = new JTextArea(3, 40);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
-        inputArea.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        inputArea.setFont(INPUT_FONT);
+        inputArea.setBackground(INPUT_BG);
+        inputArea.setForeground(TEXT_COLOR);
+        inputArea.setCaretColor(TEXT_COLOR);
+        inputArea.setBorder(new EmptyBorder(8, 10, 8, 10));
         inputArea.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -163,13 +327,36 @@ public class ChatPanel extends JPanel implements Disposable {
         });
 
         JScrollPane inputScrollPane = new JScrollPane(inputArea);
-        inputPanel.add(inputScrollPane, BorderLayout.CENTER);
+        inputScrollPane.setBorder(BorderFactory.createLineBorder(INPUT_BORDER, 1, true));
+        inputScrollPane.getViewport().setBackground(INPUT_BG);
 
-        sendButton = new JButton("发送");
+        panel.add(inputScrollPane, BorderLayout.CENTER);
+
+        sendButton = new JButton("\u27a4");
+        sendButton.setFont(SEND_FONT);
+        sendButton.setForeground(Color.WHITE);
+        sendButton.setBackground(SEND_BTN_BG);
+        sendButton.setPreferredSize(new Dimension(48, 48));
+        sendButton.setBorder(new EmptyBorder(4, 4, 4, 4));
+        sendButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        sendButton.setFocusPainted(false);
         sendButton.addActionListener(e -> sendMessage());
-        inputPanel.add(sendButton, BorderLayout.EAST);
 
-        panel.add(inputPanel, BorderLayout.SOUTH);
+        sendButton.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (sendButton.isEnabled()) {
+                    sendButton.setBackground(SEND_BTN_HOVER);
+                }
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                sendButton.setBackground(SEND_BTN_BG);
+            }
+        });
+
+        panel.add(sendButton, BorderLayout.EAST);
 
         return panel;
     }
@@ -177,66 +364,32 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Session Management ==========
 
     private void loadSessions() {
-        sessionListModel.clear();
-        List<SessionManager.SessionInfo> sessions = agentService.listSessions();
-        String activeId = agentService.getActiveSessionId();
-        int activeIndex = -1;
-
-        for (int i = 0; i < sessions.size(); i++) {
-            SessionManager.SessionInfo info = sessions.get(i);
-            String title = info.getTitle() != null && !info.getTitle().isEmpty()
-                    ? info.getTitle() : "新会话";
-            sessionListModel.addElement(new SessionItem(info.getId(), title));
-            if (info.getId().equals(activeId)) {
-                activeIndex = i;
-            }
-        }
-
-        if (activeIndex >= 0) {
-            sessionList.setSelectedIndex(activeIndex);
-        }
-
+        rebuildTabs();
         loadChatHistory();
     }
 
     private void refreshSessionList() {
-        String activeId = agentService.getActiveSessionId();
-        List<SessionManager.SessionInfo> sessions = agentService.listSessions();
-
-        sessionListModel.clear();
-        int activeIndex = -1;
-        for (int i = 0; i < sessions.size(); i++) {
-            SessionManager.SessionInfo info = sessions.get(i);
-            String title = info.getTitle() != null && !info.getTitle().isEmpty()
-                    ? info.getTitle() : "新会话";
-            sessionListModel.addElement(new SessionItem(info.getId(), title));
-            if (info.getId().equals(activeId)) {
-                activeIndex = i;
-            }
-        }
-
-        if (activeIndex >= 0 && sessionList.getSelectedIndex() != activeIndex) {
-            sessionList.setSelectedIndex(activeIndex);
-        }
+        rebuildTabs();
     }
 
     private void createNewSession() {
         agentService.createSession();
         chatEntries.clear();
         refreshChatDisplay();
-        refreshSessionList();
+        rebuildTabs();
     }
 
     private void switchToSession(String sessionId) {
         agentService.switchSession(sessionId);
         loadChatHistory();
+        rebuildTabs();
     }
 
     private void deleteSession(String sessionId) {
         agentService.deleteSession(sessionId);
         chatEntries.clear();
         loadChatHistory();
-        refreshSessionList();
+        rebuildTabs();
     }
 
     private void clearChat() {
@@ -452,34 +605,44 @@ public class ChatPanel extends JPanel implements Disposable {
         String borderCol = colorToHex(BORDER_COLOR);
         String toolTextCol = colorToHex(TOOL_TEXT_COLOR);
         String errorTextCol = colorToHex(ERROR_TEXT_COLOR);
+        String userTextCol = colorToHex(USER_TEXT_COLOR);
+        String userBorderCol = colorToHex(USER_BUBBLE_BORDER);
+        String assistantBorderCol = colorToHex(ASSISTANT_BUBBLE_BORDER);
+        String toolBorderCol = colorToHex(TOOL_BUBBLE_BORDER);
+        String errorBorderCol = colorToHex(ERROR_BUBBLE_BORDER);
 
-        return "body { font-family: SansSerif; font-size: 13px; margin: 8px; "
+        return "body { font-family: 'Segoe UI', 'Noto Sans CJK SC', 'PingFang SC', SansSerif; "
+                + "font-size: 13px; margin: 12px; "
                 + "background-color: " + chatBg + "; color: " + textCol + "; }"
-                + ".user-msg { margin: 6px 0 6px 80px; padding: 8px 12px; "
+                + ".user-msg { margin: 10px 0 10px 60px; padding: 10px 14px; "
                 + "background-color: " + userBg + "; "
-                + "border: 1px solid " + borderCol + "; }"
-                + ".assistant-msg { margin: 6px 80px 6px 0; padding: 8px 12px; "
+                + "border: 1px solid " + userBorderCol + "; "
+                + "color: " + userTextCol + "; }"
+                + ".assistant-msg { margin: 10px 60px 10px 0; padding: 10px 14px; "
                 + "background-color: " + assistantBg + "; "
-                + "border: 1px solid " + borderCol + "; }"
-                + ".tool-call { margin: 2px 80px 2px 20px; padding: 4px 8px; "
-                + "background-color: " + toolBg + "; "
-                + "border: 1px solid " + borderCol + "; "
-                + "font-size: 12px; color: " + toolTextCol + "; }"
-                + ".thinking { margin: 6px 80px 6px 0; padding: 8px 12px; "
+                + "border: 1px solid " + assistantBorderCol + "; "
                 + "color: " + textCol + "; }"
-                + ".error-msg { margin: 6px 0; padding: 8px 12px; "
+                + ".tool-call { margin: 4px 60px 4px 20px; padding: 6px 10px; "
+                + "background-color: " + toolBg + "; "
+                + "border: 1px solid " + toolBorderCol + "; "
+                + "font-size: 12px; color: " + toolTextCol + "; }"
+                + ".thinking { margin: 10px 60px 10px 0; padding: 10px 14px; "
+                + "color: " + textCol + "; }"
+                + ".error-msg { margin: 10px 0; padding: 10px 14px; "
                 + "background-color: " + errorBg + "; "
-                + "border: 1px solid " + borderCol + "; "
+                + "border: 1px solid " + errorBorderCol + "; "
                 + "color: " + errorTextCol + "; }"
-                + "pre { background-color: " + assistantBg + "; padding: 8px; "
-                + "border: 1px solid " + borderCol + "; "
-                + "font-family: Monospaced; font-size: 12px; }"
-                + "code { font-family: Monospaced; font-size: 12px; }"
+                + "pre { background-color: " + assistantBg + "; padding: 10px; "
+                + "border: 1px solid " + assistantBorderCol + "; "
+                + "font-family: 'JetBrains Mono', 'Consolas', Monospaced; font-size: 12px; }"
+                + "code { font-family: 'JetBrains Mono', 'Consolas', Monospaced; font-size: 12px; }"
                 + "pre code { padding: 0; }"
-                + "a { color: #2196F3; }"
-                + "table { border-collapse: collapse; margin: 4px 0; }"
-                + "th, td { border: 1px solid " + borderCol + "; padding: 4px 8px; }"
-                + "th { background-color: " + assistantBg + "; }";
+                + "a { color: #1E88E5; }"
+                + "table { border-collapse: collapse; margin: 6px 0; }"
+                + "th, td { border: 1px solid " + borderCol + "; padding: 6px 10px; }"
+                + "th { background-color: " + assistantBg + "; }"
+                + "p { margin: 4px 0; }"
+                + "ul, ol { margin: 4px 0; padding-left: 20px; }";
     }
 
     private static String colorToHex(Color c) {
@@ -535,34 +698,6 @@ public class ChatPanel extends JPanel implements Disposable {
 
         static ChatEntry error(String content) {
             return new ChatEntry(Type.ERROR, content);
-        }
-    }
-
-    private static class SessionItem {
-        final String id;
-        final String title;
-
-        SessionItem(String id, String title) {
-            this.id = id;
-            this.title = title;
-        }
-
-        @Override
-        public String toString() {
-            return title;
-        }
-    }
-
-    private static class SessionCellRenderer extends DefaultListCellRenderer {
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value,
-                                                      int index, boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            if (value instanceof SessionItem) {
-                setText("  " + ((SessionItem) value).title);
-                setBorder(new EmptyBorder(4, 4, 4, 4));
-            }
-            return this;
         }
     }
 }
