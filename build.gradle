@@ -72,9 +72,6 @@ dependencies {
     // JSON 处理
     implementation 'com.google.code.gson:gson:2.10.1'
 
-    // Markdown 渲染
-    implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
-
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

@@ -1,5 +1,6 @@
 package com.taiwei.aiagent.window;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
@@ -8,22 +9,49 @@ import com.intellij.ui.content.ContentFactory;
 import com.taiwei.aiagent.ui.ChatPanel;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * AI Agent 工具窗口工厂
- * 在 IDEA 右侧注册 AI 聊天面板
- */
+import javax.swing.*;
+import java.awt.*;
+
 public class ChatWindowFactory implements ToolWindowFactory {
+
+    private static final Logger LOG = Logger.getInstance(ChatWindowFactory.class);
 
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-        // 创建聊天面板
-        ChatPanel chatPanel = new ChatPanel(project);
+        JComponent component;
 
-        // 获取 ContentFactory（兼容 IDEA 2024.1+ 新 API）
+        if (isJcefAvailable()) {
+            component = new ChatPanel(project);
+        } else {
+            LOG.warn("JCEF is not available, chat panel requires JCEF to function");
+            component = createFallbackPanel();
+        }
+
         ContentFactory contentFactory = ContentFactory.getInstance();
-
-        // 创建 Content 并添加到 ToolWindow
-        Content content = contentFactory.createContent(chatPanel, "Chat", false);
+        Content content = contentFactory.createContent(component, "Chat", false);
         toolWindow.getContentManager().addContent(content);
+    }
+
+    private static boolean isJcefAvailable() {
+        try {
+            Class.forName("com.intellij.ui.jcef.JBCefBrowser");
+            return com.intellij.ui.jcef.JBCefApp.isSupported();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static JComponent createFallbackPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        JLabel label = new JLabel(
+                "<html><center><h3>JCEF \u4e0d\u53ef\u7528</h3>" +
+                "<p>\u592a\u5fae\u804a\u5929\u529f\u80fd\u9700\u8981 JCEF \u652f\u6301\u3002</p>" +
+                "<p>\u8bf7\u786e\u4fdd\u4f7f\u7528\u7684\u662f JetBrains Runtime (JBR)\u3002</p>" +
+                "</center></html>",
+                SwingConstants.CENTER
+        );
+        label.setBorder(BorderFactory.createEmptyBorder(40, 20, 40, 20));
+        panel.add(label, BorderLayout.CENTER);
+        return panel;
     }
 }
