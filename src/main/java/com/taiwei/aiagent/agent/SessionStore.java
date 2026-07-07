@@ -18,13 +18,13 @@ import java.util.List;
 
 /**
  * 会话磁盘持久化存储
- * 将最多 5 个最新会话以 JSON 格式保存到项目目录/.ai-agent-sessions.json
+ * 将最多 5 个最新会话以 JSON 格式保存到项目目录/.taiwei
  */
 public class SessionStore {
 
     private static final Logger LOG = Logger.getInstance(SessionStore.class);
     private static final int MAX_SESSIONS = 5;
-    private static final String STORE_FILE = ".ai-agent-sessions.json";
+    private static final String STORE_FILE = ".taiwei";
 
     private final Path filePath;
     private final Gson gson;
