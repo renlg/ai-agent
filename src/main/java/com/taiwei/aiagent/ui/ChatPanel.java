@@ -272,7 +272,7 @@ public class ChatPanel extends JPanel implements Disposable {
             }
         }
         json.append("]");
-        pushToJs("loadHistory", json.toString());
+        pushToJs("loadHistory", escapeJsString(json.toString()));
     }
 
     private static String escapeJsString(String s) {

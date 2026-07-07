@@ -245,7 +245,12 @@
         whenReady(function () {
             clearMessages();
             try {
-                var messages = JSON.parse(messagesJson);
+                var messages;
+                if (typeof messagesJson === 'string') {
+                    messages = JSON.parse(messagesJson);
+                } else {
+                    messages = messagesJson || [];
+                }
                 for (var i = 0; i < messages.length; i++) {
                     var m = messages[i];
                     if (m.role === 'user') {
