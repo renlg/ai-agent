@@ -15,7 +15,6 @@
             <div class="top-actions">
                 <button class="top-btn" id="newSessionBtn" title="新建会话">+ 新建</button>
                 <button class="top-btn" id="clearBtn" title="清空当前会话">清空</button>
-                <select class="model-select" id="modelSelect" title="切换模型"></select>
             </div>
         </div>
         <div class="messages-area" id="messagesArea">
@@ -27,11 +26,12 @@
         </div>
         <div class="input-area">
             <div class="input-wrapper">
+                <select class="model-select" id="modelSelect" title="切换模型"></select>
                 <textarea id="messageInput"
                           placeholder="&#x8f93;&#x5165;&#x6d88;&#x606f;&#xff0c;Enter &#x53d1;&#x9001;&#xff0c;Shift+Enter &#x6362;&#x884c;..."
-                          rows="1"></textarea>
+                          rows="5"></textarea>
+                <button class="send-btn" id="sendBtn" title="&#x53d1;&#x9001; (Enter)">&#x27A4;</button>
             </div>
-            <button class="send-btn" id="sendBtn" title="&#x53d1;&#x9001; (Enter)">&#x27A4;</button>
         </div>
     </div>
 
