@@ -15,7 +15,7 @@
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn;
-    var tabList, modelSelect, newSessionBtn, clearBtn;
+    var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel, newSessionBtn, clearBtn;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -24,7 +24,10 @@
         messageInput = document.getElementById('messageInput');
         sendBtn = document.getElementById('sendBtn');
         tabList = document.getElementById('tabList');
-        modelSelect = document.getElementById('modelSelect');
+        modelDropdown = document.getElementById('modelDropdown');
+        modelDropdownTrigger = document.getElementById('modelSelectTrigger');
+        modelDropdownMenu = document.getElementById('modelDropdownMenu');
+        modelDropdownLabel = document.getElementById('modelDropdownLabel');
         newSessionBtn = document.getElementById('newSessionBtn');
         clearBtn = document.getElementById('clearBtn');
 
@@ -57,11 +60,13 @@
             clearChat();
         });
 
-        modelSelect.addEventListener('change', function () {
-            var idx = parseInt(modelSelect.value, 10);
-            if (!isNaN(idx)) {
-                callJava('selectModel', { index: idx });
-            }
+        modelDropdownTrigger.addEventListener('click', function (e) {
+            e.stopPropagation();
+            modelDropdown.classList.toggle('open');
+        });
+
+        document.addEventListener('click', function () {
+            modelDropdown.classList.remove('open');
         });
 
         ready = true;
@@ -386,7 +391,7 @@
         });
     };
 
-    window.loadHistory = function (messagesJson) {
+    window.loadHistory = function (messagesJson, isActiveProcessing) {
         whenReady(function () {
             clearMessages();
             try {
@@ -403,6 +408,30 @@
                     } else if (m.role === 'assistant' && m.content) {
                         var el = createMessageEl('assistant', 'AI');
                         el.querySelector('.message-content').innerHTML = MarkdownRenderer.render(m.content);
+                    }
+                }
+
+                // 恢复流式传输状态
+                if (isActiveProcessing && messages.length > 0) {
+                    isProcessing = true;
+                    setButtonToStop();
+
+                    // 找到最后一个 assistant 消息，用于后续 appendContent 追加
+                    var assistantEls = messagesArea.querySelectorAll('.message.assistant');
+                    if (assistantEls.length > 0) {
+                        var lastAssistant = assistantEls[assistantEls.length - 1];
+                        currentAssistantEl = lastAssistant;
+                        var contentEl = lastAssistant.querySelector('.message-content');
+                        if (contentEl) {
+                            currentContentEl = contentEl;
+                            // 用 textContent 获取纯文本长度（与 accumulatedContent 对齐）
+                            accumulatedContent = contentEl.textContent || '';
+                        }
+                    }
+
+                    // 如果没有 assistant 消息但有流式状态，显示思考指示器
+                    if (assistantEls.length === 0) {
+                        showThinking();
                     }
                 }
             } catch (e) { /* ignore parse errors */ }
@@ -451,17 +480,35 @@
     /* ===== Top Bar: Model Selector ===== */
 
     function renderModelSelect(models, activeIndex) {
-        if (!modelSelect) return;
-        modelSelect.innerHTML = '';
+        if (!modelDropdownMenu || !modelDropdownLabel) return;
+        modelDropdownMenu.innerHTML = '';
 
         for (var i = 0; i < models.length; i++) {
-            var opt = document.createElement('option');
-            opt.value = i;
-            opt.textContent = models[i].name;
-            if (i === activeIndex) {
-                opt.selected = true;
-            }
-            modelSelect.appendChild(opt);
+            var item = document.createElement('div');
+            item.className = 'model-dropdown-item' + (i === activeIndex ? ' active' : '');
+            item.textContent = models[i].name;
+            item.setAttribute('data-index', i);
+            item.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var idx = parseInt(this.getAttribute('data-index'), 10);
+                if (!isNaN(idx)) {
+                    callJava('selectModel', { index: idx });
+                    modelDropdownLabel.textContent = this.textContent;
+                    modelDropdown.classList.remove('open');
+                    // Update active state
+                    var items = modelDropdownMenu.querySelectorAll('.model-dropdown-item');
+                    for (var j = 0; j < items.length; j++) {
+                        items[j].classList.remove('active');
+                    }
+                    this.classList.add('active');
+                }
+            });
+            modelDropdownMenu.appendChild(item);
+        }
+
+        // Set label to active model
+        if (models[activeIndex]) {
+            modelDropdownLabel.textContent = models[activeIndex].name;
         }
     }
 

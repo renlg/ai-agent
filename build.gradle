@@ -15,7 +15,7 @@ repositories {
 intellij {
     version = '2024.1'
     type = 'IC'
-    plugins = []
+    plugins = ['org.jetbrains.plugins.terminal']
     downloadSources = false
 }
 

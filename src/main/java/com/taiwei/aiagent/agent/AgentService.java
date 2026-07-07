@@ -2,10 +2,6 @@ package com.taiwei.aiagent.agent;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.process.OSProcessHandler;
-import com.intellij.execution.process.ProcessAdapter;
-import com.intellij.execution.process.ProcessEvent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.llm.LlmClient;
@@ -14,6 +10,7 @@ import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.tool.Tool;
 import com.taiwei.aiagent.tool.ToolRegistry;
+import com.taiwei.aiagent.tool.impl.RunCommandTool;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,8 +31,10 @@ public class AgentService {
 
     private final SessionManager sessionManager;
     private final ApprovalManager approvalManager = new ApprovalManager();
+    private final Project project;
     private volatile boolean stopped = false;
     private volatile LlmClient activeLlmClient = null;
+    private volatile RunCommandTool activeRunCommandTool = null;
 
     /**
      * 命令审批管理器
@@ -117,6 +116,7 @@ public class AgentService {
     }
 
     public AgentService(Project project) {
+        this.project = project;
         this.sessionManager = new SessionManager(project);
         this.sessionManager.loadFromDisk();
     }
@@ -221,12 +221,18 @@ public class AgentService {
 
     /**
      * 停止当前正在进行的生成
+     * 同时停止 LLM 调用和正在执行的工具调用
      */
     public void stopGeneration() {
         stopped = true;
         LlmClient client = activeLlmClient;
         if (client != null) {
             client.cancel();
+        }
+        // 停止正在执行的命令工具
+        RunCommandTool tool = activeRunCommandTool;
+        if (tool != null) {
+            tool.stop();
         }
     }
 
@@ -333,6 +339,13 @@ public class AgentService {
                 }
 
                 for (ChatMessage.ToolCall toolCall : iterToolCalls) {
+                    // 每个工具执行前检查是否已停止
+                    if (stopped) {
+                        LOG.info("Agent 循环被用户停止（工具执行前）");
+                        listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
+                        return;
+                    }
+
                     String toolName = toolCall.getFunction().getName();
                     String args = toolCall.getFunction().getArguments();
 
@@ -384,7 +397,7 @@ public class AgentService {
 
     /**
      * 处理 run_command 命令执行
-     * 包含危险命令审批 + IntelliJ Terminal API 执行
+     * 使用 IDEA 内置终端执行命令（通过 RunCommandTool），用户可以在终端中实时看到命令和输出
      */
     private void handleRunCommand(AgentContext context, ChatMessage.ToolCall toolCall, AgentListener listener) {
         String toolCallId = toolCall.getId();
@@ -395,20 +408,34 @@ public class AgentService {
             // a. 解析命令参数
             JsonObject jsonArgs = JsonParser.parseString(args).getAsJsonObject();
             String command = jsonArgs.get("command").getAsString();
-            int timeout = jsonArgs.has("timeout") ? jsonArgs.get("timeout").getAsInt() : 30;
-            timeout = Math.min(timeout, 120);
 
             // b. 检查是否危险命令
             boolean dangerous = isDangerousCommand(command);
 
-            // c. 通知监听器需要审批
+            // c. 通知监听器
             listener.onCommandApproval(toolCallId, command, dangerous);
 
-            // d. 对于危险命令：等待用户审批（由 ChatPanel 执行并设置结果）
+            // d. 对于危险命令：等待用户审批（轮询检查停止标志）
             if (dangerous) {
                 ApprovalManager.CommandApproval ca = approvalManager.register(toolCallId);
                 try {
-                    boolean released = ca.latch.await(timeout + 60, TimeUnit.SECONDS);
+                    // 使用轮询方式等待审批，以便能响应停止信号
+                    boolean released = false;
+                    long approvalTimeout = 300;
+                    long elapsed = 0;
+                    while (elapsed < approvalTimeout) {
+                        if (stopped) {
+                            approvalManager.reject(toolCallId);
+                            String err = "命令执行已被用户停止";
+                            listener.onToolCallEnd(toolName, err);
+                            listener.onCommandResult(toolCallId, err);
+                            context.getConversation().addToolResult(err, toolCallId);
+                            return;
+                        }
+                        released = ca.latch.await(1, TimeUnit.SECONDS);
+                        if (released) break;
+                        elapsed++;
+                    }
                     if (!released) {
                         approvalManager.reject(toolCallId);
                         String err = "命令审批超时，已取消执行";
@@ -433,30 +460,29 @@ public class AgentService {
                     context.getConversation().addToolResult(err, toolCallId);
                     return;
                 }
-                // 危险命令的结果由 ChatPanel 设置到 approvalManager
-                // ChatPanel 调用 approvalManager.setResult() 后这里就能获取到
-                // 由于 setResult 已经 countDown，result 已在 ca 中
-                String result = ca.result;
-                if (result != null) {
-                    listener.onCommandResult(toolCallId, result);
-                    listener.onToolCallEnd(toolName, result);
-                    context.getConversation().addToolResult(result, toolCallId);
-                    return;
-                } else {
-                    String err = "命令未返回结果";
-                    listener.onToolCallEnd(toolName, err);
-                    listener.onCommandResult(toolCallId, err);
-                    context.getConversation().addToolResult(err, toolCallId);
-                    return;
-                }
-            } else {
-                // 安全命令：直接在 AgentService 中用 OSProcessHandler 执行
-                listener.onCommandProgress(toolCallId, "开始执行...");
-                String result = executeCommandWithHandler(context, toolCallId, command, timeout, listener);
-                listener.onCommandProgress(toolCallId, "执行完成");
+            }
+
+            // 执行前再次检查停止标志
+            if (stopped) {
+                String err = "命令执行已被用户停止";
+                listener.onToolCallEnd(toolName, err);
+                listener.onCommandResult(toolCallId, err);
+                context.getConversation().addToolResult(err, toolCallId);
+                return;
+            }
+
+            // e. 通过 RunCommandTool 在 IDEA 终端中执行命令（安全命令直接执行，危险命令审批后执行）
+            listener.onCommandProgress(toolCallId, "开始在终端执行...");
+            RunCommandTool runCommandTool = new RunCommandTool(project);
+            activeRunCommandTool = runCommandTool;
+            try {
+                String result = runCommandTool.execute(args);
+                listener.onCommandProgress(toolCallId, "终端执行完成");
                 listener.onCommandResult(toolCallId, result);
                 listener.onToolCallEnd(toolName, result);
                 context.getConversation().addToolResult(result, toolCallId);
+            } finally {
+                activeRunCommandTool = null;
             }
 
         } catch (Exception e) {
@@ -465,63 +491,6 @@ public class AgentService {
             listener.onToolCallEnd(toolName, err);
             listener.onCommandResult(toolCallId, err);
             context.getConversation().addToolResult(err, toolCallId);
-        }
-    }
-
-    /**
-     * 使用 IntelliJ OSProcessHandler 执行命令
-     */
-    private String executeCommandWithHandler(AgentContext context, String toolCallId, String command, int timeout, AgentListener listener) {
-        try {
-            String basePath = context != null && context.getProject() != null
-                    ? context.getProject().getBasePath() : null;
-            if (basePath == null) {
-                basePath = System.getProperty("user.dir");
-            }
-
-            GeneralCommandLine commandLine = new GeneralCommandLine("sh", "-c", command)
-                    .withWorkDirectory(basePath);
-
-            OSProcessHandler handler = new OSProcessHandler(commandLine);
-
-            StringBuilder output = new StringBuilder();
-            final CountDownLatch execLatch = new CountDownLatch(1);
-            final int[] exitCode = {-1};
-
-            handler.addProcessListener(new ProcessAdapter() {
-                @Override
-                public void onTextAvailable(ProcessEvent event, com.intellij.openapi.util.Key outputType) {
-                    String text = event.getText();
-                    output.append(text);
-                    // 通知进度
-                    listener.onCommandProgress(toolCallId, text.trim());
-                }
-
-                @Override
-                public void processTerminated(ProcessEvent event) {
-                    exitCode[0] = event.getExitCode();
-                    execLatch.countDown();
-                }
-            });
-
-            handler.startNotify();
-
-            // 等待执行完成或超时
-            boolean finished = execLatch.await(timeout, TimeUnit.SECONDS);
-            if (!finished) {
-                handler.destroyProcess();
-                return "命令执行超时（" + timeout + "秒），已强制终止。\n\n部分输出:\n" + output;
-            }
-
-            String result = output.toString();
-            if (result.length() > 30000) {
-                result = result.substring(0, 30000) + "\n... [输出过长，已截断]";
-            }
-
-            return String.format("退出码: %d\n\n输出:\n%s", exitCode[0], result);
-
-        } catch (Exception e) {
-            return "执行命令失败: " + e.getMessage();
         }
     }
 

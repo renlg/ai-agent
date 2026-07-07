@@ -2,30 +2,51 @@ package com.taiwei.aiagent.tool.impl;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import org.jetbrains.plugins.terminal.ShellTerminalWidget;
+import org.jetbrains.plugins.terminal.TerminalView;
 import com.taiwei.aiagent.tool.Tool;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 执行终端命令工具
- * Agent 可以通过此工具在项目目录下执行命令
+ * 使用 IDEA 内置 Terminal 组件执行命令，用户可以在终端中实时看到命令和输出
  */
 public class RunCommandTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(RunCommandTool.class);
 
     private final Project project;
 
     /**
+     * 停止标志，用于支持用户主动停止执行
+     */
+    private volatile boolean stopped = false;
+
+    /**
      * 命令执行超时（秒）
      */
-    private static final int DEFAULT_TIMEOUT = 30;
-    private static final int MAX_TIMEOUT = 120;
+    private static final int DEFAULT_TIMEOUT = 10;
+    private static final int MAX_TIMEOUT = 300;
 
     public RunCommandTool(Project project) {
         this.project = project;
+    }
+
+    /**
+     * 停止当前正在执行的命令
+     */
+    public void stop() {
+        this.stopped = true;
     }
 
     @Override
@@ -35,7 +56,7 @@ public class RunCommandTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "在项目根目录下执行终端命令并返回输出结果。注意：命令将在项目目录下执行，请确保命令安全。";
+        return "在项目根目录下通过 IDEA 终端执行命令并返回输出结果。命令会在 IDEA 终端中可见执行。";
     }
 
     @Override
@@ -50,7 +71,7 @@ public class RunCommandTool implements Tool {
                     },
                     "timeout": {
                       "type": "integer",
-                      "description": "超时时间（秒，默认30，最大120）"
+                      "description": "超时时间（秒，默认10，最大300）"
                     }
                   },
                   "required": ["command"]
@@ -76,46 +97,150 @@ public class RunCommandTool implements Tool {
                 return "错误: 无法获取项目路径";
             }
 
-            ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
-            pb.directory(new java.io.File(basePath));
-            pb.redirectErrorStream(true);
-            pb.environment().put("LANG", "en_US.UTF-8");
+            // 创建临时文件用于捕获输出和完成信号
+            String uniqueId = UUID.randomUUID().toString().substring(0, 8);
+            Path tempDir = Files.createTempDirectory("taiwei-cmd-");
+            Path outputFile = tempDir.resolve("output-" + uniqueId + ".txt");
+            Path doneFile = tempDir.resolve("done-" + uniqueId);
 
-            Process process = pb.start();
+            // 创建包装脚本：在终端中可见执行，同时捕获输出到文件
+            Path scriptFile = tempDir.resolve("run-" + uniqueId + ".sh");
+            String scriptContent = "#!/bin/sh\n"
+                    + "cd " + shellEscape(basePath) + " || exit 1\n"
+                    + "echo \"[$(pwd)] $ " + command.replace("\"", "\\\"") + "\"\n"
+                    + "(" + command + ") 2>&1 | tee " + shellEscape(outputFile.toString()) + "\n"
+                    + "echo $? > " + shellEscape(doneFile.toString()) + "\n";
+            Files.writeString(scriptFile, scriptContent, StandardCharsets.UTF_8);
+            scriptFile.toFile().setExecutable(true);
 
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                int lineCount = 0;
-                while ((line = reader.readLine()) != null) {
-                    if (lineCount >= 200) {
-                        output.append("\n... [输出过多，已截断，共超过 200 行]");
-                        break;
+            // 在 IDEA 终端中执行命令（需要在 EDT 上执行）
+            CountDownLatch terminalLatch = new CountDownLatch(1);
+            AtomicReference<String> terminalError = new AtomicReference<>();
+
+            ApplicationManager.getApplication().invokeAndWait(() -> {
+                try {
+                    TerminalView terminalView = TerminalView.getInstance(project);
+
+                    // 在项目目录下创建终端 Tab，并执行包装脚本
+                    ShellTerminalWidget widget = terminalView.createLocalShellWidget(
+                            basePath,
+                            "TaiWei: " + truncate(command, 30)
+                    );
+                    widget.executeCommand("sh " + shellEscape(scriptFile.toString()));
+                } catch (Exception e) {
+                    LOG.error("创建终端失败", e);
+                    terminalError.set("创建终端失败: " + e.getMessage());
+                } finally {
+                    terminalLatch.countDown();
+                }
+            });
+
+            terminalLatch.await(10, TimeUnit.SECONDS);
+
+            if (terminalError.get() != null) {
+                cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
+                return terminalError.get();
+            }
+
+            // 轮询等待 done 标记文件出现（命令执行完成）
+            long startTime = System.currentTimeMillis();
+            long timeoutMs = timeout * 1000L;
+
+            while (!doneFile.toFile().exists()) {
+                // 检查是否被用户停止
+                if (stopped) {
+                    cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
+                    return "[命令已被用户停止]\n\n已捕获的部分输出:\n" + readPartialOutput(outputFile);
+                }
+                if (System.currentTimeMillis() - startTime > timeoutMs) {
+                    // 超时时不杀进程，让终端继续运行，只返回已捕获的部分输出
+                    String partialOutput = readPartialOutput(outputFile);
+                    // 不删除临时文件，让进程可以继续写
+                    if (partialOutput.isEmpty() || partialOutput.equals("(无输出)")) {
+                        return "命令执行超过 " + timeout + " 秒仍未完成，进程仍在终端中运行。\n\n(暂无输出，请切换到终端查看)";
                     }
-                    output.append(line).append("\n");
-                    lineCount++;
+                    return "命令执行超过 " + timeout + " 秒仍未完成，进程仍在终端中运行。\n\n已捕获的部分输出:\n" + partialOutput;
+                }
+                Thread.sleep(500);
+            }
+
+            // 短暂等待 tee 刷新完成
+            Thread.sleep(200);
+
+            // 读取退出码
+            String exitCodeStr = Files.readString(doneFile, StandardCharsets.UTF_8).trim();
+            int exitCode;
+            try {
+                exitCode = Integer.parseInt(exitCodeStr);
+            } catch (NumberFormatException e) {
+                exitCode = -1;
+            }
+
+            // 读取输出
+            String output = "";
+            if (Files.exists(outputFile)) {
+                output = Files.readString(outputFile, StandardCharsets.UTF_8);
+                if (output.length() > 30000) {
+                    output = output.substring(0, 30000) + "\n... [输出过长，已截断]";
                 }
             }
 
-            boolean finished = process.waitFor(timeout, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return "命令执行超时（" + timeout + "秒），已强制终止。\n\n部分输出:\n" + output;
-            }
+            // 清理临时文件
+            cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
 
-            int exitCode = process.exitValue();
-            String result = output.toString();
-
-            if (result.length() > 30000) {
-                result = result.substring(0, 30000) + "\n... [输出过长，已截断]";
-            }
-
-            return String.format("退出码: %d\n\n输出:\n%s", exitCode, result);
+            return String.format("退出码: %d\n\n输出:\n%s", exitCode, output);
 
         } catch (Exception e) {
             return "执行命令失败: " + e.getMessage();
         }
+    }
+
+    /**
+     * 读取部分输出（用于超时场景）
+     */
+    private String readPartialOutput(Path outputFile) {
+        try {
+            if (Files.exists(outputFile)) {
+                String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+                if (output.length() > 5000) {
+                    return output.substring(0, 5000) + "\n...";
+                }
+                return output;
+            }
+        } catch (Exception ignored) {
+        }
+        return "(无输出)";
+    }
+
+    /**
+     * 清理临时文件
+     */
+    private void cleanupTempFiles(Path tempDir, Path... files) {
+        for (Path f : files) {
+            try {
+                Files.deleteIfExists(f);
+            } catch (Exception ignored) {
+            }
+        }
+        try {
+            Files.deleteIfExists(tempDir);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Shell 路径转义
+     */
+    private String shellEscape(String path) {
+        return "'" + path.replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * 截断字符串
+     */
+    private String truncate(String s, int maxLen) {
+        if (s.length() <= maxLen) return s;
+        return s.substring(0, maxLen) + "...";
     }
 
     /**

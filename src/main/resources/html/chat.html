@@ -26,7 +26,13 @@
         </div>
         <div class="input-area">
             <div class="input-wrapper">
-                <select class="model-select" id="modelSelect" title="切换模型"></select>
+                <div class="model-dropdown" id="modelDropdown">
+                    <div class="model-dropdown-trigger" id="modelSelectTrigger" title="切换模型">
+                        <span class="model-dropdown-label" id="modelDropdownLabel">选择模型</span>
+                        <span class="model-dropdown-arrow">&#x25BE;</span>
+                    </div>
+                    <div class="model-dropdown-menu" id="modelDropdownMenu"></div>
+                </div>
                 <textarea id="messageInput"
                           placeholder="&#x8f93;&#x5165;&#x6d88;&#x606f;&#xff0c;Enter &#x53d1;&#x9001;&#xff0c;Shift+Enter &#x6362;&#x884c;..."
                           rows="5"></textarea>

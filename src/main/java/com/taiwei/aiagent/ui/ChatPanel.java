@@ -1,15 +1,10 @@
 package com.taiwei.aiagent.ui;
 
-import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.process.OSProcessHandler;
-import com.intellij.execution.process.ProcessAdapter;
-import com.intellij.execution.process.ProcessEvent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.Key;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
@@ -33,8 +28,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class ChatPanel extends JPanel implements Disposable {
@@ -299,7 +292,8 @@ public class ChatPanel extends JPanel implements Disposable {
         // 如果当前会话正在处理中，追加流式内容到前端显示
         String activeId = agentService.getActiveSessionId();
         SessionState state = sessionStates.get(activeId);
-        if (state != null && state.isProcessing && state.accumulatedContent.length() > 0) {
+        boolean isActiveProcessing = state != null && state.isProcessing;
+        if (isActiveProcessing && state.accumulatedContent.length() > 0) {
             if (!first) json.append(",");
             json.append("{\"role\":\"assistant\",\"content\":")
                     .append(escapeJsString(state.accumulatedContent.toString()))
@@ -307,7 +301,7 @@ public class ChatPanel extends JPanel implements Disposable {
         }
 
         json.append("]");
-        pushToJs("loadHistory", escapeJsString(json.toString()));
+        pushToJs("loadHistory", escapeJsString(json.toString()) + "," + isActiveProcessing);
     }
 
     private static String escapeJsString(String s) {
@@ -355,6 +349,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
     /**
      * JS 端点击运行按钮后触发
+     * 仅发送审批信号，实际命令执行由 AgentService 通过 RunCommandTool 在终端中完成
      */
     private void onUserApproveCommand(String toolCallId) {
         PendingCommand pc = pendingCommands.remove(toolCallId);
@@ -363,86 +358,13 @@ public class ChatPanel extends JPanel implements Disposable {
             return;
         }
 
-        // 隐藏运行按钮
+        // 隐藏运行按钮，显示进度
         pushToJs("hideRunButton", escapeJsString(toolCallId));
+        pushToJs("showProgress",
+                escapeJsString(toolCallId) + "," + escapeJsString("命令已批准，在终端执行中..."));
 
-        // 在后台线程中执行命令
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            executeCommandInTerminal(toolCallId, pc.command);
-        });
-    }
-
-    /**
-     * 使用 IntelliJ Terminal API 执行命令（危险命令专用，ChatPanel 侧执行）
-     */
-    private void executeCommandInTerminal(String toolCallId, String command) {
-        try {
-            pushToJs("showProgress", escapeJsString(toolCallId) + "," + escapeJsString("执行中..."));
-
-            String basePath = project.getBasePath();
-            if (basePath == null) {
-                basePath = System.getProperty("user.dir");
-            }
-
-            GeneralCommandLine commandLine = new GeneralCommandLine("sh", "-c", command)
-                    .withWorkDirectory(basePath);
-
-            OSProcessHandler handler = new OSProcessHandler(commandLine);
-
-            StringBuilder output = new StringBuilder();
-            final CountDownLatch latch = new CountDownLatch(1);
-            final int[] exitCode = {-1};
-
-            handler.addProcessListener(new ProcessAdapter() {
-                @Override
-                public void onTextAvailable(ProcessEvent event, Key outputType) {
-                    String text = event.getText();
-                    output.append(text);
-                    // 通知进度
-                    String status = text.trim();
-                    if (!status.isEmpty()) {
-                        pushToJs("showProgress",
-                                escapeJsString(toolCallId) + "," + escapeJsString(status));
-                    }
-                }
-
-                @Override
-                public void processTerminated(ProcessEvent event) {
-                    exitCode[0] = event.getExitCode();
-                    latch.countDown();
-                }
-            });
-
-            handler.startNotify();
-
-            // 等待执行完成
-            boolean finished = latch.await(120, TimeUnit.SECONDS);
-            if (!finished) {
-                handler.destroyProcess();
-                String err = "命令执行超时，已强制终止。\n\n部分输出:\n" + output;
-                pushToJs("hideProgress", escapeJsString(toolCallId));
-                // 通知 AgentService 执行完成
-                agentService.getApprovalManager().setResult(toolCallId, err);
-                return;
-            }
-
-            String result = output.toString();
-            if (result.length() > 30000) {
-                result = result.substring(0, 30000) + "\n... [输出过长，已截断]";
-            }
-
-            String formattedResult = String.format("退出码: %d\n\n输出:\n%s", exitCode[0], result);
-
-            pushToJs("hideProgress", escapeJsString(toolCallId));
-
-            // 通知 AgentService 执行完成
-            agentService.getApprovalManager().setResult(toolCallId, formattedResult);
-
-        } catch (Exception e) {
-            LOG.error("执行命令失败", e);
-            pushToJs("hideProgress", escapeJsString(toolCallId));
-            agentService.getApprovalManager().setResult(toolCallId, "执行命令失败: " + e.getMessage());
-        }
+        // 发送审批通过信号，AgentService 收到后会自动通过 RunCommandTool 在终端执行
+        agentService.getApprovalManager().setResult(toolCallId, "__APPROVED__");
     }
 
     // ========== Stop Generation ==========
@@ -524,6 +446,15 @@ public class ChatPanel extends JPanel implements Disposable {
 
                     pushToJs("showProgress",
                             escapeJsString(toolName) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
+                    // 延迟隐藏进度条，让用户看到完成状态
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            Thread.sleep(300); // 短暂显示完成状态
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        pushToJs("hideProgress", escapeJsString(toolName));
+                    });
                 }
 
                 @Override
@@ -557,6 +488,15 @@ public class ChatPanel extends JPanel implements Disposable {
                     pushToJs("showProgress",
                             escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
                     pushToJs("hideRunButton", escapeJsString(toolCallId));
+                    // 延迟隐藏进度条，让用户看到完成状态
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            Thread.sleep(300); // 短暂显示完成状态
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        pushToJs("hideProgress", escapeJsString(toolCallId));
+                    });
 
                     // 更新 ChatEntry
                     for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
