@@ -24,14 +24,48 @@ public class SessionStore {
 
     private static final Logger LOG = Logger.getInstance(SessionStore.class);
     private static final int MAX_SESSIONS = 5;
-    private static final String STORE_FILE = ".taiwei";
+    private static final String STORE_DIR = ".taiwei";
+    private static final String STORE_FILE = "sessions.json";
+    private static final String OLD_STORE_FILE = ".ai-agent-sessions.json";
 
+    private final Path storeDir;
     private final Path filePath;
     private final Gson gson;
 
     public SessionStore(String basePath) {
-        this.filePath = Paths.get(basePath, STORE_FILE);
+        this.storeDir = Paths.get(basePath, STORE_DIR);
+        this.filePath = storeDir.resolve(STORE_FILE);
         this.gson = new GsonBuilder().setPrettyPrinting().create();
+        migrateIfNeeded(basePath);
+    }
+
+    /**
+     * 迁移旧存储文件到新路径
+     */
+    private void migrateIfNeeded(String basePath) {
+        try {
+            // 新路径已存在，无需迁移
+            if (Files.exists(filePath)) return;
+
+            Path oldFile = Paths.get(basePath, OLD_STORE_FILE);
+            Path oldDotTaiwei = Paths.get(basePath, ".taiwei");
+
+            Path source = null;
+            if (Files.exists(oldFile)) {
+                source = oldFile;
+            } else if (Files.exists(oldDotTaiwei) && Files.isRegularFile(oldDotTaiwei)) {
+                source = oldDotTaiwei;
+            }
+
+            if (source != null) {
+                Files.createDirectories(storeDir);
+                Files.copy(source, filePath);
+                Files.delete(source);
+                LOG.info("已迁移旧存储文件 " + source.getFileName() + " 到 " + filePath);
+            }
+        } catch (IOException e) {
+            LOG.warn("迁移旧存储文件失败: " + e.getMessage(), e);
+        }
     }
 
     /**
