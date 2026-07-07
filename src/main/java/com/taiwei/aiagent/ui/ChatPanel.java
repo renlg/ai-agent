@@ -1,10 +1,15 @@
 package com.taiwei.aiagent.ui;
 
+import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.execution.process.OSProcessHandler;
+import com.intellij.execution.process.ProcessAdapter;
+import com.intellij.execution.process.ProcessEvent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
@@ -28,6 +33,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class ChatPanel extends JPanel implements Disposable {
@@ -41,6 +48,7 @@ public class ChatPanel extends JPanel implements Disposable {
     private JBCefJSQuery jsQuery;
 
     private final Map<String, SessionState> sessionStates = new HashMap<>();
+    private final Map<String, PendingCommand> pendingCommands = new HashMap<>();
     private final Runnable settingsChangeListener = this::onSettingsChanged;
 
     public ChatPanel(Project project) {
@@ -214,6 +222,11 @@ public class ChatPanel extends JPanel implements Disposable {
                 case "getModels":
                     pushModelListToJs();
                     break;
+                case "runCommand":
+                    // 用户点击了危险命令的运行按钮
+                    String toolCallId = data.get("toolCallId").getAsString();
+                    onUserApproveCommand(toolCallId);
+                    break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
             }
@@ -244,11 +257,19 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void pushToolCallStart(String name, String args) {
+        // run_command 工具：不显示 args 和 result，改为显示进度条或运行按钮
+        if ("run_command".equals(name)) {
+            return;
+        }
         pushToJs("showToolCall",
                 escapeJsString(name) + "," + escapeJsString(args != null ? args : ""));
     }
 
     private void pushToolCallEnd(String name, String result) {
+        // run_command 工具：不显示 args 和 result
+        if ("run_command".equals(name)) {
+            return;
+        }
         pushToJs("updateToolCall",
                 escapeJsString(name) + "," + escapeJsString(result != null ? result : ""));
     }
@@ -320,6 +341,115 @@ public class ChatPanel extends JPanel implements Disposable {
             }
         }
         return sb.append("\"").toString();
+    }
+
+    // ========== Pending Command Management ==========
+
+    /**
+     * 待审批的命令
+     */
+    private static class PendingCommand {
+        final String toolCallId;
+        final String command;
+        final boolean isDangerous;
+
+        PendingCommand(String toolCallId, String command, boolean isDangerous) {
+            this.toolCallId = toolCallId;
+            this.command = command;
+            this.isDangerous = isDangerous;
+        }
+    }
+
+    /**
+     * JS 端点击运行按钮后触发
+     */
+    private void onUserApproveCommand(String toolCallId) {
+        PendingCommand pc = pendingCommands.remove(toolCallId);
+        if (pc == null) {
+            LOG.warn("未找到待审批的命令: " + toolCallId);
+            return;
+        }
+
+        // 隐藏运行按钮
+        pushToJs("hideRunButton", escapeJsString(toolCallId));
+
+        // 在后台线程中执行命令
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            executeCommandInTerminal(toolCallId, pc.command);
+        });
+    }
+
+    /**
+     * 使用 IntelliJ Terminal API 执行命令（危险命令专用，ChatPanel 侧执行）
+     */
+    private void executeCommandInTerminal(String toolCallId, String command) {
+        try {
+            pushToJs("showProgress", escapeJsString(toolCallId) + "," + escapeJsString("执行中..."));
+
+            String basePath = project.getBasePath();
+            if (basePath == null) {
+                basePath = System.getProperty("user.dir");
+            }
+
+            GeneralCommandLine commandLine = new GeneralCommandLine("sh", "-c", command)
+                    .withWorkDirectory(basePath);
+
+            OSProcessHandler handler = new OSProcessHandler(commandLine);
+
+            StringBuilder output = new StringBuilder();
+            final CountDownLatch latch = new CountDownLatch(1);
+            final int[] exitCode = {-1};
+
+            handler.addProcessListener(new ProcessAdapter() {
+                @Override
+                public void onTextAvailable(ProcessEvent event, Key outputType) {
+                    String text = event.getText();
+                    output.append(text);
+                    // 通知进度
+                    String status = text.trim();
+                    if (!status.isEmpty()) {
+                        pushToJs("showProgress",
+                                escapeJsString(toolCallId) + "," + escapeJsString(status));
+                    }
+                }
+
+                @Override
+                public void processTerminated(ProcessEvent event) {
+                    exitCode[0] = event.getExitCode();
+                    latch.countDown();
+                }
+            });
+
+            handler.startNotify();
+
+            // 等待执行完成
+            boolean finished = latch.await(120, TimeUnit.SECONDS);
+            if (!finished) {
+                handler.destroyProcess();
+                String err = "命令执行超时，已强制终止。\n\n部分输出:\n" + output;
+                pushToJs("hideProgress", escapeJsString(toolCallId));
+                // 通知 AgentService 执行完成
+                agentService.getApprovalManager().setResult(toolCallId, err);
+                return;
+            }
+
+            String result = output.toString();
+            if (result.length() > 30000) {
+                result = result.substring(0, 30000) + "\n... [输出过长，已截断]";
+            }
+
+            String formattedResult = String.format("退出码: %d\n\n输出:\n%s", exitCode[0], result);
+
+            pushToJs("hideProgress", escapeJsString(toolCallId));
+
+            // 通知 AgentService 执行完成
+            agentService.getApprovalManager().setResult(toolCallId, formattedResult);
+
+        } catch (Exception e) {
+            LOG.error("执行命令失败", e);
+            pushToJs("hideProgress", escapeJsString(toolCallId));
+            agentService.getApprovalManager().setResult(toolCallId, "执行命令失败: " + e.getMessage());
+        }
     }
 
     // ========== Send Message ==========
@@ -398,6 +528,51 @@ public class ChatPanel extends JPanel implements Disposable {
                 }
 
                 @Override
+                public void onCommandApproval(String toolCallId, String command, boolean isDangerous) {
+                    sessionState.chatEntries.add(ChatEntry.toolCall("run_command", command));
+
+                    if (!sessionId.equals(agentService.getActiveSessionId())) return;
+
+                    if (isDangerous) {
+                        // 危险命令：显示运行按钮，等待用户点击
+                        pendingCommands.put(toolCallId, new PendingCommand(toolCallId, command, true));
+                        pushToJs("showRunButton",
+                                escapeJsString(toolCallId) + "," + escapeJsString(command));
+                    } else {
+                        // 安全命令：显示进度条，直接执行
+                        pushToJs("showProgress",
+                                escapeJsString(toolCallId) + "," + escapeJsString("执行中..."));
+                    }
+                }
+
+                @Override
+                public void onCommandProgress(String toolCallId, String status) {
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushToJs("showProgress",
+                                escapeJsString(toolCallId) + "," + escapeJsString(status));
+                    }
+                }
+
+                @Override
+                public void onCommandResult(String toolCallId, String result) {
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushToJs("hideProgress", escapeJsString(toolCallId));
+                        pushToJs("hideRunButton", escapeJsString(toolCallId));
+                    }
+
+                    // 更新 ChatEntry
+                    for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
+                        ChatEntry entry = sessionState.chatEntries.get(i);
+                        if (entry.type == ChatEntry.Type.TOOL_CALL
+                                && "run_command".equals(entry.toolName)
+                                && entry.toolResult == null) {
+                            entry.toolResult = result;
+                            break;
+                        }
+                    }
+                }
+
+                @Override
                 public void onComplete(String fullResponse) {
                     sessionState.isProcessing = false;
                     sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
@@ -412,6 +587,9 @@ public class ChatPanel extends JPanel implements Disposable {
                         sessionState.chatEntries.add(ChatEntry.assistant(fullResponse));
                     }
 
+                    // 清理待审批命令
+                    pendingCommands.clear();
+
                     // 更新会话列表（标题可能已改变）
                     SwingUtilities.invokeLater(() -> pushSessionListToJs());
 
@@ -425,6 +603,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     sessionState.isProcessing = false;
                     sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
                     sessionState.chatEntries.add(ChatEntry.error(error));
+
+                    // 清理待审批命令
+                    pendingCommands.clear();
 
                     if (sessionId.equals(agentService.getActiveSessionId())) {
                         pushError(error);

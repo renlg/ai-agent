@@ -139,6 +139,16 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         return getActiveModelConfig().modelName;
     }
 
+    // ========== 危险命令配置 ==========
+
+    public List<String> getDangerousCommands() {
+        return state.dangerousCommands;
+    }
+
+    public void setDangerousCommands(List<String> commands) {
+        state.dangerousCommands = commands;
+    }
+
     /**
      * 单个模型配置
      */
@@ -185,6 +195,15 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 温度参数（0-2）
          */
         public double temperature = 0.7;
+
+        /**
+         * 危险命令模式列表（匹配到任意模式的命令需要用户手动确认执行）
+         */
+        public List<String> dangerousCommands = new ArrayList<>(java.util.Arrays.asList(
+                "rm -rf", "mkfs.", "dd if=", ":(){", "shutdown", "reboot", "halt",
+                "poweroff", "init 0", "init 6", "fdisk", "format", "mv /", "chmod -R 777 /",
+                "wget http", "curl -o", "> /dev/sda", "| sh", "eval ", "source /dev"
+        ));
 
         public State() {
             // 默认添加一个模型

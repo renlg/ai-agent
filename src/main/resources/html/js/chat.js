@@ -193,6 +193,88 @@
         });
     };
 
+    /* ===== 进度条 UI ===== */
+    window.showProgress = function (toolCallId, status) {
+        whenReady(function () {
+            var existing = document.getElementById('progress-' + toolCallId);
+            if (existing) {
+                var statusEl = existing.querySelector('.command-status-text');
+                if (statusEl) {
+                    var display = status.length > 100 ? status.substring(0, 100) + '...' : status;
+                    statusEl.textContent = display;
+                }
+                return;
+            }
+
+            removeThinking();
+            currentAssistantEl = null;
+            currentContentEl = null;
+            accumulatedContent = '';
+
+            var el = document.createElement('div');
+            el.className = 'message tool command-progress';
+            el.id = 'progress-' + toolCallId;
+            el.innerHTML =
+                '<div class="message-label">&#x1f527; &#x5de5;&#x5177; &middot; <span class="tool-name">run_command</span></div>' +
+                '<div class="command-progress-bar"><div class="command-progress-indeterminate"></div></div>' +
+                '<div class="command-status-text">' + MarkdownRenderer.escapeHtml(status) + '</div>';
+            messagesArea.appendChild(el);
+            scrollToBottom();
+        });
+    };
+
+    window.hideProgress = function (toolCallId) {
+        whenReady(function () {
+            var el = document.getElementById('progress-' + toolCallId);
+            if (el) el.remove();
+        });
+    };
+
+    /* ===== 危险命令运行按钮 ===== */
+    window.showRunButton = function (toolCallId, command) {
+        whenReady(function () {
+            var existing = document.getElementById('runbtn-' + toolCallId);
+            if (existing) return;
+
+            removeThinking();
+            currentAssistantEl = null;
+            currentContentEl = null;
+            accumulatedContent = '';
+
+            var el = document.createElement('div');
+            el.className = 'message tool command-run-container';
+            el.id = 'runbtn-' + toolCallId;
+
+            var cmdDisplay = command.length > 400 ? command.substring(0, 400) + '...' : command;
+
+            el.innerHTML =
+                '<div class="message-label">&#x26a0;&#xfe0f; &#x5de5;&#x5177; &middot; <span class="tool-name">run_command</span></div>' +
+                '<div class="command-warning">&#x26a0;&#xfe0f; &#x6b64;&#x547d;&#x4ee4;&#x88ab;&#x8bc6;&#x522b;&#x4e3a;&#x5371;&#x9669;&#x547d;&#x4ee4;&#xff0c;&#x8bf7;&#x786e;&#x8ba4;&#x540e;&#x6267;&#x884c;</div>' +
+                '<div class="command-text">' + MarkdownRenderer.escapeHtml(cmdDisplay) + '</div>' +
+                '<button class="command-run-btn" onclick="window.runCommandAction(\'' + toolCallId + '\')">&#x25b6; &#x8fd0;&#x884c;</button>';
+
+            messagesArea.appendChild(el);
+            scrollToBottom();
+        });
+    };
+
+    // 运行按钮点击处理
+    window.runCommandAction = function (toolCallId) {
+        callJava('runCommand', { toolCallId: toolCallId });
+    };
+
+    window.hideRunButton = function (toolCallId) {
+        whenReady(function () {
+            var el = document.getElementById('runbtn-' + toolCallId);
+            if (el) {
+                // 替换为"已执行"状态
+                el.innerHTML =
+                    '<div class="message-label">&#x1f527; &#x5de5;&#x5177; &middot; <span class="tool-name">run_command</span></div>' +
+                    '<div class="command-status-text">&#x5df2;&#x6267;&#x884c;</div>';
+            }
+        });
+    };
+
     window.onComplete = function () {
         whenReady(function () {
             removeThinking();
@@ -376,6 +458,12 @@
         accumulatedContent = '';
         isProcessing = false;
         sendBtn.disabled = false;
+
+        // 清理进度条和运行按钮
+        var progressEls = document.querySelectorAll('[id^="progress-"]');
+        for (var pe = 0; pe < progressEls.length; pe++) { progressEls[pe].remove(); }
+        var runbtnEls = document.querySelectorAll('[id^="runbtn-"]');
+        for (var re = 0; re < runbtnEls.length; re++) { runbtnEls[re].remove(); }
 
         var ws = document.createElement('div');
         ws.className = 'welcome';

@@ -30,6 +30,7 @@ public class AiAgentConfigurable implements Configurable {
     private JBTable table;
     private JSpinner maxTokensSpinner;
     private JSpinner temperatureSpinner;
+    private JTextArea dangerousCommandsArea;
 
     private List<AiAgentSettings.ModelConfig> editingConfigs;
 
@@ -133,6 +134,33 @@ public class AiAgentConfigurable implements Configurable {
 
         hintArea.setAlignmentX(Component.LEFT_ALIGNMENT);
         mainPanel.add(hintArea);
+        mainPanel.add(Box.createVerticalStrut(16));
+
+        // ===== 危险命令配置区域 =====
+        JLabel dangerLabel = new JLabel("危险命令配置");
+        dangerLabel.setFont(dangerLabel.getFont().deriveFont(Font.BOLD, 13f));
+        dangerLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mainPanel.add(dangerLabel);
+        mainPanel.add(Box.createVerticalStrut(8));
+
+        JTextArea hintArea2 = new JTextArea("匹配到以下模式的命令需要手动点击运行按钮");
+        hintArea2.setEditable(false);
+        hintArea2.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        hintArea2.setBackground(new JBColor(new Color(0xF5F5F5), new Color(0x2B2B2B)));
+        hintArea2.setBorder(JBUI.Borders.empty(4));
+        hintArea2.setLineWrap(true);
+        hintArea2.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mainPanel.add(hintArea2);
+        mainPanel.add(Box.createVerticalStrut(4));
+
+        dangerousCommandsArea = new JTextArea(10, 50);
+        dangerousCommandsArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        dangerousCommandsArea.setLineWrap(false);
+        dangerousCommandsArea.setBorder(JBUI.Borders.empty(4));
+        JBScrollPane dangerScroll = new JBScrollPane(dangerousCommandsArea);
+        dangerScroll.setPreferredSize(new Dimension(600, 160));
+        dangerScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mainPanel.add(dangerScroll);
         mainPanel.add(Box.createVerticalGlue());
 
         reset();
@@ -203,6 +231,9 @@ public class AiAgentConfigurable implements Configurable {
         if ((Integer) maxTokensSpinner.getValue() != settings.getMaxTokens()) return true;
         if ((Double) temperatureSpinner.getValue() != settings.getTemperature()) return true;
 
+        if (!getDangerousCommandsText().equals(
+                String.join("\n", settings.getDangerousCommands()))) return true;
+
         List<AiAgentSettings.ModelConfig> current = settings.getModelConfigs();
         if (editingConfigs.size() != current.size()) return true;
         for (int i = 0; i < editingConfigs.size(); i++) {
@@ -239,6 +270,18 @@ public class AiAgentConfigurable implements Configurable {
         settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
         settings.setTemperature((Double) temperatureSpinner.getValue());
         
+        // 保存危险命令配置
+        String dangerText = getDangerousCommandsText();
+        String[] lines = dangerText.split("\n", -1);
+        List<String> dangerList = new ArrayList<>();
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty()) {
+                dangerList.add(trimmed);
+            }
+        }
+        settings.setDangerousCommands(dangerList);
+        
         // 保持当前选中的模型索引（如果索引有效）
         int currentActiveIndex = settings.getActiveModelIndex();
         if (currentActiveIndex >= editingConfigs.size()) {
@@ -261,6 +304,9 @@ public class AiAgentConfigurable implements Configurable {
         }
         maxTokensSpinner.setValue(settings.getMaxTokens());
         temperatureSpinner.setValue(settings.getTemperature());
+        
+        // 加载危险命令配置
+        dangerousCommandsArea.setText(String.join("\n", settings.getDangerousCommands()));
     }
 
     @Override
@@ -273,6 +319,11 @@ public class AiAgentConfigurable implements Configurable {
 
     private String getDisplayName(AiAgentSettings.ModelConfig config) {
         return config.name.isEmpty() ? (config.modelName.isEmpty() ? "未命名" : config.modelName) : config.name;
+    }
+
+    private String getDangerousCommandsText() {
+        String text = dangerousCommandsArea.getText();
+        return text == null ? "" : text;
     }
 
     // ===== 表格模型 =====
