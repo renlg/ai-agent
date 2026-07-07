@@ -144,6 +144,14 @@
     window.showToolCall = function (name, args) {
         whenReady(function () {
             removeThinking();
+            // 不同迭代的文本之间加换行分隔
+            if (accumulatedContent.length > 0 && !accumulatedContent.endsWith('\n')) {
+                accumulatedContent += '\n';
+                if (currentContentEl) {
+                    currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                    scrollToBottom();
+                }
+            }
             // 不要重置 assistant 引用，保持当前 assistant 消息框继续渲染
 
             var el = document.createElement('div');
@@ -205,6 +213,14 @@
             }
 
             removeThinking();
+            // 不同迭代的文本之间加换行分隔
+            if (accumulatedContent.length > 0 && !accumulatedContent.endsWith('\n')) {
+                accumulatedContent += '\n';
+                if (currentContentEl) {
+                    currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                    scrollToBottom();
+                }
+            }
             // 不要重置 assistant 引用，保持当前 assistant 消息框继续渲染
 
             var el = document.createElement('div');
@@ -233,6 +249,14 @@
             if (existing) return;
 
             removeThinking();
+            // 不同迭代的文本之间加换行分隔
+            if (accumulatedContent.length > 0 && !accumulatedContent.endsWith('\n')) {
+                accumulatedContent += '\n';
+                if (currentContentEl) {
+                    currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                    scrollToBottom();
+                }
+            }
             // 不要重置 assistant 引用，保持当前 assistant 消息框继续渲染
 
             var el = document.createElement('div');
