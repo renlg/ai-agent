@@ -21,10 +21,15 @@
         <!-- 注册配置服务 -->
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.AiAgentSettings"/>
 
-        <!-- 注册 Settings 配置页面（Tools → 太微） -->
+        <!-- 注册 Settings 配置页面（Tools → 太微 → 模型 / 终端） -->
         <applicationConfigurable parentId="tools"
-                                 instance="com.taiwei.aiagent.settings.AiAgentConfigurable"
-                                 id="com.taiwei.aiagent.settings"
-                                 displayName="太微"/>
+                                 instance="com.taiwei.aiagent.settings.TaiweiParentConfigurable"
+                                 id="com.taiwei.aiagent.settings"/>
+        <applicationConfigurable parentId="com.taiwei.aiagent.settings"
+                                 instance="com.taiwei.aiagent.settings.ModelConfigurable"
+                                 id="com.taiwei.aiagent.settings.model"/>
+        <applicationConfigurable parentId="com.taiwei.aiagent.settings"
+                                 instance="com.taiwei.aiagent.settings.TerminalConfigurable"
+                                 id="com.taiwei.aiagent.settings.terminal"/>
     </extensions>
 </idea-plugin>
