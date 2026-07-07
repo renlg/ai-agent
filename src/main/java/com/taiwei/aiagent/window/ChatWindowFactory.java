@@ -16,7 +16,7 @@ public class ChatWindowFactory implements ToolWindowFactory {
 
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-        // 创建聊天面板（传入 project 用于 JCEF 初始化）
+        // 创建聊天面板
         ChatPanel chatPanel = new ChatPanel(project);
 
         // 获取 ContentFactory（兼容 IDEA 2024.1+ 新 API）
