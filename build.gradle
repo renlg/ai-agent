@@ -72,9 +72,6 @@ dependencies {
     // JSON 处理
     implementation 'com.google.code.gson:gson:2.10.1'
 
-    // Velocity 模板引擎（用于加载和渲染提示词模板）
-    implementation 'org.apache.velocity:velocity-engine-core:2.3'
-
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
