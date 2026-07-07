@@ -13,6 +13,11 @@
     var messageQueue = [];
     var ready = false;
 
+    /* ===== Throttle: incremental Markdown render ===== */
+    var renderThrottleId = null;
+    var lastRenderedLength = 0;
+    var RENDER_THROTTLE_MS = 150;
+
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn;
     var tabList, modelSelect, newSessionBtn, clearBtn;
@@ -127,9 +132,21 @@
             accumulatedContent += content;
 
             if (currentAssistantEl && currentContentEl) {
-                // 纯文本增量追加，不触发 Markdown 渲染
+                // 纯文本增量追加
                 currentContentEl.textContent += content;
                 scrollToBottom();
+
+                // 节流：每 RENDER_THROTTLE_MS 做一次增量 Markdown 渲染
+                if (renderThrottleId === null) {
+                    renderThrottleId = setTimeout(function () {
+                        renderThrottleId = null;
+                        if (currentContentEl && accumulatedContent.length > lastRenderedLength) {
+                            currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                            lastRenderedLength = accumulatedContent.length;
+                            scrollToBottom();
+                        }
+                    }, RENDER_THROTTLE_MS);
+                }
                 return;
             }
 
@@ -154,6 +171,7 @@
                 accumulatedContent += '\n';
                 if (currentContentEl) {
                     currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                    lastRenderedLength = accumulatedContent.length;
                     scrollToBottom();
                 }
             }
@@ -223,6 +241,7 @@
                 accumulatedContent += '\n';
                 if (currentContentEl) {
                     currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                    lastRenderedLength = accumulatedContent.length;
                     scrollToBottom();
                 }
             }
@@ -259,6 +278,7 @@
                 accumulatedContent += '\n';
                 if (currentContentEl) {
                     currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                    lastRenderedLength = accumulatedContent.length;
                     scrollToBottom();
                 }
             }
@@ -301,6 +321,13 @@
     window.onComplete = function () {
         whenReady(function () {
             removeThinking();
+
+            // 清理节流定时器
+            if (renderThrottleId !== null) {
+                clearTimeout(renderThrottleId);
+                renderThrottleId = null;
+            }
+
             isProcessing = false;
             sendBtn.disabled = false;
             
@@ -313,12 +340,20 @@
             currentAssistantEl = null;
             currentContentEl = null;
             accumulatedContent = '';
+            lastRenderedLength = 0;
         });
     };
 
     window.onError = function (error) {
         whenReady(function () {
             removeThinking();
+
+            // 清理节流定时器
+            if (renderThrottleId !== null) {
+                clearTimeout(renderThrottleId);
+                renderThrottleId = null;
+            }
+
             // 先做最终 Markdown 渲染
             if (currentContentEl && accumulatedContent.length > 0) {
                 currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
@@ -329,6 +364,7 @@
             currentAssistantEl = null;
             currentContentEl = null;
             accumulatedContent = '';
+            lastRenderedLength = 0;
             scrollToBottom();
         });
     };
@@ -492,6 +528,13 @@
         accumulatedContent = '';
         isProcessing = false;
         sendBtn.disabled = false;
+
+        // 清理节流定时器
+        if (renderThrottleId !== null) {
+            clearTimeout(renderThrottleId);
+            renderThrottleId = null;
+        }
+        lastRenderedLength = 0;
 
         // 清理进度条和运行按钮
         var progressEls = document.querySelectorAll('[id^="progress-"]');
