@@ -40,25 +40,16 @@ public class ChatPanel extends JPanel implements Disposable {
     private boolean isProcessing = false;
     private final List<ChatEntry> chatEntries = new ArrayList<>();
 
-    // Message bubble colors
-    private static final JBColor USER_BUBBLE_BG = new JBColor(new Color(0xE3, 0xF2, 0xFD), new Color(0x1A, 0x3A, 0x5C));
-    private static final JBColor ASSISTANT_BUBBLE_BG = new JBColor(new Color(0xF5, 0xF5, 0xF5), new Color(0x3C, 0x3C, 0x3C));
-    private static final JBColor TOOL_BUBBLE_BG = new JBColor(new Color(0xFF, 0xF3, 0xE0), new Color(0x4D, 0x3E, 0x1E));
-    private static final JBColor ERROR_BUBBLE_BG = new JBColor(new Color(0xFF, 0xEB, 0xEE), new Color(0x4D, 0x1E, 0x1E));
     private static final JBColor CHAT_BG = new JBColor(Color.WHITE, new Color(0x2B, 0x2B, 0x2B));
     private static final JBColor TEXT_COLOR = new JBColor(new Color(0x33, 0x33, 0x33), new Color(0xCC, 0xCC, 0xCC));
-    private static final JBColor BORDER_COLOR = new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x55, 0x55, 0x55));
-    private static final JBColor TOOL_TEXT_COLOR = new JBColor(new Color(0x79, 0x55, 0x48), new Color(0xBC, 0xAA, 0xA4));
-    private static final JBColor ERROR_TEXT_COLOR = new JBColor(new Color(0xC6, 0x28, 0x28), new Color(0xEF, 0x9A, 0x9A));
-    private static final JBColor USER_TEXT_COLOR = new JBColor(new Color(0x0D, 0x47, 0xA1), new Color(0x90, 0xCA, 0xF9));
+    private static final JBColor SECONDARY_TEXT = new JBColor(new Color(0x88, 0x88, 0x88), new Color(0x88, 0x88, 0x88));
+    private static final JBColor DIVIDER_COLOR = new JBColor(new Color(0xE8, 0xE8, 0xE8), new Color(0x44, 0x44, 0x44));
 
-    // Bubble border colors (slightly darker than bg for subtle shadow effect)
-    private static final JBColor USER_BUBBLE_BORDER = new JBColor(new Color(0xBB, 0xDE, 0xFB), new Color(0x2A, 0x5A, 0x8C));
-    private static final JBColor ASSISTANT_BUBBLE_BORDER = new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x4A, 0x4A, 0x4A));
-    private static final JBColor TOOL_BUBBLE_BORDER = new JBColor(new Color(0xFF, 0xCC, 0x80), new Color(0x6D, 0x5E, 0x3E));
-    private static final JBColor ERROR_BUBBLE_BORDER = new JBColor(new Color(0xEF, 0x9A, 0x9A), new Color(0x6D, 0x3E, 0x3E));
+    private static final JBColor USER_MSG_BORDER = new JBColor(new Color(0x1E, 0x88, 0xE5), new Color(0x42, 0xA5, 0xF5));
+    private static final JBColor ASSISTANT_MSG_BORDER = new JBColor(new Color(0x43, 0xA0, 0x47), new Color(0x66, 0xBB, 0x6A));
+    private static final JBColor TOOL_MSG_BORDER = new JBColor(new Color(0xF5, 0x7C, 0x00), new Color(0xFF, 0xB7, 0x4D));
+    private static final JBColor ERROR_MSG_BORDER = new JBColor(new Color(0xE5, 0x39, 0x35), new Color(0xEF, 0x53, 0x50));
 
-    // Tab bar colors
     private static final JBColor TAB_ACTIVE_BG = new JBColor(new Color(0xE3, 0xF2, 0xFD), new Color(0x1E, 0x3A, 0x5F));
     private static final JBColor TAB_INACTIVE_BG = new JBColor(new Color(0xEE, 0xEE, 0xEE), new Color(0x38, 0x38, 0x38));
     private static final JBColor TAB_HOVER_BG = new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x42, 0x42, 0x42));
@@ -67,18 +58,15 @@ public class ChatPanel extends JPanel implements Disposable {
     private static final JBColor TAB_BAR_BG = new JBColor(new Color(0xFA, 0xFA, 0xFA), new Color(0x30, 0x30, 0x30));
     private static final JBColor TAB_ACTIVE_BORDER = new JBColor(new Color(0x90, 0xCA, 0xF9), new Color(0x3D, 0x7E, 0xBB));
 
-    // Input area colors
     private static final JBColor INPUT_BG = new JBColor(Color.WHITE, new Color(0x36, 0x36, 0x36));
     private static final JBColor INPUT_BORDER = new JBColor(new Color(0xBB, 0xDE, 0xFB), new Color(0x4A, 0x6A, 0x8A));
 
-    // Accent / button colors
     private static final JBColor ACCENT_COLOR = new JBColor(new Color(0x1E, 0x88, 0xE5), new Color(0x42, 0xA5, 0xF5));
     private static final JBColor SEND_BTN_BG = new JBColor(new Color(0x1E, 0x88, 0xE5), new Color(0x3D, 0x8C, 0xD4));
     private static final JBColor SEND_BTN_HOVER = new JBColor(new Color(0x19, 0x76, 0xD2), new Color(0x33, 0x7A, 0xB7));
     private static final JBColor NEW_BTN_HOVER_BG = new JBColor(new Color(0xE3, 0xF2, 0xFD), new Color(0x1A, 0x3A, 0x5C));
 
-    // Fonts
-    private static final Font CHAT_FONT = new Font("SansSerif", Font.PLAIN, 13);
+    private static final Font CHAT_FONT = new Font("SansSerif", Font.PLAIN, 14);
     private static final Font TAB_FONT = new Font("SansSerif", Font.PLAIN, 12);
     private static final Font INPUT_FONT = new Font("SansSerif", Font.PLAIN, 13);
     private static final Font SEND_FONT = new Font("SansSerif", Font.BOLD, 18);
@@ -119,7 +107,7 @@ public class ChatPanel extends JPanel implements Disposable {
         topBar.setBackground(TAB_BAR_BG);
         topBar.setOpaque(true);
         topBar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, DIVIDER_COLOR),
                 JBUI.Borders.empty(5, 8, 5, 8)
         ));
 
@@ -231,7 +219,7 @@ public class ChatPanel extends JPanel implements Disposable {
         tab.setBackground(isActive ? TAB_ACTIVE_BG : TAB_INACTIVE_BG);
         tab.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(
-                        isActive ? TAB_ACTIVE_BORDER : BORDER_COLOR, 1, true
+                        isActive ? TAB_ACTIVE_BORDER : DIVIDER_COLOR, 1, true
                 ),
                 JBUI.Borders.empty(4, 12, 4, 6)
         ));
@@ -260,7 +248,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
             @Override
             public void mouseEntered(MouseEvent e) {
-                closeBtn.setForeground(ERROR_TEXT_COLOR);
+                closeBtn.setForeground(ERROR_MSG_BORDER);
             }
 
             @Override
@@ -304,7 +292,7 @@ public class ChatPanel extends JPanel implements Disposable {
         panel.setBackground(CHAT_BG);
         panel.setOpaque(true);
         panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COLOR),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, DIVIDER_COLOR),
                 JBUI.Borders.empty(8, 12)
         ));
 
@@ -545,42 +533,57 @@ public class ChatPanel extends JPanel implements Disposable {
         sb.append(buildChatCss());
         sb.append("</style></head><body>");
 
-        for (ChatEntry entry : chatEntries) {
+        for (int i = 0; i < chatEntries.size(); i++) {
+            ChatEntry entry = chatEntries.get(i);
+            if (i > 0) {
+                sb.append("<hr>");
+            }
             switch (entry.type) {
                 case USER:
-                    sb.append("<div class=\"user-msg\">");
+                    sb.append("<div class=\"msg user-msg\">");
+                    sb.append("<div class=\"sender user-label\">\u4f60</div>");
+                    sb.append("<div class=\"msg-body\">");
                     sb.append(escapeHtml(entry.content));
-                    sb.append("</div>");
+                    sb.append("</div></div>");
                     break;
                 case ASSISTANT:
-                    sb.append("<div class=\"assistant-msg\">");
+                    sb.append("<div class=\"msg assistant-msg\">");
+                    sb.append("<div class=\"sender assistant-label\">AI</div>");
+                    sb.append("<div class=\"msg-body\">");
                     sb.append(MarkdownRenderer.render(entry.content));
-                    sb.append("</div>");
+                    sb.append("</div></div>");
                     break;
                 case TOOL_CALL:
-                    sb.append("<div class=\"tool-call\">");
-                    sb.append("<b>").append(escapeHtml(entry.toolName)).append("</b>");
+                    sb.append("<div class=\"msg tool-msg\">");
+                    sb.append("<div class=\"sender tool-label\">\u5de5\u5177 \u00b7 ");
+                    sb.append(escapeHtml(entry.toolName)).append("</div>");
+                    sb.append("<div class=\"msg-body\">");
                     if (entry.toolArgs != null && !entry.toolArgs.isEmpty()) {
                         String args = entry.toolArgs.length() > 100
                                 ? entry.toolArgs.substring(0, 100) + "..."
                                 : entry.toolArgs;
-                        sb.append("<br><code>").append(escapeHtml(args)).append("</code>");
+                        sb.append("<code>").append(escapeHtml(args)).append("</code>");
+                        sb.append("<br>");
                     }
                     if (entry.toolResult != null) {
                         String result = entry.toolResult.length() > 300
                                 ? entry.toolResult.substring(0, 300) + "..."
                                 : entry.toolResult;
-                        sb.append("<br>").append(escapeHtml(result));
+                        sb.append(escapeHtml(result));
                     } else {
-                        sb.append("<br><i>executing...</i>");
+                        sb.append("<i>\u6267\u884c\u4e2d...</i>");
                     }
-                    sb.append("</div>");
+                    sb.append("</div></div>");
                     break;
                 case THINKING:
-                    sb.append("<div class=\"thinking\"><i>thinking...</i></div>");
+                    sb.append("<div class=\"thinking\"><i>\u601d\u8003\u4e2d...</i></div>");
                     break;
                 case ERROR:
-                    sb.append("<div class=\"error-msg\">").append(escapeHtml(entry.content)).append("</div>");
+                    sb.append("<div class=\"msg error-msg\">");
+                    sb.append("<div class=\"sender error-label\">\u9519\u8bef</div>");
+                    sb.append("<div class=\"msg-body\">");
+                    sb.append(escapeHtml(entry.content));
+                    sb.append("</div></div>");
                     break;
             }
         }
@@ -596,76 +599,62 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private String buildChatCss() {
-        String userBg = colorToHex(USER_BUBBLE_BG);
-        String assistantBg = colorToHex(ASSISTANT_BUBBLE_BG);
-        String toolBg = colorToHex(TOOL_BUBBLE_BG);
-        String errorBg = colorToHex(ERROR_BUBBLE_BG);
         String chatBg = colorToHex(CHAT_BG);
         String textCol = colorToHex(TEXT_COLOR);
-        String borderCol = colorToHex(BORDER_COLOR);
-        String toolTextCol = colorToHex(TOOL_TEXT_COLOR);
-        String errorTextCol = colorToHex(ERROR_TEXT_COLOR);
-        String userTextCol = colorToHex(USER_TEXT_COLOR);
-        String userBorderCol = colorToHex(USER_BUBBLE_BORDER);
-        String assistantBorderCol = colorToHex(ASSISTANT_BUBBLE_BORDER);
-        String toolBorderCol = colorToHex(TOOL_BUBBLE_BORDER);
-        String errorBorderCol = colorToHex(ERROR_BUBBLE_BORDER);
+        String secondaryCol = colorToHex(SECONDARY_TEXT);
+        String dividerCol = colorToHex(DIVIDER_COLOR);
+        String userCol = colorToHex(USER_MSG_BORDER);
+        String assistantCol = colorToHex(ASSISTANT_MSG_BORDER);
+        String toolCol = colorToHex(TOOL_MSG_BORDER);
+        String errorCol = colorToHex(ERROR_MSG_BORDER);
+        String codeBg = colorToHex(new JBColor(new Color(0xF5, 0xF5, 0xF5), new Color(0x3C, 0x3C, 0x3C)));
+        String codeBorder = colorToHex(new JBColor(new Color(0xE0, 0xE0, 0xE0), new Color(0x4A, 0x4A, 0x4A)));
 
-        String bdr = "1px solid ";
+        return "body { font-family: SansSerif; font-size: 14px; "
+                + "margin-top: 8px; margin-right: 14px; margin-bottom: 8px; margin-left: 14px; "
+                + "background-color: " + chatBg + "; color: " + textCol + "; "
+                + "line-height: 1.6; }"
 
-        return "body { font-family: SansSerif; font-size: 13px; "
-                + "margin-top: 12px; margin-right: 12px; margin-bottom: 12px; margin-left: 12px; "
-                + "background-color: " + chatBg + "; color: " + textCol + "; }"
+                + "hr { height: 1px; background-color: " + dividerCol + "; "
+                + "border-style: none; margin-top: 2px; margin-bottom: 2px; }"
 
-                + ".user-msg { "
-                + "margin-top: 10px; margin-bottom: 10px; margin-left: 60px; "
-                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
-                + "background-color: " + userBg + "; "
-                + "border: " + bdr + userBorderCol + "; "
-                + "color: " + userTextCol + "; }"
+                + ".msg { margin-top: 10px; margin-bottom: 10px; "
+                + "padding-top: 6px; padding-bottom: 6px; padding-left: 12px; padding-right: 8px; "
+                + "border-left: 4px solid " + textCol + "; }"
 
-                + ".assistant-msg { "
-                + "margin-top: 10px; margin-right: 60px; margin-bottom: 10px; "
-                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
-                + "background-color: " + assistantBg + "; "
-                + "border: " + bdr + assistantBorderCol + "; "
-                + "color: " + textCol + "; }"
+                + ".user-msg { border-left-color: " + userCol + "; }"
+                + ".assistant-msg { border-left-color: " + assistantCol + "; }"
+                + ".tool-msg { border-left-color: " + toolCol + "; }"
+                + ".error-msg { border-left-color: " + errorCol + "; }"
 
-                + ".tool-call { "
-                + "margin-top: 4px; margin-right: 60px; margin-bottom: 4px; margin-left: 20px; "
-                + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; "
-                + "background-color: " + toolBg + "; "
-                + "border: " + bdr + toolBorderCol + "; "
-                + "font-size: 12px; color: " + toolTextCol + "; }"
+                + ".sender { font-size: 12px; font-weight: bold; margin-bottom: 4px; }"
+                + ".user-label { color: " + userCol + "; }"
+                + ".assistant-label { color: " + assistantCol + "; }"
+                + ".tool-label { color: " + toolCol + "; }"
+                + ".error-label { color: " + errorCol + "; }"
 
-                + ".thinking { "
-                + "margin-top: 10px; margin-right: 60px; margin-bottom: 10px; "
-                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
-                + "color: " + textCol + "; }"
+                + ".msg-body { font-size: 14px; color: " + textCol + "; line-height: 1.6; }"
 
-                + ".error-msg { "
-                + "margin-top: 10px; margin-bottom: 10px; "
-                + "padding-top: 10px; padding-right: 14px; padding-bottom: 10px; padding-left: 14px; "
-                + "background-color: " + errorBg + "; "
-                + "border: " + bdr + errorBorderCol + "; "
-                + "color: " + errorTextCol + "; }"
+                + ".thinking { margin-top: 10px; margin-bottom: 10px; "
+                + "padding-left: 12px; color: " + secondaryCol + "; font-size: 13px; }"
 
-                + "pre { "
-                + "background-color: " + assistantBg + "; "
+                + "pre { background-color: " + codeBg + "; "
                 + "padding-top: 10px; padding-right: 10px; padding-bottom: 10px; padding-left: 10px; "
-                + "border: " + bdr + assistantBorderCol + "; "
+                + "border: 1px solid " + codeBorder + "; "
                 + "font-family: Monospaced; font-size: 12px; }"
 
-                + "code { font-family: Monospaced; font-size: 12px; }"
-                + "pre code { padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; }"
+                + "code { font-family: Monospaced; font-size: 12px; "
+                + "background-color: " + codeBg + "; "
+                + "padding-top: 2px; padding-right: 4px; padding-bottom: 2px; padding-left: 4px; }"
+                + "pre code { background-color: transparent; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; }"
 
-                + "a { color: #1E88E5; }"
+                + "a { color: " + userCol + "; }"
 
                 + "table { margin-top: 6px; margin-bottom: 6px; }"
-                + "th { border: " + bdr + borderCol + "; "
+                + "th { border: 1px solid " + codeBorder + "; "
                 + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; "
-                + "background-color: " + assistantBg + "; }"
-                + "td { border: " + bdr + borderCol + "; "
+                + "background-color: " + codeBg + "; }"
+                + "td { border: 1px solid " + codeBorder + "; "
                 + "padding-top: 6px; padding-right: 10px; padding-bottom: 6px; padding-left: 10px; }"
 
                 + "p { margin-top: 4px; margin-bottom: 4px; }"
