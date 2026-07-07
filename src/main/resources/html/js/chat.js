@@ -1,6 +1,6 @@
 /**
  * Chat UI Controller
- * Handles DOM manipulation, Java ↔ JS bridge, session management
+ * Handles DOM manipulation, Java <-> JS bridge, session management
  */
 (function () {
     'use strict';
@@ -15,6 +15,7 @@
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn;
+    var tabList, modelSelect, newSessionBtn, clearBtn;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -22,6 +23,10 @@
         welcomeScreen = document.getElementById('welcomeScreen');
         messageInput = document.getElementById('messageInput');
         sendBtn = document.getElementById('sendBtn');
+        tabList = document.getElementById('tabList');
+        modelSelect = document.getElementById('modelSelect');
+        newSessionBtn = document.getElementById('newSessionBtn');
+        clearBtn = document.getElementById('clearBtn');
 
         if (window.__TAIW_THEME__ === 'dark') {
             document.body.classList.add('dark');
@@ -37,6 +42,21 @@
         messageInput.addEventListener('input', autoResize);
 
         sendBtn.addEventListener('click', sendMessage);
+
+        newSessionBtn.addEventListener('click', function () {
+            createNewSession();
+        });
+
+        clearBtn.addEventListener('click', function () {
+            clearChat();
+        });
+
+        modelSelect.addEventListener('change', function () {
+            var idx = parseInt(modelSelect.value, 10);
+            if (!isNaN(idx)) {
+                callJava('selectModel', { index: idx });
+            }
+        });
 
         ready = true;
         flushQueue();
@@ -100,7 +120,7 @@
         }
     }
 
-    /* ===== Java → JS API ===== */
+    /* ===== Java -> JS API ===== */
 
     window.appendContent = function (content) {
         whenReady(function () {
@@ -162,8 +182,8 @@
                     if (!existing) {
                         var resDiv = document.createElement('div');
                         resDiv.className = 'tool-result';
-                        var display = result && result.length > 500 ? result.substring(0, 500) + '\n...' : (result || '');
-                        resDiv.textContent = display;
+                        var resDisplay = result && result.length > 500 ? result.substring(0, 500) + '\n...' : (result || '');
+                        resDiv.textContent = resDisplay;
                         card.appendChild(resDiv);
                     }
                     break;
@@ -197,9 +217,27 @@
         });
     };
 
-    window.updateSessionList = function (sessionsJson, activeId) {
+    window.updateSessionList = function (sessions, activeId) {
         whenReady(function () {
-            /* sessions tab bar lives in Swing; this is a no-op placeholder */
+            var sessionList;
+            if (typeof sessions === 'string') {
+                try { sessionList = JSON.parse(sessions); } catch (e) { return; }
+            } else {
+                sessionList = sessions;
+            }
+            renderSessionTabs(sessionList, activeId);
+        });
+    };
+
+    window.updateModelList = function (models, activeIndex) {
+        whenReady(function () {
+            var modelList;
+            if (typeof models === 'string') {
+                try { modelList = JSON.parse(models); } catch (e) { return; }
+            } else {
+                modelList = models;
+            }
+            renderModelSelect(modelList, activeIndex);
         });
     };
 
@@ -221,6 +259,61 @@
             scrollToBottom();
         });
     };
+
+    /* ===== Top Bar: Session Tabs ===== */
+
+    function renderSessionTabs(sessions, activeId) {
+        if (!tabList) return;
+        tabList.innerHTML = '';
+
+        for (var i = 0; i < sessions.length; i++) {
+            var s = sessions[i];
+            var isActive = s.id === activeId;
+            var tab = document.createElement('div');
+            tab.className = 'tab-item' + (isActive ? ' active' : '');
+            tab.setAttribute('data-id', s.id);
+
+            var titleSpan = document.createElement('span');
+            titleSpan.className = 'tab-title';
+            var title = s.title || '\u65b0\u4f1a\u8bdd';
+            titleSpan.textContent = title.length > 12 ? title.substring(0, 12) + '...' : title;
+            titleSpan.addEventListener('click', function (sid) {
+                return function () { switchSession(sid); };
+            }(s.id));
+            tab.appendChild(titleSpan);
+
+            var closeBtn = document.createElement('span');
+            closeBtn.className = 'tab-close';
+            closeBtn.innerHTML = '\u00d7';
+            closeBtn.title = '\u5173\u95ed\u4f1a\u8bdd';
+            closeBtn.addEventListener('click', function (sid, evt) {
+                return function (e) {
+                    e.stopPropagation();
+                    deleteSession(sid);
+                };
+            }(s.id));
+            tab.appendChild(closeBtn);
+
+            tabList.appendChild(tab);
+        }
+    }
+
+    /* ===== Top Bar: Model Selector ===== */
+
+    function renderModelSelect(models, activeIndex) {
+        if (!modelSelect) return;
+        modelSelect.innerHTML = '';
+
+        for (var i = 0; i < models.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = models[i].name;
+            if (i === activeIndex) {
+                opt.selected = true;
+            }
+            modelSelect.appendChild(opt);
+        }
+    }
 
     /* ===== DOM helpers ===== */
 

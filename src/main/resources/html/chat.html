@@ -8,6 +8,16 @@
 </head>
 <body>
     <div class="chat-container">
+        <div class="top-bar" id="topBar">
+            <div class="tab-scroll">
+                <div class="tab-list" id="tabList"></div>
+            </div>
+            <div class="top-actions">
+                <button class="top-btn" id="newSessionBtn" title="新建会话">+ 新建</button>
+                <button class="top-btn" id="clearBtn" title="清空当前会话">清空</button>
+                <select class="model-select" id="modelSelect" title="切换模型"></select>
+            </div>
+        </div>
         <div class="messages-area" id="messagesArea">
             <div class="welcome" id="welcomeScreen">
                 <div class="welcome-icon">&#x1f916;</div>
