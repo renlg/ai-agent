@@ -34,6 +34,8 @@ public class AgentService {
 
     private final SessionManager sessionManager;
     private final ApprovalManager approvalManager = new ApprovalManager();
+    private volatile boolean stopped = false;
+    private volatile LlmClient activeLlmClient = null;
 
     /**
      * 命令审批管理器
@@ -190,12 +192,16 @@ public class AgentService {
         // 添加用户消息到对话历史
         ctx.getConversation().addUserMessage(userMessage);
 
+        stopped = false;
+        activeLlmClient = ctx.getLlmClient();
+
         listener.onThinking();
 
         // 启动 Agent 循环
         executeAgentLoop(ctx, listener);
 
         // 消息处理完成后持久化
+        activeLlmClient = null;
         sessionManager.saveState();
     }
 
@@ -214,6 +220,24 @@ public class AgentService {
     }
 
     /**
+     * 停止当前正在进行的生成
+     */
+    public void stopGeneration() {
+        stopped = true;
+        LlmClient client = activeLlmClient;
+        if (client != null) {
+            client.cancel();
+        }
+    }
+
+    /**
+     * 检查是否已停止
+     */
+    public boolean isStopped() {
+        return stopped;
+    }
+
+    /**
      * Agent 核心循环（流式）
      * 使用 SSE 流式调用 LLM，实时推送内容片段到前端
      * 工具调用在流结束后统一处理，然后继续循环
@@ -229,6 +253,11 @@ public class AgentService {
         StringBuilder fullResponse = new StringBuilder();
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
+            if (stopped) {
+                LOG.info("Agent 循环被用户停止");
+                listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
+                return;
+            }
             LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代（流式）");
 
             final StringBuilder iterContent = new StringBuilder();
@@ -276,6 +305,13 @@ public class AgentService {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 listener.onError("Agent 循环被中断");
+                return;
+            }
+
+            // 用户点击停止：cancel 会触发 onFailure，但应视为正常结束
+            if (stopped) {
+                LOG.info("Agent 循环被用户停止");
+                listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                 return;
             }
 

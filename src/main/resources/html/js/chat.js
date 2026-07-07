@@ -41,7 +41,13 @@
 
         messageInput.addEventListener('input', autoResize);
 
-        sendBtn.addEventListener('click', sendMessage);
+        sendBtn.addEventListener('click', function () {
+            if (isProcessing) {
+                stopGeneration();
+            } else {
+                sendMessage();
+            }
+        });
 
         newSessionBtn.addEventListener('click', function () {
             createNewSession();
@@ -87,12 +93,28 @@
         messageInput.value = '';
         messageInput.style.height = 'auto';
         isProcessing = true;
-        sendBtn.disabled = true;
+        setButtonToStop();
 
         appendUserMessage(text);
         showThinking();
 
         callJava('sendMessage', { content: text });
+    }
+
+    function stopGeneration() {
+        callJava('stopGeneration', {});
+    }
+
+    function setButtonToStop() {
+        sendBtn.classList.add('stop-mode');
+        sendBtn.innerHTML = '&#x25A0;'; // ■ 停止符号
+        sendBtn.title = '\u505c\u6b62\u751f\u6210';
+    }
+
+    function setButtonToSend() {
+        sendBtn.classList.remove('stop-mode');
+        sendBtn.innerHTML = '&#x27A4;'; // ➤ 发送符号
+        sendBtn.title = '\u53d1\u9001 (Enter)';
     }
 
     function clearChat() {
@@ -307,6 +329,7 @@
         whenReady(function () {
             removeThinking();
             isProcessing = false;
+            setButtonToSend();
             sendBtn.disabled = false;
             
             // 流式完成后做一次完整 Markdown 渲染
@@ -330,6 +353,7 @@
             }
             createMessageEl('error', '❌ 错误').querySelector('.message-content').textContent = error;
             isProcessing = false;
+            setButtonToSend();
             sendBtn.disabled = false;
             currentAssistantEl = null;
             currentContentEl = null;
@@ -496,6 +520,7 @@
         currentContentEl = null;
         accumulatedContent = '';
         isProcessing = false;
+        setButtonToSend();
         sendBtn.disabled = false;
 
         // 清理进度条和运行按钮

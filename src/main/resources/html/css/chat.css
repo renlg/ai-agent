@@ -562,6 +562,25 @@ html, body {
     opacity: 0.6;
 }
 
+.send-btn.stop-mode {
+    background: #e53935;
+    cursor: pointer;
+    opacity: 1;
+}
+
+.send-btn.stop-mode:hover {
+    background: #c62828;
+    transform: scale(1.05);
+}
+
+.dark .send-btn.stop-mode {
+    background: #ef5350;
+}
+
+.dark .send-btn.stop-mode:hover {
+    background: #e53935;
+}
+
 /* ===== Command Progress & Run Button ===== */
 
 .command-progress {

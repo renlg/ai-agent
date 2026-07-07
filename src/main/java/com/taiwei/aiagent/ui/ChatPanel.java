@@ -227,6 +227,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     String toolCallId = data.get("toolCallId").getAsString();
                     onUserApproveCommand(toolCallId);
                     break;
+                case "stopGeneration":
+                    stopGeneration();
+                    break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
             }
@@ -440,6 +443,12 @@ public class ChatPanel extends JPanel implements Disposable {
             pushToJs("hideProgress", escapeJsString(toolCallId));
             agentService.getApprovalManager().setResult(toolCallId, "执行命令失败: " + e.getMessage());
         }
+    }
+
+    // ========== Stop Generation ==========
+
+    private void stopGeneration() {
+        agentService.stopGeneration();
     }
 
     // ========== Send Message ==========

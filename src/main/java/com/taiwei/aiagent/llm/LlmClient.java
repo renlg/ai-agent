@@ -40,4 +40,9 @@ public interface LlmClient {
      * 获取当前模型名称
      */
     String getModelName();
+
+    /**
+     * 取消正在进行的流式调用
+     */
+    void cancel();
 }

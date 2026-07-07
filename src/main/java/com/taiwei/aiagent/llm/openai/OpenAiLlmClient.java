@@ -31,6 +31,7 @@ public class OpenAiLlmClient implements LlmClient {
     private final String model;
     private final OkHttpClient httpClient;
     private final Gson gson;
+    private volatile EventSource currentEventSource;
 
     public OpenAiLlmClient(String baseUrl, String apiKey, String model) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
@@ -74,12 +75,17 @@ public class OpenAiLlmClient implements LlmClient {
 
         EventSource.Factory factory = EventSources.createFactory(httpClient);
 
-        factory.newEventSource(request, new EventSourceListener() {
+        EventSource eventSource = factory.newEventSource(request, new EventSourceListener() {
 
             // 用于累积流式工具调用
             private final Map<Integer, StringBuilder> toolCallIdMap = new ConcurrentHashMap<>();
             private final Map<Integer, StringBuilder> toolCallNameMap = new ConcurrentHashMap<>();
             private final Map<Integer, StringBuilder> toolCallArgsMap = new ConcurrentHashMap<>();
+
+            @Override
+            public void onOpen(EventSource eventSource, Response response) {
+                currentEventSource = eventSource;
+            }
 
             @Override
             public void onEvent(EventSource eventSource, String id, String type, String data) {
@@ -151,6 +157,7 @@ public class OpenAiLlmClient implements LlmClient {
                 }
             }
         });
+        currentEventSource = eventSource;
     }
 
     @Override
@@ -161,6 +168,15 @@ public class OpenAiLlmClient implements LlmClient {
     @Override
     public String getModelName() {
         return model;
+    }
+
+    @Override
+    public void cancel() {
+        EventSource es = currentEventSource;
+        if (es != null) {
+            es.cancel();
+            currentEventSource = null;
+        }
     }
 
     // ========== 内部方法 ==========
