@@ -41,6 +41,7 @@ public class ChatPanel extends JPanel implements Disposable {
     private boolean isProcessing = false;
     private final List<ChatEntry> chatEntries = new ArrayList<>();
     private final Runnable settingsChangeListener = this::onSettingsChanged;
+    private volatile int currentGeneration = 0;
 
     public ChatPanel(Project project) {
         this.project = project;
@@ -321,6 +322,7 @@ public class ChatPanel extends JPanel implements Disposable {
         String sessionId = agentService.getActiveSessionId();
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            final int generation = ++currentGeneration;
             agentService.sendMessage(sessionId, text, new AgentService.AgentListener() {
                 final StringBuilder accumulatedContent = new StringBuilder();
 
@@ -330,6 +332,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onContent(String content) {
+                    if (generation != currentGeneration) return;
                     accumulatedContent.append(content);
 
                     boolean replaced = false;
@@ -354,12 +357,14 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onToolCallStart(String toolName, String arguments) {
+                    if (generation != currentGeneration) return;
                     chatEntries.add(ChatEntry.toolCall(toolName, arguments));
                     pushToolCallStart(toolName, arguments);
                 }
 
                 @Override
                 public void onToolCallEnd(String toolName, String result) {
+                    if (generation != currentGeneration) return;
                     for (int i = chatEntries.size() - 1; i >= 0; i--) {
                         ChatEntry entry = chatEntries.get(i);
                         if (entry.type == ChatEntry.Type.TOOL_CALL
@@ -374,6 +379,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onComplete(String fullResponse) {
+                    if (generation != currentGeneration) return;
                     chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
 
                     boolean hasAssistant = false;
@@ -396,6 +402,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onError(String error) {
+                    if (generation != currentGeneration) return;
                     chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
                     chatEntries.add(ChatEntry.error(error));
 
@@ -412,6 +419,7 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Session Management ==========
 
     private void createNewSession() {
+        currentGeneration++;
         agentService.createSession();
         chatEntries.clear();
         pushSessionListToJs();
@@ -419,6 +427,7 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void switchToSession(String sessionId) {
+        currentGeneration++;
         agentService.switchSession(sessionId);
         chatEntries.clear();
         pushHistoryToJs();
@@ -426,6 +435,7 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void deleteSession(String sessionId) {
+        currentGeneration++;
         agentService.deleteSession(sessionId);
         chatEntries.clear();
         pushHistoryToJs();
