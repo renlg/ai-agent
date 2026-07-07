@@ -144,9 +144,7 @@
     window.showToolCall = function (name, args) {
         whenReady(function () {
             removeThinking();
-            currentAssistantEl = null;
-            currentContentEl = null;
-            accumulatedContent = '';
+            // 不要重置 assistant 引用，保持当前 assistant 消息框继续渲染
 
             var el = document.createElement('div');
             el.className = 'message tool';
@@ -207,9 +205,7 @@
             }
 
             removeThinking();
-            currentAssistantEl = null;
-            currentContentEl = null;
-            accumulatedContent = '';
+            // 不要重置 assistant 引用，保持当前 assistant 消息框继续渲染
 
             var el = document.createElement('div');
             el.className = 'message tool command-progress';
@@ -237,9 +233,7 @@
             if (existing) return;
 
             removeThinking();
-            currentAssistantEl = null;
-            currentContentEl = null;
-            accumulatedContent = '';
+            // 不要重置 assistant 引用，保持当前 assistant 消息框继续渲染
 
             var el = document.createElement('div');
             el.className = 'message tool command-run-container';
