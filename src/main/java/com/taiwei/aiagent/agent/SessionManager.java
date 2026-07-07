@@ -1,6 +1,9 @@
 package com.taiwei.aiagent.agent;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.taiwei.aiagent.model.ChatMessage;
+import com.taiwei.aiagent.model.Conversation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,15 +14,74 @@ import java.util.UUID;
 /**
  * 多会话管理器
  * 管理多个 AgentContext 实例，每个实例对应一个独立的会话
+ * 支持磁盘持久化：最多保存 5 个最新会话
  */
 public class SessionManager {
 
+    private static final Logger LOG = Logger.getInstance(SessionManager.class);
+
     private final Project project;
     private final LinkedHashMap<String, AgentContext> sessions = new LinkedHashMap<>();
+    private final SessionStore sessionStore;
     private String activeSessionId;
 
     public SessionManager(Project project) {
         this.project = project;
+        String basePath = project.getBasePath() != null ? project.getBasePath() : System.getProperty("user.home");
+        this.sessionStore = new SessionStore(basePath);
+    }
+
+    /**
+     * 从磁盘加载历史会话（最多 5 个）
+     * 应在初始化时调用一次
+     */
+    public void loadFromDisk() {
+        List<SessionStore.SessionData> savedSessions = sessionStore.load();
+        if (savedSessions.isEmpty()) {
+            LOG.info("没有可恢复的历史会话");
+            return;
+        }
+
+        for (SessionStore.SessionData data : savedSessions) {
+            List<ChatMessage> messages = convertToChatMessages(data.messages);
+            Conversation conversation = new Conversation(
+                    data.id, data.title, data.createdAt, null, messages);
+            AgentContext context = new AgentContext(project, conversation);
+            sessions.put(data.id, context);
+        }
+
+        // 默认激活最后一个（最新的）会话
+        if (!sessions.isEmpty()) {
+            String lastKey = null;
+            for (String key : sessions.keySet()) {
+                lastKey = key;
+            }
+            activeSessionId = lastKey;
+        }
+
+        LOG.info("从磁盘恢复了 " + sessions.size() + " 个历史会话");
+    }
+
+    /**
+     * 将当前所有会话状态保存到磁盘
+     */
+    public void saveState() {
+        List<SessionStore.SessionData> sessionDataList = new ArrayList<>();
+        for (Map.Entry<String, AgentContext> entry : sessions.entrySet()) {
+            String id = entry.getKey();
+            AgentContext ctx = entry.getValue();
+            Conversation conv = ctx.getConversation();
+
+            List<SessionStore.MessageData> messageDataList = convertToMessageDataList(conv.getNonSystemMessages());
+
+            sessionDataList.add(new SessionStore.SessionData(
+                    id,
+                    conv.getTitle(),
+                    conv.getCreatedAt(),
+                    messageDataList
+            ));
+        }
+        sessionStore.save(sessionDataList);
     }
 
     /**
@@ -32,6 +94,7 @@ public class SessionManager {
         AgentContext context = new AgentContext(project);
         sessions.put(sessionId, context);
         activeSessionId = sessionId;
+        saveState();
         return sessionId;
     }
 
@@ -120,7 +183,74 @@ public class SessionManager {
                 activeSessionId = lastKey;
             }
         }
+        saveState();
     }
+
+    // ========== 消息格式转换 ==========
+
+    private List<SessionStore.MessageData> convertToMessageDataList(List<ChatMessage> messages) {
+        List<SessionStore.MessageData> result = new ArrayList<>();
+        for (ChatMessage msg : messages) {
+            String toolName = null;
+            String toolArgs = null;
+            String toolResult = null;
+            List<SessionStore.ToolCallData> toolCallsData = null;
+
+            if ("assistant".equals(msg.getRole()) && msg.getToolCalls() != null && msg.getToolCalls().length > 0) {
+                toolName = msg.getToolCalls()[0].getFunction().getName();
+                toolArgs = msg.getToolCalls()[0].getFunction().getArguments();
+                toolCallsData = new ArrayList<>();
+                for (ChatMessage.ToolCall tc : msg.getToolCalls()) {
+                    SessionStore.FunctionCallData funcData = null;
+                    if (tc.getFunction() != null) {
+                        funcData = new SessionStore.FunctionCallData(
+                                tc.getFunction().getName(),
+                                tc.getFunction().getArguments()
+                        );
+                    }
+                    toolCallsData.add(new SessionStore.ToolCallData(tc.getId(), tc.getType(), funcData));
+                }
+            } else if ("tool".equals(msg.getRole())) {
+                toolResult = msg.getContent();
+            }
+
+            result.add(new SessionStore.MessageData(
+                    msg.getRole(), msg.getContent(), toolName, toolArgs, toolResult,
+                    msg.getToolCallId(), toolCallsData));
+        }
+        return result;
+    }
+
+    private List<ChatMessage> convertToChatMessages(List<SessionStore.MessageData> messageDataList) {
+        List<ChatMessage> result = new ArrayList<>();
+        if (messageDataList == null) return result;
+
+        for (SessionStore.MessageData md : messageDataList) {
+            ChatMessage msg = new ChatMessage(md.role, md.content);
+            msg.setToolCallId(md.toolCallId);
+            if (md.toolCalls != null) {
+                ChatMessage.ToolCall[] toolCalls = new ChatMessage.ToolCall[md.toolCalls.size()];
+                for (int i = 0; i < md.toolCalls.size(); i++) {
+                    SessionStore.ToolCallData tcd = md.toolCalls.get(i);
+                    ChatMessage.ToolCall tc = new ChatMessage.ToolCall();
+                    tc.setId(tcd.id);
+                    tc.setType(tcd.type);
+                    if (tcd.function != null) {
+                        ChatMessage.FunctionCall fc = new ChatMessage.FunctionCall();
+                        fc.setName(tcd.function.name);
+                        fc.setArguments(tcd.function.arguments);
+                        tc.setFunction(fc);
+                    }
+                    toolCalls[i] = tc;
+                }
+                msg.setToolCalls(toolCalls);
+            }
+            result.add(msg);
+        }
+        return result;
+    }
+
+    // ========== 会话摘要 ==========
 
     /**
      * 会话摘要信息

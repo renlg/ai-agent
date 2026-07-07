@@ -46,6 +46,7 @@ public class AgentService {
 
     public AgentService(Project project) {
         this.sessionManager = new SessionManager(project);
+        this.sessionManager.loadFromDisk();
     }
 
     /**
@@ -129,6 +130,9 @@ public class AgentService {
 
         // 启动 Agent 循环
         executeAgentLoop(ctx, listener);
+
+        // 消息处理完成后持久化
+        sessionManager.saveState();
     }
 
     /**

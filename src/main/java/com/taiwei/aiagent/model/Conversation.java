@@ -33,7 +33,7 @@ public class Conversation {
     /**
      * 会话创建时间戳
      */
-    private final long createdAt;
+    private long createdAt;
 
     public Conversation() {
         this.id = UUID.randomUUID().toString();
@@ -46,6 +46,28 @@ public class Conversation {
         this.systemPrompt = systemPrompt;
         if (systemPrompt != null && !systemPrompt.isEmpty()) {
             messages.add(ChatMessage.system(systemPrompt));
+        }
+    }
+
+    /**
+     * 从持久化数据恢复会话
+     * 使用已保存的 id、title、createdAt，并恢复非系统消息
+     */
+    public Conversation(String id, String title, long createdAt, String systemPrompt, List<ChatMessage> savedMessages) {
+        this.id = id;
+        this.title = title;
+        this.createdAt = createdAt;
+        this.systemPrompt = systemPrompt;
+        this.messages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+            messages.add(ChatMessage.system(systemPrompt));
+        }
+        if (savedMessages != null) {
+            for (ChatMessage msg : savedMessages) {
+                if (!"system".equals(msg.getRole())) {
+                    messages.add(msg);
+                }
+            }
         }
     }
 
@@ -87,6 +109,19 @@ public class Conversation {
      */
     public List<ChatMessage> getMessages() {
         return new ArrayList<>(messages);
+    }
+
+    /**
+     * 获取非系统消息列表（用于持久化）
+     */
+    public List<ChatMessage> getNonSystemMessages() {
+        List<ChatMessage> result = new ArrayList<>();
+        for (ChatMessage msg : messages) {
+            if (!"system".equals(msg.getRole())) {
+                result.add(msg);
+            }
+        }
+        return result;
     }
 
     /**

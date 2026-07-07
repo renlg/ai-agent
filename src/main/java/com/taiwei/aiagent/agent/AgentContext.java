@@ -46,6 +46,17 @@ public class AgentContext {
     }
 
     /**
+     * 从已恢复的 Conversation 创建上下文（用于从磁盘恢复会话）
+     */
+    public AgentContext(Project project, Conversation conversation) {
+        this.project = project;
+        this.promptManager = new PromptManager(project);
+        this.conversation = conversation;
+        this.toolRegistry = new ToolRegistry();
+        registerDefaultTools();
+    }
+
+    /**
      * 根据当前设置创建 LLM 客户端
      */
     private LlmClient createLlmClient() {
