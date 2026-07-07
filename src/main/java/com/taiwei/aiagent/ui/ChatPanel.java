@@ -257,21 +257,11 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void pushToolCallStart(String name, String args) {
-        // run_command 工具：不显示 args 和 result，改为显示进度条或运行按钮
-        if ("run_command".equals(name)) {
-            return;
-        }
-        pushToJs("showToolCall",
-                escapeJsString(name) + "," + escapeJsString(args != null ? args : ""));
+        return;
     }
 
     private void pushToolCallEnd(String name, String result) {
-        // run_command 工具：不显示 args 和 result
-        if ("run_command".equals(name)) {
-            return;
-        }
-        pushToJs("updateToolCall",
-                escapeJsString(name) + "," + escapeJsString(result != null ? result : ""));
+        return;
     }
 
     private void pushComplete() {
@@ -506,7 +496,8 @@ public class ChatPanel extends JPanel implements Disposable {
                     sessionState.chatEntries.add(ChatEntry.toolCall(toolName, arguments));
 
                     if (sessionId.equals(agentService.getActiveSessionId())) {
-                        pushToolCallStart(toolName, arguments);
+                        pushToJs("showProgress",
+                                escapeJsString(toolName) + "," + escapeJsString("执行 " + toolName + "..."));
                     }
                 }
 
@@ -523,7 +514,7 @@ public class ChatPanel extends JPanel implements Disposable {
                     }
 
                     if (sessionId.equals(agentService.getActiveSessionId())) {
-                        pushToolCallEnd(toolName, result);
+                        pushToJs("hideProgress", escapeJsString(toolName));
                     }
                 }
 
