@@ -21,9 +21,24 @@ import java.util.List;
 public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings.State> {
 
     private State state = new State();
+    private final List<Runnable> changeListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public static AiAgentSettings getInstance() {
         return ApplicationManager.getApplication().getService(AiAgentSettings.class);
+    }
+
+    public void addChangeListener(Runnable listener) {
+        changeListeners.add(listener);
+    }
+
+    public void removeChangeListener(Runnable listener) {
+        changeListeners.remove(listener);
+    }
+
+    public void fireSettingsChanged() {
+        for (Runnable listener : changeListeners) {
+            listener.run();
+        }
     }
 
     @Override

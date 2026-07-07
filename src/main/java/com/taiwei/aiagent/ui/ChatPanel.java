@@ -40,10 +40,12 @@ public class ChatPanel extends JPanel implements Disposable {
 
     private boolean isProcessing = false;
     private final List<ChatEntry> chatEntries = new ArrayList<>();
+    private final Runnable settingsChangeListener = this::onSettingsChanged;
 
     public ChatPanel(Project project) {
         this.project = project;
         this.agentService = new AgentService(project);
+        AiAgentSettings.getInstance().addChangeListener(settingsChangeListener);
         initUI();
     }
 
@@ -436,8 +438,13 @@ public class ChatPanel extends JPanel implements Disposable {
         pushToJs("clearMessages", "");
     }
 
+    private void onSettingsChanged() {
+        SwingUtilities.invokeLater(this::pushModelListToJs);
+    }
+
     @Override
     public void dispose() {
+        AiAgentSettings.getInstance().removeChangeListener(settingsChangeListener);
         if (jsQuery != null) {
             Disposer.dispose(jsQuery);
         }

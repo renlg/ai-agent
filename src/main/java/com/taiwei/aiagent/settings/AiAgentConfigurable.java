@@ -244,6 +244,8 @@ public class AiAgentConfigurable implements Configurable {
         if (currentActiveIndex >= editingConfigs.size()) {
             settings.setActiveModelIndex(0);
         }
+
+        settings.fireSettingsChanged();
     }
 
     @Override
