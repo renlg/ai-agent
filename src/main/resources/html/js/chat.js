@@ -126,18 +126,23 @@
         whenReady(function () {
             accumulatedContent += content;
 
-            if (currentAssistantEl) {
-                renderAssistantContent(accumulatedContent);
+            if (currentAssistantEl && currentContentEl) {
+                // 纯文本增量追加，不触发 Markdown 渲染
+                currentContentEl.textContent += content;
+                scrollToBottom();
                 return;
             }
 
+            // 首次：创建 assistant 消息框
             removeThinking();
             removeWelcome();
 
             var msg = createMessageEl('assistant', 'AI');
             currentAssistantEl = msg;
             currentContentEl = msg.querySelector('.message-content');
-            renderAssistantContent(accumulatedContent);
+            // 初始内容用 textContent 设置
+            currentContentEl.textContent = accumulatedContent;
+            scrollToBottom();
         });
     };
 
@@ -298,6 +303,13 @@
             removeThinking();
             isProcessing = false;
             sendBtn.disabled = false;
+            
+            // 流式完成后做一次完整 Markdown 渲染
+            if (currentContentEl && accumulatedContent.length > 0) {
+                currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+                scrollToBottom();
+            }
+            
             currentAssistantEl = null;
             currentContentEl = null;
             accumulatedContent = '';
@@ -307,7 +319,11 @@
     window.onError = function (error) {
         whenReady(function () {
             removeThinking();
-            createMessageEl('error', '&#x274c; &#x9519;&#x8bef;').querySelector('.message-content').textContent = error;
+            // 先做最终 Markdown 渲染
+            if (currentContentEl && accumulatedContent.length > 0) {
+                currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
+            }
+            createMessageEl('error', '❌ 错误').querySelector('.message-content').textContent = error;
             isProcessing = false;
             sendBtn.disabled = false;
             currentAssistantEl = null;
