@@ -423,21 +423,21 @@ public class ChatPanel extends JPanel implements Disposable {
                 }
 
                 @Override
-                public void onToolCallStart(String toolName, String arguments) {
-                    sessionState.chatEntries.add(ChatEntry.toolCall(toolName, arguments));
+                public void onToolCallStart(String toolCallId, String toolName, String arguments) {
+                    sessionState.chatEntries.add(ChatEntry.toolCall(toolCallId, toolName, arguments));
 
                     if (sessionId.equals(agentService.getActiveSessionId())) {
                         pushToJs("showProgress",
-                                escapeJsString(toolName) + "," + escapeJsString("执行 " + toolName + "..."));
+                                escapeJsString(toolCallId) + "," + escapeJsString("执行 " + toolName + "..."));
                     }
                 }
 
                 @Override
-                public void onToolCallEnd(String toolName, String result) {
+                public void onToolCallEnd(String toolCallId, String toolName, String result) {
                     for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
                         ChatEntry entry = sessionState.chatEntries.get(i);
                         if (entry.type == ChatEntry.Type.TOOL_CALL
-                                && toolName.equals(entry.toolName)
+                                && toolCallId.equals(entry.toolCallId)
                                 && entry.toolResult == null) {
                             entry.toolResult = result;
                             break;
@@ -445,7 +445,7 @@ public class ChatPanel extends JPanel implements Disposable {
                     }
 
                     pushToJs("showProgress",
-                            escapeJsString(toolName) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
+                            escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
                     // 延迟隐藏进度条，让用户看到完成状态
                     ApplicationManager.getApplication().invokeLater(() -> {
                         try {
@@ -453,13 +453,13 @@ public class ChatPanel extends JPanel implements Disposable {
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
-                        pushToJs("hideProgress", escapeJsString(toolName));
+                        pushToJs("hideProgress", escapeJsString(toolCallId));
                     });
                 }
 
                 @Override
                 public void onCommandApproval(String toolCallId, String command, boolean isDangerous) {
-                    sessionState.chatEntries.add(ChatEntry.toolCall("run_command", command));
+                    sessionState.chatEntries.add(ChatEntry.toolCall(toolCallId, "run_command", command));
 
                     if (!sessionId.equals(agentService.getActiveSessionId())) return;
 
@@ -502,7 +502,7 @@ public class ChatPanel extends JPanel implements Disposable {
                     for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
                         ChatEntry entry = sessionState.chatEntries.get(i);
                         if (entry.type == ChatEntry.Type.TOOL_CALL
-                                && "run_command".equals(entry.toolName)
+                                && toolCallId.equals(entry.toolCallId)
                                 && entry.toolResult == null) {
                             entry.toolResult = result;
                             break;
@@ -543,8 +543,8 @@ public class ChatPanel extends JPanel implements Disposable {
                     // 清理待审批命令
                     pendingCommands.clear();
 
-                    pushToJs("hideProgress", escapeJsString(sessionId));
-                    pushToJs("hideRunButton", escapeJsString(sessionId));
+                    pushToJs("clearAllProgress", "");
+                    pushToJs("clearAllRunButtons", "");
                     pushError(error);
                 }
             });
@@ -615,6 +615,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
         final Type type;
         String content;
+        String toolCallId;
         String toolName;
         String toolArgs;
         String toolResult;
@@ -636,8 +637,9 @@ public class ChatPanel extends JPanel implements Disposable {
             return new ChatEntry(Type.THINKING, null);
         }
 
-        static ChatEntry toolCall(String name, String args) {
+        static ChatEntry toolCall(String toolCallId, String name, String args) {
             ChatEntry entry = new ChatEntry(Type.TOOL_CALL, null);
+            entry.toolCallId = toolCallId;
             entry.toolName = name;
             entry.toolArgs = args;
             return entry;

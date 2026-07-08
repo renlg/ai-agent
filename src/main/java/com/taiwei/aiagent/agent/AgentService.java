@@ -94,10 +94,10 @@ public class AgentService {
         void onContent(String content);
 
         /** 开始调用工具 */
-        void onToolCallStart(String toolName, String arguments);
+        void onToolCallStart(String toolCallId, String toolName, String arguments);
 
         /** 工具调用完成 */
-        void onToolCallEnd(String toolName, String result);
+        void onToolCallEnd(String toolCallId, String toolName, String result);
 
         /** 命令需要审批（危险命令） */
         default void onCommandApproval(String toolCallId, String command, boolean isDangerous) {}
@@ -348,8 +348,9 @@ public class AgentService {
 
                     String toolName = toolCall.getFunction().getName();
                     String args = toolCall.getFunction().getArguments();
+                    String toolCallId = toolCall.getId();
 
-                    listener.onToolCallStart(toolName, args);
+                    listener.onToolCallStart(toolCallId, toolName, args);
                     LOG.info("调用工具: " + toolName + " 参数: " + args);
 
                     if ("run_command".equals(toolName)) {
@@ -365,7 +366,7 @@ public class AgentService {
                             result = "错误: 未找到工具 '" + toolName + "'";
                         }
 
-                        listener.onToolCallEnd(toolName, result);
+                        listener.onToolCallEnd(toolCallId, toolName, result);
                         LOG.info("工具 " + toolName + " 执行完成");
 
                         context.getConversation().addToolResult(result, toolCall.getId());
@@ -427,7 +428,7 @@ public class AgentService {
                         if (stopped) {
                             approvalManager.reject(toolCallId);
                             String err = "命令执行已被用户停止";
-                            listener.onToolCallEnd(toolName, err);
+                            listener.onToolCallEnd(toolCallId, toolName, err);
                             listener.onCommandResult(toolCallId, err);
                             context.getConversation().addToolResult(err, toolCallId);
                             return;
@@ -439,14 +440,14 @@ public class AgentService {
                     if (!released) {
                         approvalManager.reject(toolCallId);
                         String err = "命令审批超时，已取消执行";
-                        listener.onToolCallEnd(toolName, err);
+                        listener.onToolCallEnd(toolCallId, toolName, err);
                         listener.onCommandResult(toolCallId, err);
                         context.getConversation().addToolResult(err, toolCallId);
                         return;
                     }
                     if (!ca.approved) {
                         String err = "命令执行已被取消";
-                        listener.onToolCallEnd(toolName, err);
+                        listener.onToolCallEnd(toolCallId, toolName, err);
                         listener.onCommandResult(toolCallId, err);
                         context.getConversation().addToolResult(err, toolCallId);
                         return;
@@ -455,7 +456,7 @@ public class AgentService {
                     Thread.currentThread().interrupt();
                     approvalManager.reject(toolCallId);
                     String err = "等待命令审批被中断";
-                    listener.onToolCallEnd(toolName, err);
+                    listener.onToolCallEnd(toolCallId, toolName, err);
                     listener.onCommandResult(toolCallId, err);
                     context.getConversation().addToolResult(err, toolCallId);
                     return;
@@ -465,7 +466,7 @@ public class AgentService {
             // 执行前再次检查停止标志
             if (stopped) {
                 String err = "命令执行已被用户停止";
-                listener.onToolCallEnd(toolName, err);
+                listener.onToolCallEnd(toolCallId, toolName, err);
                 listener.onCommandResult(toolCallId, err);
                 context.getConversation().addToolResult(err, toolCallId);
                 return;
@@ -479,7 +480,7 @@ public class AgentService {
                 String result = runCommandTool.execute(args);
                 listener.onCommandProgress(toolCallId, "终端执行完成");
                 listener.onCommandResult(toolCallId, result);
-                listener.onToolCallEnd(toolName, result);
+                listener.onToolCallEnd(toolCallId, toolName, result);
                 context.getConversation().addToolResult(result, toolCallId);
             } finally {
                 activeRunCommandTool = null;
@@ -488,7 +489,7 @@ public class AgentService {
         } catch (Exception e) {
             LOG.error("处理 run_command 失败", e);
             String err = "处理命令失败: " + e.getMessage();
-            listener.onToolCallEnd(toolName, err);
+            listener.onToolCallEnd(toolCallId, toolName, err);
             listener.onCommandResult(toolCallId, err);
             context.getConversation().addToolResult(err, toolCallId);
         }

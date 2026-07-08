@@ -279,6 +279,13 @@
         });
     };
 
+    window.clearAllProgress = function () {
+        whenReady(function () {
+            var els = document.querySelectorAll('[id^="progress-"]');
+            for (var i = 0; i < els.length; i++) { els[i].remove(); }
+        });
+    };
+
     /* ===== 危险命令运行按钮 ===== */
     window.showRunButton = function (toolCallId, command) {
         whenReady(function () {
@@ -327,6 +334,13 @@
                     '<div class="message-label">&#x1f527; &#x5de5;&#x5177; &middot; <span class="tool-name">run_command</span></div>' +
                     '<div class="command-status-text">&#x5df2;&#x6267;&#x884c;</div>';
             }
+        });
+    };
+
+    window.clearAllRunButtons = function () {
+        whenReady(function () {
+            var els = document.querySelectorAll('[id^="runbtn-"]');
+            for (var i = 0; i < els.length; i++) { els[i].remove(); }
         });
     };
 
