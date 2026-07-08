@@ -485,18 +485,25 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onCommandResult(String toolCallId, String result) {
-                    pushToJs("showProgress",
-                            escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
-                    pushToJs("hideRunButton", escapeJsString(toolCallId));
-                    // 延迟隐藏进度条，让用户看到完成状态
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        try {
-                            Thread.sleep(300); // 短暂显示完成状态
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                        pushToJs("hideProgress", escapeJsString(toolCallId));
-                    });
+                    PendingCommand pc = pendingCommands.remove(toolCallId);
+                    boolean isDangerous = pc != null;
+
+                    if (isDangerous) {
+                        pushToJs("hideRunButton", escapeJsString(toolCallId));
+                    } else {
+                        pushToJs("showProgress",
+                                escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
+                        pushToJs("hideRunButton", escapeJsString(toolCallId));
+                        // 延迟隐藏进度条，让用户看到完成状态
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            try {
+                                Thread.sleep(300); // 短暂显示完成状态
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                            pushToJs("hideProgress", escapeJsString(toolCallId));
+                        });
+                    }
 
                     // 更新 ChatEntry
                     for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
