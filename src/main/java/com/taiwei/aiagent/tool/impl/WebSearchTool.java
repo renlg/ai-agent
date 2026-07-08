@@ -45,6 +45,10 @@ public class WebSearchTool implements Tool {
                     "time_range": {
                       "type": "string",
                       "description": "时间范围过滤，可选值：OneDay（一天内）、OneWeek（一周内）、OneMonth（一月内）、OneYear（一年内）。不传则不过滤"
+                    },
+                    "categories": {
+                      "type": "string",
+                      "description": "查询分类（可选，多个用逗号分隔。支持：finance金融、law法律、medical医疗、internet互联网、tax税务、news_province新闻省级、news_center新闻中央）"
                     }
                   },
                   "required": ["query"]
@@ -65,6 +69,7 @@ public class WebSearchTool implements Tool {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String query = args.get("query").getAsString();
             String timeRange = args.has("time_range") ? args.get("time_range").getAsString() : null;
+            String categories = args.has("categories") ? args.get("categories").getAsString() : null;
 
             if (query == null || query.trim().isEmpty()) {
                 return "错误: 搜索关键词不能为空";
@@ -80,8 +85,12 @@ public class WebSearchTool implements Tool {
             // 4. 构建请求
             UnifiedSearchInput input = new UnifiedSearchInput();
             input.setQuery(query);
+            input.setEngineType("LiteAdvanced");
             if (timeRange != null && !timeRange.trim().isEmpty()) {
                 input.setTimeRange(timeRange);
+            }
+            if (categories != null && !categories.trim().isEmpty()) {
+                input.setCategory(categories);
             }
             UnifiedSearchRequest request = new UnifiedSearchRequest();
             request.setBody(input);
