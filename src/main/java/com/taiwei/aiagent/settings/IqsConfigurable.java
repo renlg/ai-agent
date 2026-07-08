@@ -16,6 +16,8 @@ import java.awt.*;
 public class IqsConfigurable implements Configurable {
 
     private JPanel mainPanel;
+    private JComboBox<String> searchEngineCombo;
+    private JPanel iqsConfigPanel;
     private JPasswordField accessKeyIdField;
     private JPasswordField accessKeySecretField;
 
@@ -32,15 +34,31 @@ public class IqsConfigurable implements Configurable {
         mainPanel.setBorder(JBUI.Borders.empty(12));
 
         // 标题
-        JLabel titleLabel = new JLabel("阿里云 IQS 网络搜索配置");
+        JLabel titleLabel = new JLabel("搜索引擎配置");
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 14f));
         titleLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         mainPanel.add(titleLabel);
         mainPanel.add(Box.createVerticalStrut(8));
 
-        // 提示信息
+        // 搜索引擎选择
+        JPanel enginePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        enginePanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel engineLabel = new JLabel("搜索引擎: ");
+        enginePanel.add(engineLabel);
+
+        searchEngineCombo = new JComboBox<>(new String[]{"低成本默认（DuckDuckGo）", "阿里云 IQS"});
+        searchEngineCombo.addActionListener(e -> onEngineChanged());
+        enginePanel.add(searchEngineCombo);
+        mainPanel.add(enginePanel);
+        mainPanel.add(Box.createVerticalStrut(12));
+
+        // IQS 配置面板（仅在选择阿里云 IQS 时显示）
+        iqsConfigPanel = new JPanel();
+        iqsConfigPanel.setLayout(new BoxLayout(iqsConfigPanel, BoxLayout.Y_AXIS));
+        iqsConfigPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         JTextArea hintArea = new JTextArea(
-                "配置阿里云 AccessKey 后，Agent 可使用网络搜索工具获取实时信息。\n" +
+                "配置阿里云 AccessKey 后，Agent 可使用阿里云 IQS 网络搜索工具获取实时信息。\n" +
                 "请前往阿里云控制台（RAM 访问控制）创建 AccessKey，并开通 IQS 服务。\n" +
                 "需确保 AK/SK 具有 AliyunIQSFullAccess 权限。"
         );
@@ -52,16 +70,14 @@ public class IqsConfigurable implements Configurable {
         hintArea.setLineWrap(true);
         hintArea.setWrapStyleWord(true);
         hintArea.setAlignmentX(Component.LEFT_ALIGNMENT);
-        mainPanel.add(hintArea);
+        iqsConfigPanel.add(hintArea);
 
-        // 输入面板
         JPanel formPanel = new JPanel(new GridBagLayout());
         formPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = new Insets(4, 4, 4, 4);
 
-        // AccessKey ID
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.weightx = 0;
@@ -74,7 +90,6 @@ public class IqsConfigurable implements Configurable {
         accessKeyIdField = new JPasswordField(30);
         formPanel.add(accessKeyIdField, gbc);
 
-        // AccessKey Secret
         gbc.gridx = 0;
         gbc.gridy = 1;
         gbc.weightx = 0;
@@ -87,55 +102,83 @@ public class IqsConfigurable implements Configurable {
         accessKeySecretField = new JPasswordField(30);
         formPanel.add(accessKeySecretField, gbc);
 
-        mainPanel.add(formPanel);
+        iqsConfigPanel.add(formPanel);
+        mainPanel.add(iqsConfigPanel);
         mainPanel.add(Box.createVerticalGlue());
 
         reset();
         return mainPanel;
     }
 
+    private void onEngineChanged() {
+        boolean isIqs = searchEngineCombo.getSelectedIndex() == 1;
+        iqsConfigPanel.setVisible(isIqs);
+    }
+
     @Override
     public boolean isModified() {
-        IqsSettings settings = IqsSettings.getInstance();
-        return !getAccessKeyIdText().equals(settings.getAccessKeyId())
-                || !getAccessKeySecretText().equals(settings.getAccessKeySecret());
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        String currentType = searchEngineCombo.getSelectedIndex() == 1 ? "ALIYUN_IQS" : "LOW_COST";
+        if (!currentType.equals(settings.getSearchEngineType())) {
+            return true;
+        }
+        if (searchEngineCombo.getSelectedIndex() == 1) {
+            IqsSettings iqsSettings = IqsSettings.getInstance();
+            return !getAccessKeyIdText().equals(iqsSettings.getAccessKeyId())
+                    || !getAccessKeySecretText().equals(iqsSettings.getAccessKeySecret());
+        }
+        return false;
     }
 
     @Override
     public void apply() throws ConfigurationException {
-        String akId = getAccessKeyIdText().trim();
-        String akSecret = getAccessKeySecretText().trim();
+        AiAgentSettings settings = AiAgentSettings.getInstance();
 
-        if (akId.isEmpty() && akSecret.isEmpty()) {
-            // 允许两者都为空（用户可能暂时不想配置）
-            IqsSettings settings = IqsSettings.getInstance();
-            settings.setAccessKeyId("");
-            settings.setAccessKeySecret("");
-            return;
-        }
+        if (searchEngineCombo.getSelectedIndex() == 1) {
+            String akId = getAccessKeyIdText().trim();
+            String akSecret = getAccessKeySecretText().trim();
 
-        if (akId.isEmpty()) {
-            throw new ConfigurationException("AccessKey ID 不能为空");
-        }
-        if (akSecret.isEmpty()) {
-            throw new ConfigurationException("AccessKey Secret 不能为空");
-        }
+            if (akId.isEmpty() && akSecret.isEmpty()) {
+                IqsSettings iqsSettings = IqsSettings.getInstance();
+                iqsSettings.setAccessKeyId("");
+                iqsSettings.setAccessKeySecret("");
+                settings.setSearchEngineType("ALIYUN_IQS");
+                return;
+            }
 
-        IqsSettings settings = IqsSettings.getInstance();
-        settings.setAccessKeyId(akId);
-        settings.setAccessKeySecret(akSecret);
+            if (akId.isEmpty()) {
+                throw new ConfigurationException("AccessKey ID 不能为空");
+            }
+            if (akSecret.isEmpty()) {
+                throw new ConfigurationException("AccessKey Secret 不能为空");
+            }
+
+            IqsSettings iqsSettings = IqsSettings.getInstance();
+            iqsSettings.setAccessKeyId(akId);
+            iqsSettings.setAccessKeySecret(akSecret);
+            settings.setSearchEngineType("ALIYUN_IQS");
+        } else {
+            settings.setSearchEngineType("LOW_COST");
+        }
     }
 
     @Override
     public void reset() {
-        IqsSettings settings = IqsSettings.getInstance();
-        accessKeyIdField.setText(settings.getAccessKeyId());
-        accessKeySecretField.setText(settings.getAccessKeySecret());
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        boolean isIqs = "ALIYUN_IQS".equals(settings.getSearchEngineType());
+        searchEngineCombo.setSelectedIndex(isIqs ? 1 : 0);
+        iqsConfigPanel.setVisible(isIqs);
+
+        IqsSettings iqsSettings = IqsSettings.getInstance();
+        accessKeyIdField.setText(iqsSettings.getAccessKeyId());
+        accessKeySecretField.setText(iqsSettings.getAccessKeySecret());
     }
 
     @Override
     public void disposeUIResources() {
         mainPanel = null;
+        searchEngineCombo = null;
+        iqsConfigPanel = null;
         accessKeyIdField = null;
         accessKeySecretField = null;
     }

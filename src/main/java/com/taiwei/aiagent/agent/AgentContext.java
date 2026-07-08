@@ -8,9 +8,12 @@ import com.taiwei.aiagent.llm.openai.OpenAiLlmClient;
 import com.taiwei.aiagent.model.Conversation;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.tool.ToolRegistry;
+import com.taiwei.aiagent.tool.impl.DdgSearchTool;
 import com.taiwei.aiagent.tool.impl.FileReadTool;
 import com.taiwei.aiagent.tool.impl.FileReplaceTool;
 import com.taiwei.aiagent.tool.impl.FileWriteTool;
+import com.taiwei.aiagent.tool.impl.FindReferencesTool;
+import com.taiwei.aiagent.tool.impl.FindSymbolTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
@@ -107,8 +110,16 @@ public class AgentContext {
         toolRegistry.register(new FileWriteTool(project));
         toolRegistry.register(new FileReplaceTool(project));
         toolRegistry.register(new SearchCodeTool(project));
+        toolRegistry.register(new FindSymbolTool(project));
+        toolRegistry.register(new FindReferencesTool(project));
         toolRegistry.register(new RunCommandTool(project));
-        toolRegistry.register(new WebSearchTool());
+
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        if ("ALIYUN_IQS".equals(settings.getSearchEngineType())) {
+            toolRegistry.register(new WebSearchTool());
+        } else {
+            toolRegistry.register(new DdgSearchTool());
+        }
     }
 
     /**

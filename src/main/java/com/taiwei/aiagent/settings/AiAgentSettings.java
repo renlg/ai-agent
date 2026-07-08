@@ -149,6 +149,16 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         state.dangerousCommands = commands;
     }
 
+    // ========== 搜索引擎配置 ==========
+
+    public String getSearchEngineType() {
+        return state.searchEngineType;
+    }
+
+    public void setSearchEngineType(String searchEngineType) {
+        state.searchEngineType = searchEngineType;
+    }
+
     /**
      * 单个模型配置
      */
@@ -204,6 +214,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
                 "poweroff", "init 0", "init 6", "fdisk", "format", "mv /", "chmod -R 777 /",
                 "wget http", "curl -o", "> /dev/sda", "| sh", "eval ", "source /dev"
         ));
+
+        /**
+         * 搜索引擎类型：LOW_COST（DuckDuckGo 免费）或 ALIYUN_IQS（阿里云 IQS）
+         */
+        public String searchEngineType = "LOW_COST";
 
         public State() {
             // 默认添加一个模型
