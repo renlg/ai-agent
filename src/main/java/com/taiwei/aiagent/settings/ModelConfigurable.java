@@ -78,7 +78,7 @@ public class ModelConfigurable implements Configurable {
         modelSection.add(buttonPanel, BorderLayout.SOUTH);
 
         // ===== 全局参数区域 =====
-        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(4096, 256, 128000, 256));
+        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(2000000, 256, 2000000, 1024));
         maxTokensSpinner.setPreferredSize(new Dimension(140, 32));
 
         temperatureSpinner = new JSpinner(new SpinnerNumberModel(0.7, 0.0, 2.0, 0.1));

@@ -189,7 +189,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         /**
          * 最大输出 Token 数
          */
-        public int maxTokens = 4096;
+        public int maxTokens = 2000000;
 
         /**
          * 温度参数（0-2）

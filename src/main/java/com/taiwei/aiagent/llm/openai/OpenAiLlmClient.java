@@ -7,6 +7,7 @@ import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.llm.LlmStreamListener;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.settings.AiAgentSettings;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
@@ -221,6 +222,7 @@ public class OpenAiLlmClient implements LlmClient {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", stream);
+        body.addProperty("max_tokens", AiAgentSettings.getInstance().getMaxTokens());
 
         if (stream) {
             JsonObject streamOptions = new JsonObject();
