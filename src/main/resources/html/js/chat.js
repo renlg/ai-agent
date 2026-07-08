@@ -106,7 +106,6 @@
 
         appendUserMessage(text);
         showThinking();
-        showRoundLoading();
 
         callJava('sendMessage', { content: text });
     }
@@ -586,7 +585,7 @@
         el.id = 'thinkingIndicator';
         el.innerHTML =
             '<div class="thinking-dots"><span></span><span></span><span></span></div>' +
-            '<span>&#x601d;&#x8003;&#x4e2d;...</span>';
+            '<span>thinking...</span>';
         messagesArea.appendChild(el);
         scrollToBottom();
     }
