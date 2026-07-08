@@ -7,6 +7,8 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.taiwei.aiagent.diff.DiffEntry;
+import com.taiwei.aiagent.diff.DiffReviewService;
 import com.taiwei.aiagent.tool.Tool;
 
 import java.io.IOException;
@@ -72,12 +74,24 @@ public class FileWriteTool implements Tool {
                 Files.createDirectories(parent);
             }
 
+            // 读取旧内容（用于后续 diff 比较）
+            final String oldContent;
+            if (Files.exists(resolved)) {
+                oldContent = Files.readString(resolved, StandardCharsets.UTF_8);
+            } else {
+                oldContent = "";
+            }
+
             // 写入文件
             Files.writeString(resolved, content, StandardCharsets.UTF_8);
 
             // 刷新 VFS 让 IDE 感知到文件变化
             ApplicationManager.getApplication().invokeLater(() -> {
                 LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
+
+                // 记录 AI 代码变更 diff
+                DiffEntry diffEntry = new DiffEntry(resolved.toString(), oldContent, content);
+                DiffReviewService.getInstance(project).addDiff(diffEntry);
             });
 
             return "文件写入成功: " + resolved;

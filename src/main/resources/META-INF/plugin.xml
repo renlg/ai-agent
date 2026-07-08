@@ -35,5 +35,9 @@
         <applicationConfigurable parentId="com.taiwei.aiagent.settings"
                                  instance="com.taiwei.aiagent.settings.IqsConfigurable"
                                  id="com.taiwei.aiagent.settings.iqs"/>
+
+        <!-- Diff 模块：AI 改动的代码变更追踪与审查系统 -->
+        <projectService serviceImplementation="com.taiwei.aiagent.diff.DiffReviewService"/>
+        <editorNotificationProvider implementation="com.taiwei.aiagent.diff.DiffEditorNotificationProvider"/>
     </extensions>
 </idea-plugin>
