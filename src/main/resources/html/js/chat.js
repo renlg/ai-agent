@@ -106,6 +106,7 @@
 
         appendUserMessage(text);
         showThinking();
+        showRoundLoading();
 
         callJava('sendMessage', { content: text });
     }
@@ -351,6 +352,7 @@
     window.onComplete = function () {
         whenReady(function () {
             removeThinking();
+            removeRoundLoading();
             isProcessing = false;
             setButtonToSend();
             sendBtn.disabled = false;
@@ -370,6 +372,7 @@
     window.onError = function (error) {
         whenReady(function () {
             removeThinking();
+            removeRoundLoading();
             // 先做最终 Markdown 渲染
             if (currentContentEl && accumulatedContent.length > 0) {
                 currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
@@ -395,9 +398,9 @@
             statsEl.className = 'token-stats';
             var elapsed = (elapsedMs / 1000).toFixed(1);
             statsEl.innerHTML =
-                '<span>\ud83d\udce5 ' + (usage.promptTokens || 0).toLocaleString() + '</span>' +
-                '<span>\ud83d\udce4 ' + (usage.completionTokens || 0).toLocaleString() + '</span>' +
-                '<span>\u23f1\ufe0f ' + elapsed + 's</span>';
+                '<span>\u8f93\u5165: ' + (usage.promptTokens || 0).toLocaleString() + '</span>' +
+                '<span>\u8f93\u51fa: ' + (usage.completionTokens || 0).toLocaleString() + '</span>' +
+                '<span>\u8017\u65f6: ' + elapsed + 's</span>';
             messagesArea.appendChild(statsEl);
 
             updateTokenProgressRing();
@@ -593,6 +596,23 @@
         if (el) el.remove();
     }
 
+    function showRoundLoading() {
+        removeRoundLoading();
+        var el = document.createElement('div');
+        el.className = 'round-loading';
+        el.id = 'roundLoadingIndicator';
+        el.innerHTML =
+            '<div class="round-loading-spinner"></div>' +
+            '<span>\u5904\u7406\u4e2d...</span>';
+        messagesArea.appendChild(el);
+        scrollToBottom();
+    }
+
+    function removeRoundLoading() {
+        var el = document.getElementById('roundLoadingIndicator');
+        if (el) el.remove();
+    }
+
     function removeWelcome() {
         if (welcomeScreen && welcomeScreen.parentNode) {
             welcomeScreen.remove();
@@ -631,7 +651,8 @@
         }
 
         container.classList.add('visible');
-        tooltip.textContent = '\u5df2\u7528 ' + totalUsedTokens.toLocaleString() + ' / ' + TOKEN_BUDGET.toLocaleString() + ' tokens';
+        var pct = (progress * 100).toFixed(1);
+        tooltip.textContent = '\u5df2\u7528 ' + totalUsedTokens.toLocaleString() + ' / ' + TOKEN_BUDGET.toLocaleString() + ' tokens (' + pct + '%)';
     }
 
     function clearMessages() {

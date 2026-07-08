@@ -371,6 +371,31 @@ html, body {
     40% { opacity: 1; transform: scale(1); }
 }
 
+/* Round Loading Indicator */
+.round-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 500;
+    margin-top: 8px;
+}
+
+.round-loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 /* ===== Markdown Content ===== */
 .message-content h1,
 .message-content h2,
