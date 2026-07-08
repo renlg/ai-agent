@@ -164,8 +164,7 @@
                 return;
             }
 
-            // 首次：创建 assistant 消息框
-            removeThinking();
+            // 首次：创建 assistant 消息框（不关闭 thinking 动画，等 onComplete/onError 时再关闭）
             removeWelcome();
 
             var msg = createMessageEl('assistant', 'AI');
@@ -179,7 +178,6 @@
 
     window.showToolCall = function (name, args) {
         whenReady(function () {
-            removeThinking();
             // 不同迭代的文本之间加换行分隔
             if (accumulatedContent.length > 0 && !accumulatedContent.endsWith('\n')) {
                 accumulatedContent += '\n';
