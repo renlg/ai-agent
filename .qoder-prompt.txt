@@ -1,0 +1,21 @@
+修复 Velocity 启动报错。项目路径 /Users/renlinggao/workspace/ai-agent
+
+找到使用 Velocity 的 Java 文件（可能是 PromptTemplateEngine 或类似类），按以下方案修复：
+
+1. **init 前切换 ContextClassLoader**：在 Velocity 初始化代码前，将当前线程的 ContextClassLoader 切换为 PromptTemplateEngine.class.getClassLoader()，初始化完成后恢复原 ClassLoader。
+
+```java
+ClassLoader original = Thread.currentThread().getContextClassLoader();
+try {
+    Thread.currentThread().setContextClassLoader(PromptTemplateEngine.class.getClassLoader());
+    // 原 Velocity 初始化代码
+} finally {
+    Thread.currentThread().setContextClassLoader(original);
+}
+```
+
+2. **使用 evaluate() 而非 getTemplate()**：将依赖 ResourceManager 加载 classpath 文件的 `getTemplate()` 调用改为 `evaluate()`，直接传入字符串模板内容。
+
+注意查找所有涉及 Velocity 初始化和模板渲染的地方，不要在 Qoder 回答中输出代码块之外的内容。
+
+改完后编译验证。

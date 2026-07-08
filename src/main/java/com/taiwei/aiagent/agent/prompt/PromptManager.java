@@ -2,16 +2,19 @@ package com.taiwei.aiagent.agent.prompt;
 
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.settings.AiAgentSettings;
-import org.apache.velocity.Template;
 import org.apache.velocity.VelocityContext;
 import org.apache.velocity.app.VelocityEngine;
-import org.apache.velocity.runtime.resource.loader.ClasspathResourceLoader;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 /**
  * Prompt 模板管理器
@@ -29,11 +32,17 @@ public class PromptManager {
 
     private VelocityEngine createVelocityEngine() {
         Properties props = new Properties();
-        props.setProperty("resource.loaders", "classpath");
-        props.setProperty("resource.loader.classpath.class", ClasspathResourceLoader.class.getName());
-        VelocityEngine engine = new VelocityEngine();
-        engine.init(props);
-        return engine;
+        props.setProperty("resource.loaders", "string");
+        props.setProperty("resource.loader.string.class", "org.apache.velocity.runtime.resource.loader.StringResourceLoader");
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(PromptManager.class.getClassLoader());
+            VelocityEngine engine = new VelocityEngine();
+            engine.init(props);
+            return engine;
+        } finally {
+            Thread.currentThread().setContextClassLoader(original);
+        }
     }
 
     /**
@@ -60,10 +69,23 @@ public class PromptManager {
         }
         context.put("model", model != null ? model : "未知");
 
-        Template template = velocityEngine.getTemplate("templates/system_prompt.vm", "UTF-8");
+        String templateContent = loadTemplateContent();
         StringWriter writer = new StringWriter();
-        template.merge(context, writer);
+        velocityEngine.evaluate(context, writer, "system_prompt", templateContent);
         return writer.toString();
+    }
+
+    private String loadTemplateContent() {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("templates/system_prompt.vm")) {
+            if (is == null) {
+                throw new RuntimeException("Template not found: templates/system_prompt.vm");
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                return reader.lines().collect(Collectors.joining("\n"));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load template", e);
+        }
     }
 
     private String detectPlatform() {
