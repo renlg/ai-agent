@@ -12,6 +12,7 @@ import com.taiwei.aiagent.tool.impl.FileReadTool;
 import com.taiwei.aiagent.tool.impl.FileWriteTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
+import com.taiwei.aiagent.tool.impl.WebSearchTool;
 
 /**
  * Agent 会话上下文
@@ -105,6 +106,7 @@ public class AgentContext {
         toolRegistry.register(new FileWriteTool(project));
         toolRegistry.register(new SearchCodeTool(project));
         toolRegistry.register(new RunCommandTool(project));
+        toolRegistry.register(new WebSearchTool());
     }
 
     /**
