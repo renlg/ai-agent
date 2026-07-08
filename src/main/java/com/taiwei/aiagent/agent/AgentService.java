@@ -379,7 +379,12 @@ public class AgentService {
                         Tool tool = registry.getTool(toolName);
                         String result;
                         if (tool != null) {
-                            result = tool.execute(args);
+                            try {
+                                result = tool.execute(args);
+                            } catch (Exception e) {
+                                LOG.error("工具 " + toolName + " 执行异常", e);
+                                result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
+                            }
                         } else {
                             result = "错误: 未找到工具 '" + toolName + "'";
                         }

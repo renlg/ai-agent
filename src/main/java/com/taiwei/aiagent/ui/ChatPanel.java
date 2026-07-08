@@ -458,14 +458,11 @@ public class ChatPanel extends JPanel implements Disposable {
                     pushToJs("showProgress",
                             escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
                     // 延迟隐藏进度条，让用户看到完成状态
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        try {
-                            Thread.sleep(300); // 短暂显示完成状态
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
+                    Timer hideTimer = new Timer(300, e -> {
                         pushToJs("hideProgress", escapeJsString(toolCallId));
                     });
+                    hideTimer.setRepeats(false);
+                    hideTimer.start();
                 }
 
                 @Override
@@ -506,14 +503,11 @@ public class ChatPanel extends JPanel implements Disposable {
                                 escapeJsString(toolCallId) + "," + escapeJsString("\u2705 \u5b8c\u6210"));
                         pushToJs("hideRunButton", escapeJsString(toolCallId));
                         // 延迟隐藏进度条，让用户看到完成状态
-                        ApplicationManager.getApplication().invokeLater(() -> {
-                            try {
-                                Thread.sleep(300); // 短暂显示完成状态
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                            }
+                        Timer hideTimer = new Timer(300, e -> {
                             pushToJs("hideProgress", escapeJsString(toolCallId));
                         });
+                        hideTimer.setRepeats(false);
+                        hideTimer.start();
                     }
 
                     // 更新 ChatEntry
