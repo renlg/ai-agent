@@ -154,8 +154,8 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
      */
     public static class ModelConfig {
         public String name = "qwen3-max";          // 显示名称
-        public String baseUrl = "http://39.107.128.199:3000/v1";
-        public String apiKey = "sk-36CIQjNXGkMaVn0PC57de032B6Ed454cB0B2BfDc52D96e42";
+        public String baseUrl = "";
+        public String apiKey = "";
         public String modelName = "qwen3-max";
 
         public ModelConfig() {}
