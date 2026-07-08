@@ -2,16 +2,15 @@ package com.taiwei.aiagent.tool.impl;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.diff.DiffEntry;
 import com.taiwei.aiagent.diff.DiffReviewService;
 import com.taiwei.aiagent.tool.Tool;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -89,10 +88,14 @@ public class FileWriteTool implements Tool {
             DiffEntry diffEntry = new DiffEntry(resolved.toString(), oldContent, content);
             DiffReviewService.getInstance(project).addDiff(diffEntry);
 
-            // 只把 VFS 刷新放在 invokeLater 中
-            ApplicationManager.getApplication().invokeLater(() -> {
-                LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
-            });
+            // 同步刷新 VFS，并强制编辑器重新加载（保证 IDEA 编辑器内容实时刷新）
+            VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
+            if (vFile != null) {
+                Document document = FileDocumentManager.getInstance().getDocument(vFile);
+                if (document != null) {
+                    FileDocumentManager.getInstance().reloadFromDisk(document);
+                }
+            }
 
             return "文件写入成功: " + resolved;
 
