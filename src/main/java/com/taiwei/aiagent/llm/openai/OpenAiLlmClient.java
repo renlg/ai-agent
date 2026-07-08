@@ -98,9 +98,10 @@ public class OpenAiLlmClient implements LlmClient {
 
                 try {
                     JsonObject chunk = gson.fromJson(data, JsonObject.class);
+                    if (chunk == null) return;
 
                     // 解析 usage（通常在最后一个 chunk 中，choices 可能为空）
-                    if (chunk.has("usage")) {
+                    if (chunk.has("usage") && !chunk.get("usage").isJsonNull()) {
                         JsonObject usageObj = chunk.getAsJsonObject("usage");
                         LlmResponse.Usage usage = new LlmResponse.Usage();
                         usage.setPromptTokens(usageObj.get("prompt_tokens").getAsInt());
@@ -109,10 +110,15 @@ public class OpenAiLlmClient implements LlmClient {
                         listener.onUsage(usage);
                     }
 
+                    if (!chunk.has("choices") || chunk.get("choices").isJsonNull()) return;
                     JsonArray choices = chunk.getAsJsonArray("choices");
                     if (choices == null || choices.size() == 0) return;
 
-                    JsonObject delta = choices.get(0).getAsJsonObject().getAsJsonObject("delta");
+                    JsonElement firstChoice = choices.get(0);
+                    if (firstChoice == null || firstChoice.isJsonNull()) return;
+                    JsonObject choiceObj = firstChoice.getAsJsonObject();
+                    if (choiceObj == null || !choiceObj.has("delta") || choiceObj.get("delta").isJsonNull()) return;
+                    JsonObject delta = choiceObj.getAsJsonObject("delta");
                     if (delta == null) return;
 
                     // 处理内容增量
@@ -124,25 +130,29 @@ public class OpenAiLlmClient implements LlmClient {
                     }
 
                     // 处理工具调用增量
-                    if (delta.has("tool_calls")) {
+                    if (delta.has("tool_calls") && !delta.get("tool_calls").isJsonNull()) {
                         JsonArray toolCalls = delta.getAsJsonArray("tool_calls");
-                        for (JsonElement elem : toolCalls) {
-                            JsonObject tc = elem.getAsJsonObject();
-                            int index = tc.get("index").getAsInt();
+                        if (toolCalls != null) {
+                            for (JsonElement elem : toolCalls) {
+                                if (elem == null || elem.isJsonNull()) continue;
+                                JsonObject tc = elem.getAsJsonObject();
+                                if (!tc.has("index") || tc.get("index").isJsonNull()) continue;
+                                int index = tc.get("index").getAsInt();
 
-                            if (tc.has("id") && !tc.get("id").isJsonNull()) {
-                                toolCallIdMap.computeIfAbsent(index, k -> new StringBuilder())
-                                        .append(tc.get("id").getAsString());
-                            }
-                            if (tc.has("function") && !tc.get("function").isJsonNull()) {
-                                JsonObject fn = tc.getAsJsonObject("function");
-                                if (fn.has("name") && !fn.get("name").isJsonNull()) {
-                                    toolCallNameMap.computeIfAbsent(index, k -> new StringBuilder())
-                                            .append(fn.get("name").getAsString());
+                                if (tc.has("id") && !tc.get("id").isJsonNull()) {
+                                    toolCallIdMap.computeIfAbsent(index, k -> new StringBuilder())
+                                            .append(tc.get("id").getAsString());
                                 }
-                                if (fn.has("arguments") && !fn.get("arguments").isJsonNull()) {
-                                    toolCallArgsMap.computeIfAbsent(index, k -> new StringBuilder())
-                                            .append(fn.get("arguments").getAsString());
+                                if (tc.has("function") && !tc.get("function").isJsonNull()) {
+                                    JsonObject fn = tc.getAsJsonObject("function");
+                                    if (fn.has("name") && !fn.get("name").isJsonNull()) {
+                                        toolCallNameMap.computeIfAbsent(index, k -> new StringBuilder())
+                                                .append(fn.get("name").getAsString());
+                                    }
+                                    if (fn.has("arguments") && !fn.get("arguments").isJsonNull()) {
+                                        toolCallArgsMap.computeIfAbsent(index, k -> new StringBuilder())
+                                                .append(fn.get("arguments").getAsString());
+                                    }
                                 }
                             }
                         }
