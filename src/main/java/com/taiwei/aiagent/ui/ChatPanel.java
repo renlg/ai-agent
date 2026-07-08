@@ -270,10 +270,11 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void pushUsageToJs(LlmResponse.Usage usage, long elapsedMs) {
-        String json = "{\"promptTokens\":" + usage.getPromptTokens()
+        String json = "{\"usage\":{\"promptTokens\":" + usage.getPromptTokens()
                 + ",\"completionTokens\":" + usage.getCompletionTokens()
-                + ",\"totalTokens\":" + usage.getTotalTokens() + "}";
-        pushToJs("updateTokenUsage", json + "," + elapsedMs);
+                + ",\"totalTokens\":" + usage.getTotalTokens() + "}"
+                + ",\"elapsedMs\":" + elapsedMs + "}";
+        pushToJs("updateTokenUsage", json);
     }
 
     private void pushHistoryToJs() {

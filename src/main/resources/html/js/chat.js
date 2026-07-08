@@ -385,20 +385,20 @@
         });
     };
 
-    window.updateTokenUsage = function (usage, elapsedMs) {
+    window.updateTokenUsage = function (data) {
         whenReady(function () {
-            totalUsedTokens += (usage.promptTokens || 0) + (usage.completionTokens || 0);
+            var usage = data.usage || {};
+            var elapsedMs = data.elapsedMs || 0;
+            totalUsedTokens += usage.totalTokens || 0;
 
-            if (currentAssistantEl) {
-                var statsEl = document.createElement('div');
-                statsEl.className = 'token-stats';
-                var elapsed = (elapsedMs / 1000).toFixed(1);
-                statsEl.innerHTML =
-                    '<span>\ud83d\udce5 ' + (usage.promptTokens || 0).toLocaleString() + '</span>' +
-                    '<span>\ud83d\udce4 ' + (usage.completionTokens || 0).toLocaleString() + '</span>' +
-                    '<span>\u23f1\ufe0f ' + elapsed + 's</span>';
-                currentAssistantEl.parentNode.insertBefore(statsEl, currentAssistantEl.nextSibling);
-            }
+            var statsEl = document.createElement('div');
+            statsEl.className = 'token-stats';
+            var elapsed = (elapsedMs / 1000).toFixed(1);
+            statsEl.innerHTML =
+                '<span>\ud83d\udce5 ' + (usage.promptTokens || 0).toLocaleString() + '</span>' +
+                '<span>\ud83d\udce4 ' + (usage.completionTokens || 0).toLocaleString() + '</span>' +
+                '<span>\u23f1\ufe0f ' + elapsed + 's</span>';
+            messagesArea.appendChild(statsEl);
 
             updateTokenProgressRing();
             scrollToBottom();
@@ -623,6 +623,13 @@
         ring.style.strokeDasharray = circumference;
         ring.style.strokeDashoffset = circumference * (1 - progress);
 
+        container.classList.remove('warning', 'danger');
+        if (progress > 0.9) {
+            container.classList.add('danger');
+        } else if (progress > 0.8) {
+            container.classList.add('warning');
+        }
+
         container.classList.add('visible');
         tooltip.textContent = '\u5df2\u7528 ' + totalUsedTokens.toLocaleString() + ' / ' + TOKEN_BUDGET.toLocaleString() + ' tokens';
     }
@@ -633,8 +640,14 @@
         currentContentEl = null;
         accumulatedContent = '';
         isProcessing = false;
+        totalUsedTokens = 0;
         setButtonToSend();
         sendBtn.disabled = false;
+
+        var progressContainer = document.querySelector('.token-progress-container');
+        if (progressContainer) {
+            progressContainer.classList.remove('visible', 'warning', 'danger');
+        }
 
         // 清理进度条和运行按钮
         var progressEls = document.querySelectorAll('[id^="progress-"]');

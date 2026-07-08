@@ -723,8 +723,7 @@ html, body {
 .token-progress-tooltip {
     position: absolute;
     bottom: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
+    right: 0;
     padding: 4px 8px;
     font-size: 11px;
     color: var(--text-primary);
@@ -732,6 +731,9 @@ html, body {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     white-space: nowrap;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s;
@@ -740,6 +742,14 @@ html, body {
 
 .token-progress-container:hover .token-progress-tooltip {
     opacity: 1;
+}
+
+.token-progress-container.warning .token-progress-fg {
+    stroke: #e67e22;
+}
+
+.token-progress-container.danger .token-progress-fg {
+    stroke: #e53935;
 }
 
 /* ===== Command Progress & Run Button ===== */
