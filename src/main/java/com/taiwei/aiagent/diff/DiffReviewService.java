@@ -1,8 +1,10 @@
 package com.taiwei.aiagent.diff;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -13,6 +15,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -26,13 +30,63 @@ public class DiffReviewService {
     private final Project project;
     private final List<DiffEntry> diffList = new ArrayList<>();
     private final EventListenerList listenerList = new EventListenerList();
+    private final DiffHighlighter highlighter;
+    private final Set<String> hiddenFiles = ConcurrentHashMap.newKeySet();
+    private int currentIndex = 0;
 
     public DiffReviewService(@NotNull Project project) {
         this.project = project;
+        this.highlighter = new DiffHighlighter(project);
     }
 
     public static DiffReviewService getInstance(@NotNull Project project) {
         return project.getService(DiffReviewService.class);
+    }
+
+    public DiffHighlighter getHighlighter() {
+        return highlighter;
+    }
+
+    public int getCurrentIndex() {
+        return currentIndex;
+    }
+
+    public void setCurrentIndex(int index) {
+        synchronized (diffList) {
+            if (index >= 0 && index < diffList.size()) {
+                this.currentIndex = index;
+            }
+        }
+    }
+
+    public DiffEntry getCurrentDiff() {
+        synchronized (diffList) {
+            if (diffList.isEmpty()) return null;
+            if (currentIndex < 0 || currentIndex >= diffList.size()) return null;
+            return diffList.get(currentIndex);
+        }
+    }
+
+    public int getDiffCount() {
+        synchronized (diffList) {
+            return diffList.size();
+        }
+    }
+
+    // ---- Hide / Show ----
+
+    public boolean toggleHidden(String filePath) {
+        if (hiddenFiles.contains(filePath)) {
+            hiddenFiles.remove(filePath);
+            return false;
+        } else {
+            hiddenFiles.add(filePath);
+            return true;
+        }
+    }
+
+    public boolean isDiffHidden(String filePath) {
+        return hiddenFiles.contains(filePath);
     }
 
     // ---- Diff Management ----
@@ -46,13 +100,24 @@ public class DiffReviewService {
                 diffList.remove(0);
             }
             diffList.add(entry);
+            currentIndex = diffList.size() - 1;
         }
 
         // Notify listeners
         fireDiffAdded(entry);
 
-        // Apply editor highlighting
-        applyHighlightForEntry(entry);
+        // Open file and apply highlight via invokeLater
+        ApplicationManager.getApplication().invokeLater(() -> {
+            VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(entry.getFilePath());
+            if (vf != null) {
+                FileEditorManager.getInstance(project).openFile(vf, true);
+            }
+            if (!hiddenFiles.contains(entry.getFilePath())) {
+                highlighter.highlight(entry);
+            }
+            //noinspection deprecation
+            com.intellij.ui.EditorNotifications.getInstance(project).updateAllNotifications();
+        });
     }
 
     /**
@@ -60,21 +125,32 @@ public class DiffReviewService {
      */
     public void acceptDiff(@NotNull DiffEntry entry) {
         entry.setAccepted(true);
-        fireDiffAccepted(entry);
+        fireOnIndexChanged();
     }
 
     /**
-     * Accept all diffs for a given file path.
+     * Accept all diffs for a given file path and remove them.
+     */
+    public void acceptByFile(String filePath) {
+        synchronized (diffList) {
+            diffList.removeIf(e -> {
+                if (e.getFilePath().equals(filePath)) {
+                    e.setAccepted(true);
+                    return true;
+                }
+                return false;
+            });
+        }
+        hiddenFiles.remove(filePath);
+        adjustCurrentIndex();
+        fireOnIndexChanged();
+    }
+
+    /**
+     * Accept all diffs for a given file path (old name, delegates to acceptByFile).
      */
     public void acceptFile(String filePath) {
-        synchronized (diffList) {
-            for (DiffEntry entry : diffList) {
-                if (entry.getFilePath().equals(filePath) && !entry.isAccepted()) {
-                    entry.setAccepted(true);
-                    fireDiffAccepted(entry);
-                }
-            }
-        }
+        acceptByFile(filePath);
     }
 
     /**
@@ -85,10 +161,10 @@ public class DiffReviewService {
             for (DiffEntry entry : diffList) {
                 if (!entry.isAccepted()) {
                     entry.setAccepted(true);
-                    fireDiffAccepted(entry);
                 }
             }
         }
+        fireOnIndexChanged();
     }
 
     /**
@@ -119,33 +195,47 @@ public class DiffReviewService {
         // Clear highlights for this file
         Document document = getDocumentForFile(entry.getFilePath());
         if (document != null) {
-            DiffHighlighter.clearHighlight(project, document);
+            highlighter.clearHighlight(document);
         }
 
-        fireDiffReverted(entry);
+        fireOnIndexChanged();
+        adjustCurrentIndex();
     }
 
     /**
      * Revert all diffs for a given file path.
      */
     public void revertFile(String filePath) {
-        List<DiffEntry> fileDiffs;
+        revertByFile(filePath);
+    }
+
+    /**
+     * Revert all diffs for a given file path and remove entries.
+     */
+    public void revertByFile(String filePath) {
+        DiffEntry firstEntry;
         synchronized (diffList) {
-            fileDiffs = diffList.stream()
+            firstEntry = diffList.stream()
                     .filter(e -> e.getFilePath().equals(filePath))
-                    .collect(Collectors.toList());
-            diffList.removeAll(fileDiffs);
+                    .findFirst().orElse(null);
+            diffList.removeIf(entry -> entry.getFilePath().equals(filePath));
         }
 
-        for (DiffEntry entry : fileDiffs) {
-            fireDiffReverted(entry);
+        if (firstEntry != null) {
+            WriteCommandAction.runWriteCommandAction(project, "Revert AI Change", null, () -> {
+                VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(filePath);
+                if (vf != null) {
+                    Document document = FileDocumentManager.getInstance().getDocument(vf);
+                    if (document != null) {
+                        document.setText(firstEntry.getOldContent());
+                    }
+                }
+            });
         }
 
-        // Clear highlights
-        Document document = getDocumentForFile(filePath);
-        if (document != null) {
-            DiffHighlighter.clearHighlight(project, document);
-        }
+        hiddenFiles.remove(filePath);
+        adjustCurrentIndex();
+        fireOnIndexChanged();
     }
 
     /**
@@ -159,13 +249,15 @@ public class DiffReviewService {
         }
 
         for (DiffEntry entry : allDiffs) {
-            fireDiffReverted(entry);
             // Clear highlights per file
             Document document = getDocumentForFile(entry.getFilePath());
             if (document != null) {
-                DiffHighlighter.clearHighlight(project, document);
+                highlighter.clearHighlight(document);
             }
         }
+
+        adjustCurrentIndex();
+        fireOnIndexChanged();
     }
 
     /**
@@ -175,7 +267,8 @@ public class DiffReviewService {
         synchronized (diffList) {
             diffList.clear();
         }
-        fireDiffCleared();
+        fireOnAllCleared();
+        adjustCurrentIndex();
     }
 
     // ---- Query Methods ----
@@ -194,6 +287,14 @@ public class DiffReviewService {
         }
     }
 
+    public List<DiffEntry> getPendingDiffs() {
+        synchronized (diffList) {
+            return diffList.stream()
+                    .filter(e -> !e.isAccepted())
+                    .collect(Collectors.toList());
+        }
+    }
+
     // ---- Listener Management ----
 
     public void addListener(DiffReviewListener listener) {
@@ -206,10 +307,13 @@ public class DiffReviewService {
 
     // ---- Internal ----
 
-    private void applyHighlightForEntry(DiffEntry entry) {
-        Document document = getDocumentForFile(entry.getFilePath());
-        if (document != null) {
-            DiffHighlighter.applyHighlight(project, document, entry.getOldContent(), entry.getNewContent());
+    private void adjustCurrentIndex() {
+        synchronized (diffList) {
+            if (diffList.isEmpty()) {
+                currentIndex = 0;
+            } else if (currentIndex >= diffList.size()) {
+                currentIndex = diffList.size() - 1;
+            }
         }
     }
 
@@ -228,21 +332,15 @@ public class DiffReviewService {
         }
     }
 
-    private void fireDiffAccepted(DiffEntry entry) {
+    private void fireOnIndexChanged() {
         for (DiffReviewListener listener : listenerList.getListeners(DiffReviewListener.class)) {
-            listener.onDiffAccepted(entry);
+            listener.onIndexChanged(currentIndex);
         }
     }
 
-    private void fireDiffReverted(DiffEntry entry) {
+    private void fireOnAllCleared() {
         for (DiffReviewListener listener : listenerList.getListeners(DiffReviewListener.class)) {
-            listener.onDiffReverted(entry);
-        }
-    }
-
-    private void fireDiffCleared() {
-        for (DiffReviewListener listener : listenerList.getListeners(DiffReviewListener.class)) {
-            listener.onDiffCleared();
+            listener.onAllCleared();
         }
     }
 }

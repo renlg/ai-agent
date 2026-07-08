@@ -85,13 +85,13 @@ public class FileWriteTool implements Tool {
             // 写入文件
             Files.writeString(resolved, content, StandardCharsets.UTF_8);
 
-            // 刷新 VFS 让 IDE 感知到文件变化
+            // 写入文件后同步记录 diff
+            DiffEntry diffEntry = new DiffEntry(resolved.toString(), oldContent, content);
+            DiffReviewService.getInstance(project).addDiff(diffEntry);
+
+            // 只把 VFS 刷新放在 invokeLater 中
             ApplicationManager.getApplication().invokeLater(() -> {
                 LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
-
-                // 记录 AI 代码变更 diff
-                DiffEntry diffEntry = new DiffEntry(resolved.toString(), oldContent, content);
-                DiffReviewService.getInstance(project).addDiff(diffEntry);
             });
 
             return "文件写入成功: " + resolved;

@@ -16,20 +16,20 @@ public class DiffGutterIconRenderer extends GutterIconRenderer {
     private static final Icon ADDED_ICON = IconLoader.getIcon("/icons/diff_added.svg", DiffGutterIconRenderer.class);
     private static final Icon MODIFIED_ICON = IconLoader.getIcon("/icons/diff_modified.svg", DiffGutterIconRenderer.class);
 
-    private final DiffEntry.DiffType diffType;
+    private final boolean isAdded;
 
-    public DiffGutterIconRenderer(DiffEntry.DiffType diffType) {
-        this.diffType = diffType;
+    public DiffGutterIconRenderer(boolean isAdded) {
+        this.isAdded = isAdded;
     }
 
     @Override
     public @NotNull Icon getIcon() {
-        return diffType == DiffEntry.DiffType.ADDED ? ADDED_ICON : MODIFIED_ICON;
+        return isAdded ? ADDED_ICON : MODIFIED_ICON;
     }
 
     @Override
     public @Nullable String getTooltipText() {
-        return diffType == DiffEntry.DiffType.ADDED ? "新增行" : "修改行";
+        return isAdded ? "新增行" : "修改行";
     }
 
     @Override
@@ -42,11 +42,11 @@ public class DiffGutterIconRenderer extends GutterIconRenderer {
         if (this == o) return true;
         if (!(o instanceof DiffGutterIconRenderer)) return false;
         DiffGutterIconRenderer that = (DiffGutterIconRenderer) o;
-        return diffType == that.diffType;
+        return isAdded == that.isAdded;
     }
 
     @Override
     public int hashCode() {
-        return diffType.hashCode();
+        return Boolean.hashCode(isAdded);
     }
 }

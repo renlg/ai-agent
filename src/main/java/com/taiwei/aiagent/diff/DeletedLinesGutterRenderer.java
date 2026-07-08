@@ -15,10 +15,16 @@ public class DeletedLinesGutterRenderer extends GutterIconRenderer {
 
     private static final Icon DELETED_ICON = IconLoader.getIcon("/icons/diff_deleted.svg", DeletedLinesGutterRenderer.class);
 
-    private final String deletedContent;
+    private final int deletedCount;
+    private final String[] oldLines;
+    private final int startLine;
+    private final int endLine;
 
-    public DeletedLinesGutterRenderer(String deletedContent) {
-        this.deletedContent = deletedContent;
+    public DeletedLinesGutterRenderer(int deletedCount, String[] oldLines, int startLine, int endLine) {
+        this.deletedCount = deletedCount;
+        this.oldLines = oldLines;
+        this.startLine = startLine;
+        this.endLine = endLine;
     }
 
     @Override
@@ -28,14 +34,19 @@ public class DeletedLinesGutterRenderer extends GutterIconRenderer {
 
     @Override
     public @Nullable String getTooltipText() {
-        if (deletedContent == null || deletedContent.isEmpty()) {
+        if (oldLines == null || oldLines.length == 0) {
             return "删除行";
         }
-        // Show first 200 chars of deleted content in tooltip
-        String preview = deletedContent.length() > 200
-                ? deletedContent.substring(0, 200) + "..."
-                : deletedContent;
-        return "<html><body style='font-family: monospace; white-space: pre;'>已删除: " + escapeHtml(preview) + "</body></html>";
+        StringBuilder sb = new StringBuilder();
+        sb.append("已删除 ").append(deletedCount).append(" 行:\n");
+        for (int i = startLine; i <= endLine && i < oldLines.length; i++) {
+            sb.append("- ").append(oldLines[i]).append("\n");
+            if (i - startLine > 10) {
+                sb.append("... (共 ").append(deletedCount).append(" 行)");
+                break;
+            }
+        }
+        return sb.toString();
     }
 
     @Override
@@ -48,18 +59,14 @@ public class DeletedLinesGutterRenderer extends GutterIconRenderer {
         if (this == o) return true;
         if (!(o instanceof DeletedLinesGutterRenderer)) return false;
         DeletedLinesGutterRenderer that = (DeletedLinesGutterRenderer) o;
-        return deletedContent != null ? deletedContent.equals(that.deletedContent) : that.deletedContent == null;
+        return deletedCount == that.deletedCount && startLine == that.startLine && endLine == that.endLine;
     }
 
     @Override
     public int hashCode() {
-        return deletedContent != null ? deletedContent.hashCode() : 0;
-    }
-
-    private String escapeHtml(String text) {
-        return text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>");
+        int result = deletedCount;
+        result = 31 * result + startLine;
+        result = 31 * result + endLine;
+        return result;
     }
 }

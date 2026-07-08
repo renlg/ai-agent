@@ -1,13 +1,13 @@
 package com.taiwei.aiagent.diff;
 
-import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.ui.EditorNotificationPanel;
 import com.intellij.ui.EditorNotificationProvider;
 import com.intellij.ui.EditorNotifications;
@@ -15,7 +15,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.awt.*;
 import java.util.List;
 import java.util.function.Function;
 
@@ -36,90 +35,92 @@ public class DiffEditorNotificationProvider implements EditorNotificationProvide
             DiffReviewService service = DiffReviewService.getInstance(project);
             String filePath = file.getPath();
             List<DiffEntry> fileDiffs = service.getDiffsForFile(filePath);
-            long pendingCount = fileDiffs.stream().filter(e -> !e.isAccepted()).count();
-
-            if (pendingCount == 0) {
-                return null; // No notification needed
+            if (fileDiffs.isEmpty()) {
+                return null;
             }
 
-            return createNotificationPanel(project, file, filePath, pendingCount, service);
+            return createNotificationPanel(project, file, filePath, service);
         };
     }
 
     @NotNull
     private JComponent createNotificationPanel(@NotNull Project project, @NotNull VirtualFile file,
-                                                String filePath, long pendingCount,
-                                                DiffReviewService service) {
-        EditorNotificationPanel panel = new EditorNotificationPanel();
-        panel.setText("当前文件有 " + pendingCount + " 处未审查的 AI 更改");
+                                                String filePath, DiffReviewService service) {
+        EditorNotificationPanel panel = new EditorNotificationPanel(EditorNotificationPanel.Status.Info);
 
-        // "全部保留" button
-        panel.createActionLabel("全部保留", () -> {
-            service.acceptFile(filePath);
-            refreshNotifications(project, file, service);
+        int totalCount = service.getDiffCount();
+        int currentIdx = service.getCurrentIndex();
+        panel.setText("太微 | " + (currentIdx + 1) + " of " + totalCount + " Files");
+
+        DiffHighlighter highlighter = service.getHighlighter();
+
+        // 上一个 / 下一个文件导航
+        if (totalCount > 1) {
+            panel.createActionLabel("← 上一个", () -> {
+                int idx = service.getCurrentIndex();
+                if (idx > 0) {
+                    service.setCurrentIndex(idx - 1);
+                    navigateToCurrentDiff(project, service);
+                }
+            });
+            panel.createActionLabel("下一个 →", () -> {
+                int idx = service.getCurrentIndex();
+                if (idx < totalCount - 1) {
+                    service.setCurrentIndex(idx + 1);
+                    navigateToCurrentDiff(project, service);
+                }
+            });
+        }
+
+        // 隐藏/显示 Diff
+        boolean isHidden = service.isDiffHidden(filePath);
+        panel.createActionLabel(isHidden ? "显示Diff" : "隐藏Diff", () -> {
+            boolean nowHidden = service.toggleHidden(filePath);
+            if (nowHidden) {
+                highlighter.clearHighlightsForFile(filePath);
+            } else {
+                List<DiffEntry> diffs = service.getDiffsForFile(filePath);
+                if (!diffs.isEmpty()) {
+                    highlighter.highlight(diffs.get(diffs.size() - 1));
+                }
+            }
+            EditorNotifications.getInstance(project).updateAllNotifications();
         });
 
-        // "全部撤销" button
-        panel.createActionLabel("全部撤销", () -> {
-            service.revertFile(filePath);
-            refreshNotifications(project, file, service);
+        // 撤销更改
+        panel.createActionLabel("撤销更改", () -> {
+            highlighter.clearHighlightsForFile(filePath);
+            service.revertByFile(filePath);
+            EditorNotifications.getInstance(project).updateAllNotifications();
         });
 
-        // "逐条审查" button → open a diff viewer or toggle inline review mode
-        panel.createActionLabel("逐条审查", () -> {
-            // For now, this just scrolls to the first diff location in the editor
-            scrollToFirstDiff(project, file, service, filePath);
+        // 保留更改
+        panel.createActionLabel("保留更改", () -> {
+            highlighter.clearHighlightsForFile(filePath);
+            service.acceptByFile(filePath);
+            EditorNotifications.getInstance(project).updateAllNotifications();
         });
 
-        // "隐藏" button
-        panel.createActionLabel("隐藏", () -> {
-            panel.setVisible(false);
-        });
+        // 自动高亮（第一次打开时）
+        if (!isHidden) {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                List<DiffEntry> diffs = service.getDiffsForFile(filePath);
+                if (!diffs.isEmpty()) {
+                    highlighter.highlight(diffs.get(diffs.size() - 1));
+                }
+            });
+        }
 
         return panel;
     }
 
-    private void refreshNotifications(@NotNull Project project, @NotNull VirtualFile file,
-                                      @NotNull DiffReviewService service) {
-        // Listen for changes to re-evaluate the notification
-        service.addListener(new DiffReviewListener() {
-            @Override
-            public void onDiffAdded(DiffEntry entry) {
-                EditorNotifications.getInstance(project).updateNotifications(file);
-            }
-
-            @Override
-            public void onDiffAccepted(DiffEntry entry) {
-                EditorNotifications.getInstance(project).updateNotifications(file);
-            }
-
-            @Override
-            public void onDiffReverted(DiffEntry entry) {
-                EditorNotifications.getInstance(project).updateNotifications(file);
-            }
-
-            @Override
-            public void onDiffCleared() {
-                EditorNotifications.getInstance(project).updateNotifications(file);
-            }
-        });
-
-        EditorNotifications.getInstance(project).updateNotifications(file);
-    }
-
-    private void scrollToFirstDiff(@NotNull Project project, @NotNull VirtualFile file,
-                                   @NotNull DiffReviewService service, String filePath) {
-        List<DiffEntry> fileDiffs = service.getDiffsForFile(filePath);
-        if (fileDiffs.isEmpty()) return;
-
-        DiffEntry first = fileDiffs.get(0);
-        Editor editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
-        if (editor != null && first.getNewContent() != null) {
-            String[] lines = first.getNewContent().split("\n", -1);
-            if (lines.length > 0) {
-                // Scroll to approximately the location of the change
-                editor.getCaretModel().moveToOffset(0);
-            }
+    private void navigateToCurrentDiff(Project project, DiffReviewService service) {
+        DiffEntry entry = service.getCurrentDiff();
+        if (entry == null) return;
+        VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(entry.getFilePath());
+        if (vf != null) {
+            FileEditorManager.getInstance(project).openFile(vf, true);
         }
+        EditorNotifications.getInstance(project).updateAllNotifications();
     }
 }

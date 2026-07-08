@@ -6,25 +6,31 @@ import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.Inlay;
 import com.intellij.openapi.editor.impl.DocumentMarkupModel;
 import com.intellij.openapi.editor.markup.*;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.JBColor;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * LCS-based line-level diff algorithm with editor highlighting.
  * Computes diff between old and new content, then renders highlights and gutter icons.
+ * Instance-based: each project gets its own DiffHighlighter to avoid static Map memory leaks.
  */
 public class DiffHighlighter {
 
     private static final int LARGE_FILE_THRESHOLD = 5000;
-    private static final Map<String, List<RangeHighlighter>> fileHighlighters = new HashMap<>();
-    private static final Map<String, List<Inlay<?>>> fileInlays = new HashMap<>();
-    private static final Map<String, List<RangeHighlighter>> fileGutterHighlighters = new HashMap<>();
+
+    private final Project project;
+    private final Map<String, List<RangeHighlighter>> highlightersByFile = new ConcurrentHashMap<>();
+    private final Map<String, List<Inlay<?>>> inlaysByFile = new ConcurrentHashMap<>();
 
     // Color constants for themes
     private static final Color ADDED_BG = JBColor.namedColor(
@@ -39,6 +45,10 @@ public class DiffHighlighter {
             "Editor.ModifiedBar.background.deleted",
             new JBColor(new Color(0x8b, 0x00, 0x00, 0x20), new Color(0x8b, 0x00, 0x00, 0x30))
     );
+
+    public DiffHighlighter(Project project) {
+        this.project = project;
+    }
 
     /**
      * Represents a line-level diff operation.
@@ -66,19 +76,17 @@ public class DiffHighlighter {
     /**
      * Apply diff highlights to the given document.
      */
-    public static void applyHighlight(@NotNull Project project, @NotNull Document document,
-                                      @NotNull String oldContent, @NotNull String newContent) {
+    public void applyHighlight(@NotNull Document document,
+                               @NotNull String oldContent, @NotNull String newContent) {
         // Clear existing highlights for this document
-        clearHighlight(project, document);
+        clearHighlight(document);
 
-        String fileKey = getDocumentKey(document);
+        String fileKey = getFileKey(document);
         List<DiffLine> diffLines = computeDiff(oldContent, newContent);
 
         MarkupModel markupModel = DocumentMarkupModel.forDocument(document, project, true);
 
         List<RangeHighlighter> highlighters = new ArrayList<>();
-        List<Inlay<?>> inlays = new ArrayList<>();
-        List<RangeHighlighter> gutterHighlighters = new ArrayList<>();
 
         int newLineIndex = 0;
         int oldLineIndex = 0;
@@ -91,63 +99,92 @@ public class DiffHighlighter {
                     break;
 
                 case ADDED:
-                    highlightLine(markupModel, document, newLineIndex, DiffLine.Type.ADDED, highlighters, gutterHighlighters);
+                    highlightLine(markupModel, document, newLineIndex, DiffLine.Type.ADDED, highlighters);
                     newLineIndex++;
                     break;
 
                 case DELETED:
-                    // Highlight a marker at the current position for deleted lines
                     highlightDeletedLine(markupModel, document, newLineIndex, oldLineIndex, diffLine.oldLine,
-                            highlighters, gutterHighlighters);
+                            highlighters);
                     // Create block inlay at current position showing deleted content
-                    Inlay<?> inlay = createDeletedInlay(project, document, newLineIndex, diffLine.oldLine);
+                    Inlay<?> inlay = createDeletedInlay(document, newLineIndex, diffLine.oldLine);
                     if (inlay != null) {
-                        inlays.add(inlay);
+                        addInlay(fileKey, inlay);
                     }
                     oldLineIndex++;
                     break;
 
                 case MODIFIED:
-                    highlightLine(markupModel, document, newLineIndex, DiffLine.Type.MODIFIED, highlighters, gutterHighlighters);
+                    highlightLine(markupModel, document, newLineIndex, DiffLine.Type.MODIFIED, highlighters);
+                    // Create block inlay at current position showing old (pre-modified) content
+                    {
+                        Inlay<?> modifiedInlay = createDeletedInlay(document, newLineIndex, diffLine.oldLine);
+                        if (modifiedInlay != null) {
+                            addInlay(fileKey, modifiedInlay);
+                        }
+                    }
                     newLineIndex++;
                     oldLineIndex++;
                     break;
             }
         }
 
-        fileHighlighters.put(fileKey, highlighters);
-        fileInlays.put(fileKey, inlays);
-        fileGutterHighlighters.put(fileKey, gutterHighlighters);
+        highlightersByFile.put(fileKey, highlighters);
+    }
+
+    /**
+     * Apply diff highlights from a DiffEntry using filePath-based key.
+     * Clears existing highlights first, then applies new ones.
+     */
+    public void highlight(@NotNull DiffEntry entry) {
+        clearHighlightsForFile(entry.getFilePath());
+        VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(entry.getFilePath());
+        if (vf == null) return;
+        Document document = FileDocumentManager.getInstance().getDocument(vf);
+        if (document == null) return;
+        applyHighlight(document, entry.getOldContent(), entry.getNewContent());
     }
 
     /**
      * Clear all diff highlights for the given document.
      */
-    public static void clearHighlight(@NotNull Project project, @NotNull Document document) {
-        String fileKey = getDocumentKey(document);
-        MarkupModel markupModel = DocumentMarkupModel.forDocument(document, project, true);
+    public void clearHighlight(@NotNull Document document) {
+        String fileKey = getFileKey(document);
 
-        // Remove range highlighters
-        List<RangeHighlighter> highlighters = fileHighlighters.remove(fileKey);
+        // Remove range highlighters via dispose()
+        List<RangeHighlighter> highlighters = highlightersByFile.remove(fileKey);
         if (highlighters != null) {
             for (RangeHighlighter h : highlighters) {
-                markupModel.removeHighlighter(h);
+                if (h.isValid()) h.dispose();
             }
         }
 
-        // Remove gutter highlighters
-        List<RangeHighlighter> gutterHighlighters = fileGutterHighlighters.remove(fileKey);
-        if (gutterHighlighters != null) {
-            for (RangeHighlighter h : gutterHighlighters) {
-                markupModel.removeHighlighter(h);
-            }
-        }
-
-        // Remove inlays
-        List<Inlay<?>> inlays = fileInlays.remove(fileKey);
+        // Remove inlays via Disposer
+        List<Inlay<?>> inlays = inlaysByFile.remove(fileKey);
         if (inlays != null) {
             for (Inlay<?> inlay : inlays) {
-                Disposer.dispose(inlay);
+                if (inlay.isValid()) Disposer.dispose(inlay);
+            }
+        }
+    }
+
+    /**
+     * Clear diff highlights for a specific file path using filePath-based key.
+     */
+    public void clearHighlightsForFile(@NotNull String filePath) {
+        // Remove range highlighters via dispose()
+        List<RangeHighlighter> highlighters = highlightersByFile.remove(filePath);
+        if (highlighters != null) {
+            for (RangeHighlighter h : highlighters) {
+                if (h.isValid()) h.dispose();
+            }
+        }
+
+        // Remove inlays via Disposer
+        List<Inlay<?>> inlays = inlaysByFile.remove(filePath);
+        if (inlays != null) {
+            for (Inlay<?> inlay : inlays) {
+                if (inlay.isValid()) Disposer.dispose(inlay);
             }
         }
     }
@@ -222,16 +259,43 @@ public class DiffHighlighter {
         int idx = 0;
         while (idx < diffLines.size()) {
             DiffLine current = diffLines.get(idx);
-            // Check if we have a DELETED followed by an ADDED → these form a MODIFIED
-            if (current.type == DiffLine.Type.DELETED && idx + 1 < diffLines.size()
-                    && diffLines.get(idx + 1).type == DiffLine.Type.ADDED) {
-                DiffLine next = diffLines.get(idx + 1);
-                result.add(new DiffLine(DiffLine.Type.MODIFIED, current.oldLine, next.newLine,
-                        current.oldLineNum, next.newLineNum));
-                idx += 2;
-            } else {
+            if (current.type == DiffLine.Type.EQUAL) {
                 result.add(current);
                 idx++;
+                continue;
+            }
+            // 收集连续的 DELETED
+            List<DiffLine> deletedGroup = new ArrayList<>();
+            while (idx < diffLines.size() && diffLines.get(idx).type == DiffLine.Type.DELETED) {
+                deletedGroup.add(diffLines.get(idx));
+                idx++;
+            }
+            // 收集紧跟的连续 ADDED
+            List<DiffLine> addedGroup = new ArrayList<>();
+            while (idx < diffLines.size() && diffLines.get(idx).type == DiffLine.Type.ADDED) {
+                addedGroup.add(diffLines.get(idx));
+                idx++;
+            }
+            // 如果同时有删除和新增 → 合并为 MODIFIED
+            if (!deletedGroup.isEmpty() && !addedGroup.isEmpty()) {
+                int count = Math.min(deletedGroup.size(), addedGroup.size());
+                for (int i = 0; i < count; i++) {
+                    DiffLine del = deletedGroup.get(i);
+                    DiffLine add = addedGroup.get(i);
+                    result.add(new DiffLine(DiffLine.Type.MODIFIED, del.oldLine, add.newLine,
+                            del.oldLineNum, add.newLineNum));
+                }
+                // 多余的 DELETED
+                for (int i = count; i < deletedGroup.size(); i++) {
+                    result.add(deletedGroup.get(i));
+                }
+                // 多余的 ADDED
+                for (int i = count; i < addedGroup.size(); i++) {
+                    result.add(addedGroup.get(i));
+                }
+            } else {
+                result.addAll(deletedGroup);
+                result.addAll(addedGroup);
             }
         }
         return result;
@@ -265,9 +329,8 @@ public class DiffHighlighter {
 
     // ---- Highlighting Helpers ----
 
-    private static void highlightLine(MarkupModel markupModel, Document document, int lineIndex,
-                                      DiffLine.Type type, List<RangeHighlighter> highlighters,
-                                      List<RangeHighlighter> gutterHighlighters) {
+    private void highlightLine(MarkupModel markupModel, Document document, int lineIndex,
+                               DiffLine.Type type, List<RangeHighlighter> highlighters) {
         if (lineIndex >= document.getLineCount()) return;
 
         int lineStart = document.getLineStartOffset(lineIndex);
@@ -300,7 +363,7 @@ public class DiffHighlighter {
         }
 
         // Add gutter icon for added/modified lines
-        DiffEntry.DiffType diffType = type == DiffLine.Type.ADDED ? DiffEntry.DiffType.ADDED : DiffEntry.DiffType.MODIFIED;
+        boolean isAddedLine = type == DiffLine.Type.ADDED;
         RangeHighlighter gutterHighlighter = markupModel.addRangeHighlighter(
                 lineStart, lineEnd,
                 HighlighterLayer.FIRST - 1,
@@ -308,15 +371,14 @@ public class DiffHighlighter {
                 HighlighterTargetArea.EXACT_RANGE
         );
         if (gutterHighlighter != null) {
-            gutterHighlighter.setGutterIconRenderer(new DiffGutterIconRenderer(diffType));
-            gutterHighlighters.add(gutterHighlighter);
+            gutterHighlighter.setGutterIconRenderer(new DiffGutterIconRenderer(isAddedLine));
+            highlighters.add(gutterHighlighter);
         }
     }
 
-    private static void highlightDeletedLine(MarkupModel markupModel, Document document,
-                                             int newLineIndex, int oldLineIndex, String deletedContent,
-                                             List<RangeHighlighter> highlighters,
-                                             List<RangeHighlighter> gutterHighlighters) {
+    private void highlightDeletedLine(MarkupModel markupModel, Document document,
+                                      int newLineIndex, int oldLineIndex, String deletedContent,
+                                      List<RangeHighlighter> highlighters) {
         // Place a marker at the position where content was deleted
         if (newLineIndex < document.getLineCount()) {
             int lineStart = document.getLineStartOffset(newLineIndex);
@@ -349,14 +411,14 @@ public class DiffHighlighter {
                     HighlighterTargetArea.EXACT_RANGE
             );
             if (gutterHighlighter != null) {
-                gutterHighlighter.setGutterIconRenderer(new DeletedLinesGutterRenderer(deletedContent));
-                gutterHighlighters.add(gutterHighlighter);
+                gutterHighlighter.setGutterIconRenderer(
+                        new DeletedLinesGutterRenderer(1, new String[]{deletedContent}, 0, 0));
+                highlighters.add(gutterHighlighter);
             }
         }
     }
 
-    private static Inlay<?> createDeletedInlay(@NotNull Project project, @NotNull Document document,
-                                                int lineIndex, String deletedContent) {
+    private Inlay<?> createDeletedInlay(@NotNull Document document, int lineIndex, String deletedContent) {
         if (lineIndex >= document.getLineCount()) {
             // If content was at the end, attach to the last line
             lineIndex = Math.max(0, document.getLineCount() - 1);
@@ -369,12 +431,19 @@ public class DiffHighlighter {
         int offset = document.getLineStartOffset(lineIndex);
 
         DeletedBlockRenderer renderer = new DeletedBlockRenderer(deletedContent);
-        Inlay<?> inlay = editor.getInlayModel().addBlockElement(offset, false, false, 0, renderer);
-
-        return inlay;
+        return editor.getInlayModel().addBlockElement(offset, false, false, 0, renderer);
     }
 
-    private static String getDocumentKey(Document document) {
+    private void addInlay(String fileKey, Inlay<?> inlay) {
+        inlaysByFile.computeIfAbsent(fileKey, k -> new ArrayList<>()).add(inlay);
+    }
+
+    private String getFileKey(Document document) {
+        VirtualFile vf = FileDocumentManager.getInstance().getFile(document);
+        if (vf != null) {
+            return vf.getPath();
+        }
+        // Fallback: use document hash if no VirtualFile available
         return Integer.toHexString(System.identityHashCode(document));
     }
 }
