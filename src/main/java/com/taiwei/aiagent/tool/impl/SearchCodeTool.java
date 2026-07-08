@@ -2,6 +2,7 @@ package com.taiwei.aiagent.tool.impl;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -77,19 +78,22 @@ public class SearchCodeTool implements Tool {
                 pattern = Pattern.compile(Pattern.quote(query), Pattern.CASE_INSENSITIVE);
             }
 
-            VirtualFile baseDir = project.getBaseDir();
-            if (baseDir == null) {
-                return "错误: 无法获取项目根目录";
-            }
+            final Pattern searchPattern = pattern;
+            return ReadAction.compute(() -> {
+                VirtualFile baseDir = project.getBaseDir();
+                if (baseDir == null) {
+                    return "错误: 无法获取项目根目录";
+                }
 
-            List<String> results = new ArrayList<>();
-            searchInDirectory(baseDir, pattern, filePattern, maxResults, results);
+                List<String> results = new ArrayList<>();
+                searchInDirectory(baseDir, searchPattern, filePattern, maxResults, results);
 
-            if (results.isEmpty()) {
-                return "未找到匹配结果";
-            }
+                if (results.isEmpty()) {
+                    return "未找到匹配结果";
+                }
 
-            return String.join("\n", results);
+                return String.join("\n", results);
+            });
 
         } catch (Exception e) {
             return "搜索失败: " + e.getMessage();
