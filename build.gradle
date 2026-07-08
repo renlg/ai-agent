@@ -75,6 +75,9 @@ dependencies {
     // 阿里云 IQS 网络搜索 SDK
     implementation 'com.aliyun:iqs20241111:1.7.2'
 
+    // Velocity 模板引擎
+    implementation 'org.apache.velocity:velocity-engine-core:2.3'
+
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
