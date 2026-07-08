@@ -756,13 +756,11 @@ html, body {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     white-space: nowrap;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s;
     box-shadow: var(--shadow-sm);
+    text-align: right;
 }
 
 .token-progress-container:hover .token-progress-tooltip {

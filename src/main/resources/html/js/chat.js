@@ -652,7 +652,7 @@
 
         container.classList.add('visible');
         var pct = (progress * 100).toFixed(1);
-        tooltip.textContent = '\u5df2\u7528 ' + totalUsedTokens.toLocaleString() + ' / ' + TOKEN_BUDGET.toLocaleString() + ' tokens (' + pct + '%)';
+        tooltip.innerHTML = '\u5df2\u7528 ' + totalUsedTokens.toLocaleString() + ' / ' + TOKEN_BUDGET.toLocaleString() + ' tokens<br>(' + pct + '%)';
     }
 
     function clearMessages() {

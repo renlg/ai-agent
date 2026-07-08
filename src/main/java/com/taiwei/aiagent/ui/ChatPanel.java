@@ -282,20 +282,39 @@ public class ChatPanel extends JPanel implements Disposable {
         if (ctx == null) return;
 
         List<ChatMessage> messages = ctx.getConversation().getMessages();
-        StringBuilder json = new StringBuilder("[");
-        boolean first = true;
+
+        // 第一步：过滤出 user 和 assistant（有内容）消息，合并连续的 assistant
+        List<SimpleEntry> displayEntries = new ArrayList<>();
+        SimpleEntry pendingAssistant = null;
+
         for (ChatMessage msg : messages) {
             String role = msg.getRole();
-            if ("user".equals(role) || ("assistant".equals(role)
-                    && msg.getContent() != null && !msg.getContent().isEmpty())) {
-                if (!first) json.append(",");
-                json.append("{\"role\":")
-                        .append(escapeJsString(role))
-                        .append(",\"content\":")
-                        .append(escapeJsString(msg.getContent()))
-                        .append("}");
-                first = false;
+            if ("user".equals(role)) {
+                pendingAssistant = null;
+                displayEntries.add(new SimpleEntry("user", msg.getContent()));
+            } else if ("assistant".equals(role)
+                    && msg.getContent() != null && !msg.getContent().isEmpty()) {
+                if (pendingAssistant != null) {
+                    // 合并到上一条 assistant：追加 content
+                    pendingAssistant.content += msg.getContent();
+                } else {
+                    pendingAssistant = new SimpleEntry("assistant", msg.getContent());
+                    displayEntries.add(pendingAssistant);
+                }
             }
+        }
+
+        // 第二步：构建 JSON 数组
+        StringBuilder json = new StringBuilder("[");
+        boolean first = true;
+        for (SimpleEntry entry : displayEntries) {
+            if (!first) json.append(",");
+            json.append("{\"role\":")
+                    .append(escapeJsString(entry.role))
+                    .append(",\"content\":")
+                    .append(escapeJsString(entry.content))
+                    .append("}");
+            first = false;
         }
 
         // 如果当前会话正在处理中，追加流式内容到前端显示
@@ -311,6 +330,19 @@ public class ChatPanel extends JPanel implements Disposable {
 
         json.append("]");
         pushToJs("loadHistory", escapeJsString(json.toString()) + "," + isActiveProcessing);
+    }
+
+    /**
+     * 简易键值对，用于构建推送到前端的显示条目
+     */
+    private static class SimpleEntry {
+        final String role;
+        String content;
+
+        SimpleEntry(String role, String content) {
+            this.role = role;
+            this.content = content;
+        }
     }
 
     private static String escapeJsString(String s) {

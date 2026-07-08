@@ -247,7 +247,59 @@ public class SessionManager {
             }
             result.add(msg);
         }
-        return result;
+        return mergeConsecutiveAssistantMessages(result);
+    }
+
+    /**
+     * 合并连续的 assistant 消息（多轮工具调用迭代产生）
+     * 合并规则：
+     * 1. content 使用第一条非空的 content（保留最早的不为空的那条）
+     * 2. tool_calls 合并所有 tool_call 数组，顺序追加
+     */
+    private List<ChatMessage> mergeConsecutiveAssistantMessages(List<ChatMessage> messages) {
+        List<ChatMessage> merged = new ArrayList<>();
+        ChatMessage pending = null;
+
+        for (ChatMessage msg : messages) {
+            if ("assistant".equals(msg.getRole())) {
+                if (pending == null) {
+                    // 开始新的 assistant 消息块
+                    pending = new ChatMessage("assistant", msg.getContent());
+                    if (msg.getToolCalls() != null && msg.getToolCalls().length > 0) {
+                        pending.setToolCalls(msg.getToolCalls());
+                    }
+                } else {
+                    // 合并到已有的 pending assistant 消息
+                    // content: 保留最早的非空 content
+                    if ((pending.getContent() == null || pending.getContent().isEmpty())
+                            && msg.getContent() != null && !msg.getContent().isEmpty()) {
+                        pending.setContent(msg.getContent());
+                    }
+                    // tool_calls: 合并所有
+                    if (msg.getToolCalls() != null && msg.getToolCalls().length > 0) {
+                        ChatMessage.ToolCall[] existing = pending.getToolCalls();
+                        if (existing == null) {
+                            pending.setToolCalls(msg.getToolCalls());
+                        } else {
+                            ChatMessage.ToolCall[] combined = new ChatMessage.ToolCall[existing.length + msg.getToolCalls().length];
+                            System.arraycopy(existing, 0, combined, 0, existing.length);
+                            System.arraycopy(msg.getToolCalls(), 0, combined, existing.length, msg.getToolCalls().length);
+                            pending.setToolCalls(combined);
+                        }
+                    }
+                }
+            } else {
+                if (pending != null) {
+                    merged.add(pending);
+                    pending = null;
+                }
+                merged.add(msg);
+            }
+        }
+        if (pending != null) {
+            merged.add(pending);
+        }
+        return merged;
     }
 
     // ========== 会话摘要 ==========
