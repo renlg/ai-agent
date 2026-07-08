@@ -179,6 +179,12 @@ public class OpenAiLlmClient implements LlmClient {
         }
     }
 
+    @Override
+    public void close() {
+        httpClient.dispatcher().executorService().shutdown();
+        httpClient.connectionPool().evictAll();
+    }
+
     // ========== 内部方法 ==========
 
     private Request buildRequest(JsonObject requestBody) {

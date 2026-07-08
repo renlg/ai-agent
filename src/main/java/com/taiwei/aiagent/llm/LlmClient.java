@@ -45,4 +45,10 @@ public interface LlmClient {
      * 取消正在进行的流式调用
      */
     void cancel();
+
+    /**
+     * 释放底层资源（连接池、线程池等）
+     */
+    default void close() {
+    }
 }

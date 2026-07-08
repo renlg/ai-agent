@@ -31,6 +31,11 @@ public class AgentContext {
      */
     private static final int MAX_ITERATIONS = 10;
 
+    private LlmClient cachedClient;
+    private String cachedBaseUrl;
+    private String cachedApiKey;
+    private String cachedModel;
+
     public AgentContext(Project project) {
         this.project = project;
 
@@ -57,7 +62,7 @@ public class AgentContext {
     }
 
     /**
-     * 根据当前设置创建 LLM 客户端
+     * 根据当前设置创建 LLM 客户端，并关闭旧的缓存客户端
      */
     private LlmClient createLlmClient() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
@@ -67,15 +72,29 @@ public class AgentContext {
         int activeIndex = settings.getActiveModelIndex();
         LOG.info("创建 LLM 客户端 - activeIndex=" + activeIndex
                 + ", baseUrl=" + baseUrl + ", model=" + model);
-        return new OpenAiLlmClient(baseUrl, apiKey, model);
+
+        if (cachedClient != null) {
+            cachedClient.close();
+        }
+
+        LlmClient client = new OpenAiLlmClient(baseUrl, apiKey, model);
+        cachedClient = client;
+        cachedBaseUrl = baseUrl;
+        cachedApiKey = apiKey;
+        cachedModel = model;
+        return client;
     }
 
     /**
-     * 切换模型（重新创建 LLM 客户端）
+     * 切换模型（使缓存失效，下次 getLlmClient() 时重建）
      */
     public void switchModel(int modelIndex) {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setActiveModelIndex(modelIndex);
+        cachedClient = null;
+        cachedBaseUrl = null;
+        cachedApiKey = null;
+        cachedModel = null;
     }
 
     /**
@@ -110,10 +129,22 @@ public class AgentContext {
     }
 
     /**
-     * 动态获取 LLM 客户端（每次从最新配置创建）
-     * 确保切换模型或修改配置后，LLM 调用使用最新的 baseUrl/apiKey/model
+     * 动态获取 LLM 客户端
+     * 配置未变时返回缓存实例，配置变更时重建并关闭旧客户端
      */
     public LlmClient getLlmClient() {
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        String baseUrl = settings.getBaseUrl();
+        String apiKey = settings.getApiKey();
+        String model = settings.getModel();
+
+        if (cachedClient != null
+                && java.util.Objects.equals(baseUrl, cachedBaseUrl)
+                && java.util.Objects.equals(apiKey, cachedApiKey)
+                && java.util.Objects.equals(model, cachedModel)) {
+            return cachedClient;
+        }
+
         return createLlmClient();
     }
 
