@@ -49,6 +49,14 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
         state.accessKeySecret = accessKeySecret;
     }
 
+    public String getEndpoint() {
+        return state.endpoint;
+    }
+
+    public void setEndpoint(String endpoint) {
+        state.endpoint = endpoint;
+    }
+
     /**
      * 检查是否已配置 AK/SK
      */
@@ -63,5 +71,6 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
     public static class State {
         public String accessKeyId = "";
         public String accessKeySecret = "";
+        public String endpoint = "iqs.cn-zhangjiakou.aliyuncs.com";
     }
 }

@@ -74,7 +74,7 @@ public class WebSearchTool implements Tool {
             Config config = new Config();
             config.setAccessKeyId(settings.getAccessKeyId());
             config.setAccessKeySecret(settings.getAccessKeySecret());
-            config.setEndpoint("iqs.aliyuncs.com");
+            config.setEndpoint(settings.getEndpoint());
             Client client = new Client(config);
 
             // 4. 构建请求
