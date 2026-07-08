@@ -9,6 +9,7 @@ import com.taiwei.aiagent.model.Conversation;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.tool.ToolRegistry;
 import com.taiwei.aiagent.tool.impl.FileReadTool;
+import com.taiwei.aiagent.tool.impl.FileReplaceTool;
 import com.taiwei.aiagent.tool.impl.FileWriteTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
@@ -104,6 +105,7 @@ public class AgentContext {
     private void registerDefaultTools() {
         toolRegistry.register(new FileReadTool(project));
         toolRegistry.register(new FileWriteTool(project));
+        toolRegistry.register(new FileReplaceTool(project));
         toolRegistry.register(new SearchCodeTool(project));
         toolRegistry.register(new RunCommandTool(project));
         toolRegistry.register(new WebSearchTool());
