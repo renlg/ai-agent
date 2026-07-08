@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.diff.DiffEntry;
@@ -89,13 +90,16 @@ public class FileWriteTool implements Tool {
             DiffReviewService.getInstance(project).addDiff(diffEntry);
 
             // 同步刷新 VFS，并强制编辑器重新加载（保证 IDEA 编辑器内容实时刷新）
-            VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
-            if (vFile != null) {
-                Document document = FileDocumentManager.getInstance().getDocument(vFile);
-                if (document != null) {
-                    FileDocumentManager.getInstance().reloadFromDisk(document);
+            // 必须在 EDT 线程执行，因为 VFS API 要求 EDT 访问
+            ApplicationManager.getApplication().invokeAndWait(() -> {
+                VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
+                if (vFile != null) {
+                    Document document = FileDocumentManager.getInstance().getDocument(vFile);
+                    if (document != null) {
+                        FileDocumentManager.getInstance().reloadFromDisk(document);
+                    }
                 }
-            }
+            });
 
             return "文件写入成功: " + resolved;
 
