@@ -6,15 +6,17 @@
     'use strict';
 
     /* ===== State ===== */
+    var TOKEN_BUDGET = 200000;
     var isProcessing = false;
     var currentAssistantEl = null;
     var currentContentEl = null;
     var accumulatedContent = '';
     var messageQueue = [];
     var ready = false;
+    var totalUsedTokens = 0;
 
     /* ===== DOM refs ===== */
-    var messagesArea, welcomeScreen, messageInput, sendBtn;
+    var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
     var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel, newSessionBtn, clearBtn;
 
     /* ===== Init ===== */
@@ -30,6 +32,7 @@
         modelDropdownLabel = document.getElementById('modelDropdownLabel');
         newSessionBtn = document.getElementById('newSessionBtn');
         clearBtn = document.getElementById('clearBtn');
+        inputWrapper = document.querySelector('.input-wrapper');
 
         if (window.__TAIW_THEME__ === 'dark') {
             document.body.classList.add('dark');
@@ -71,6 +74,7 @@
 
         ready = true;
         flushQueue();
+        initTokenProgress();
     });
 
     function flushQueue() {
@@ -381,6 +385,26 @@
         });
     };
 
+    window.updateTokenUsage = function (usage, elapsedMs) {
+        whenReady(function () {
+            totalUsedTokens += (usage.promptTokens || 0) + (usage.completionTokens || 0);
+
+            if (currentAssistantEl) {
+                var statsEl = document.createElement('div');
+                statsEl.className = 'token-stats';
+                var elapsed = (elapsedMs / 1000).toFixed(1);
+                statsEl.innerHTML =
+                    '<span>\ud83d\udce5 ' + (usage.promptTokens || 0).toLocaleString() + '</span>' +
+                    '<span>\ud83d\udce4 ' + (usage.completionTokens || 0).toLocaleString() + '</span>' +
+                    '<span>\u23f1\ufe0f ' + elapsed + 's</span>';
+                currentAssistantEl.parentNode.insertBefore(statsEl, currentAssistantEl.nextSibling);
+            }
+
+            updateTokenProgressRing();
+            scrollToBottom();
+        });
+    };
+
     window.updateSessionList = function (sessions, activeId) {
         whenReady(function () {
             var sessionList;
@@ -573,6 +597,34 @@
         if (welcomeScreen && welcomeScreen.parentNode) {
             welcomeScreen.remove();
         }
+    }
+
+    function initTokenProgress() {
+        if (!inputWrapper) return;
+        var container = document.createElement('div');
+        container.className = 'token-progress-container';
+        container.innerHTML =
+            '<svg class="token-progress-ring" width="24" height="24" viewBox="0 0 24 24">' +
+                '<circle class="token-progress-bg" cx="12" cy="12" r="10" />' +
+                '<circle class="token-progress-fg" cx="12" cy="12" r="10" />' +
+            '</svg>' +
+            '<div class="token-progress-tooltip"></div>';
+        inputWrapper.appendChild(container);
+    }
+
+    function updateTokenProgressRing() {
+        var ring = document.querySelector('.token-progress-fg');
+        var tooltip = document.querySelector('.token-progress-tooltip');
+        var container = document.querySelector('.token-progress-container');
+        if (!ring || !tooltip || !container) return;
+
+        var circumference = 2 * Math.PI * 10;
+        var progress = Math.min(totalUsedTokens / TOKEN_BUDGET, 1);
+        ring.style.strokeDasharray = circumference;
+        ring.style.strokeDashoffset = circumference * (1 - progress);
+
+        container.classList.add('visible');
+        tooltip.textContent = '\u5df2\u7528 ' + totalUsedTokens.toLocaleString() + ' / ' + TOKEN_BUDGET.toLocaleString() + ' tokens';
     }
 
     function clearMessages() {

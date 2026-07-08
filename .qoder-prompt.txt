@@ -1,0 +1,49 @@
+## 需求：Token 统计 & 圆形进度条 & 耗时统计
+
+在 ai-agent IntelliJ IDEA 插件（JCEF 架构）中，为每条 AI 消息添加 Token 统计、耗时展示，以及在输入框添加圆形 Token 进度条。
+
+### 改动文件清单
+
+1. **`src/main/java/com/taiwei/aiagent/agent/LlmStreamListener.java`**
+   - 接口新增 `onUsage(LlmResponse.Usage usage)` 方法
+
+2. **`src/main/java/com/taiwei/aiagent/ui/ChatPanel.java`**
+   - 流式完成时获取 `response.getUsage()`，通过 `pushToJs("updateTokenUsage", ...)` 调用 JS 的 `window.updateTokenUsage(usage, elapsedMs)`
+   - 传递 Usage 数据和耗时（毫秒）到 JS
+
+3. **`src/main/resources/html/js/chat.js`**
+   - 新增 `window.updateTokenUsage(usage, elapsedMs)` 函数
+   - 在 `onComplete` 或流式结束时调用 updateTokenUsage
+   - 在当前 assistant 消息框下方插入 `.token-stats`，显示格式：`📥1,234 / 📤567 / ⏱️3.2s`
+   - 维护全局 `totalUsedTokens`，每次累加 usage.promptTokens + usage.completionTokens
+   - 在 `input-wrapper` 内新增 SVG 圆形进度条元素
+   - 进度 = `totalUsedTokens / 200000`
+   - hover 时显示 tooltip：`已用 12,345 / 200,000 tokens`
+   - tooltip 默认隐藏，hover 进度条时显示
+
+4. **`src/main/resources/html/css/chat.css`**
+   - `.token-stats`：11px 灰色小字，flex 横向排列，间距 8px
+   - `.token-progress-ring`：24x24 圆形 SVG，定位在发送按钮左侧，垂直居中
+   - `.token-progress-tooltip`：绝对定位在进度条上方，默认隐藏，hover 进度条时显示
+
+5. **`src/main/resources/html/chat.html`**（不改动，由 JS 动态创建 DOM）
+
+### 不改动
+- `LlmResponse.java`（已有 Usage 内部类）
+- `chat.html`
+
+### LlmResponse.Usage 结构（已有）
+```java
+public static class Usage {
+    private int promptTokens;
+    private int completionTokens;
+    private int totalTokens;
+    // getters
+}
+```
+
+### 技术要点
+- 使用 JCEF bridge：Java 侧 `pushToJs("updateTokenUsage", jsonData)`，JS 侧 `window.updateTokenUsage = function(data) {...}`
+- SVG 圆形进度条用 `stroke-dasharray` + `stroke-dashoffset` 实现
+- Usage 数据通过 JSON 传递：`{"promptTokens": N, "completionTokens": N, "totalTokens": N}`，外加 `elapsedMs` 字段
+- 总 token 上限 200K 用常量定义在 JS 顶部

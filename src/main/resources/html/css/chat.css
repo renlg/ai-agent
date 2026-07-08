@@ -666,6 +666,82 @@ html, body {
     background: #e53935;
 }
 
+/* ===== Token Stats ===== */
+.token-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    margin-bottom: 20px;
+    padding-left: 4px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.token-stats span {
+    white-space: nowrap;
+}
+
+/* ===== Token Progress Ring ===== */
+.token-progress-container {
+    position: absolute;
+    right: 50px;
+    bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 5;
+}
+
+.token-progress-container.visible {
+    opacity: 1;
+}
+
+.token-progress-ring {
+    display: block;
+}
+
+.token-progress-bg {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 2;
+}
+
+.token-progress-fg {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 12px 12px;
+    transition: stroke-dashoffset 0.4s ease;
+}
+
+.token-progress-tooltip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    box-shadow: var(--shadow-sm);
+}
+
+.token-progress-container:hover .token-progress-tooltip {
+    opacity: 1;
+}
+
 /* ===== Command Progress & Run Button ===== */
 
 .command-progress {

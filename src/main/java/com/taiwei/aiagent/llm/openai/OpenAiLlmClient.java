@@ -98,6 +98,17 @@ public class OpenAiLlmClient implements LlmClient {
 
                 try {
                     JsonObject chunk = gson.fromJson(data, JsonObject.class);
+
+                    // 解析 usage（通常在最后一个 chunk 中，choices 可能为空）
+                    if (chunk.has("usage")) {
+                        JsonObject usageObj = chunk.getAsJsonObject("usage");
+                        LlmResponse.Usage usage = new LlmResponse.Usage();
+                        usage.setPromptTokens(usageObj.get("prompt_tokens").getAsInt());
+                        usage.setCompletionTokens(usageObj.get("completion_tokens").getAsInt());
+                        usage.setTotalTokens(usageObj.get("total_tokens").getAsInt());
+                        listener.onUsage(usage);
+                    }
+
                     JsonArray choices = chunk.getAsJsonArray("choices");
                     if (choices == null || choices.size() == 0) return;
 
@@ -200,6 +211,12 @@ public class OpenAiLlmClient implements LlmClient {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", stream);
+
+        if (stream) {
+            JsonObject streamOptions = new JsonObject();
+            streamOptions.addProperty("include_usage", true);
+            body.add("stream_options", streamOptions);
+        }
 
         // 消息列表
         JsonArray messagesArray = new JsonArray();

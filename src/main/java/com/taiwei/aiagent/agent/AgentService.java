@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.llm.LlmClient;
+import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.llm.LlmStreamListener;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
@@ -110,6 +111,9 @@ public class AgentService {
 
         /** Agent 完成回答 */
         void onComplete(String fullResponse);
+
+        /** Token 使用统计（多次迭代累加后在 onComplete 前调用） */
+        default void onUsage(LlmResponse.Usage usage) {}
 
         /** 发生错误 */
         void onError(String error);
@@ -257,10 +261,13 @@ public class AgentService {
         int maxIterations = context.getMaxIterations();
 
         StringBuilder fullResponse = new StringBuilder();
+        int[] totalUsage = {0, 0, 0}; // promptTokens, completionTokens, totalTokens
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             if (stopped) {
                 LOG.info("Agent 循环被用户停止");
+                LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                if (usage != null) listener.onUsage(usage);
                 listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                 return;
             }
@@ -294,6 +301,13 @@ public class AgentService {
                         }
 
                         @Override
+                        public void onUsage(LlmResponse.Usage usage) {
+                            totalUsage[0] += usage.getPromptTokens();
+                            totalUsage[1] += usage.getCompletionTokens();
+                            totalUsage[2] += usage.getTotalTokens();
+                        }
+
+                        @Override
                         public void onComplete() {
                             latch.countDown();
                         }
@@ -317,6 +331,8 @@ public class AgentService {
             // 用户点击停止：cancel 会触发 onFailure，但应视为正常结束
             if (stopped) {
                 LOG.info("Agent 循环被用户停止");
+                LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                if (usage != null) listener.onUsage(usage);
                 listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                 return;
             }
@@ -342,6 +358,8 @@ public class AgentService {
                     // 每个工具执行前检查是否已停止
                     if (stopped) {
                         LOG.info("Agent 循环被用户停止（工具执行前）");
+                        LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                        if (usage != null) listener.onUsage(usage);
                         listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                         return;
                     }
@@ -384,6 +402,8 @@ public class AgentService {
 
             context.getConversation().addAssistantMessage(content);
 
+            LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+            if (usage != null) listener.onUsage(usage);
             listener.onComplete(fullResponse.toString());
             LOG.info("Agent 循环结束，共迭代 " + (iteration + 1) + " 次");
             return;
@@ -393,7 +413,18 @@ public class AgentService {
         String msg = "\n\n[Agent 已达到最大迭代次数 (" + maxIterations + ")，停止执行]";
         listener.onContent(msg);
         fullResponse.append(msg);
+        LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+        if (usage != null) listener.onUsage(usage);
         listener.onComplete(fullResponse.toString());
+    }
+
+    private static LlmResponse.Usage buildAccumulatedUsage(int[] totalUsage) {
+        if (totalUsage[2] == 0) return null;
+        LlmResponse.Usage usage = new LlmResponse.Usage();
+        usage.setPromptTokens(totalUsage[0]);
+        usage.setCompletionTokens(totalUsage[1]);
+        usage.setTotalTokens(totalUsage[2]);
+        return usage;
     }
 
     /**

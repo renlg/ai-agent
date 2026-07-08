@@ -12,6 +12,7 @@ import com.intellij.ui.jcef.JBCefJSQuery;
 import com.taiwei.aiagent.agent.AgentContext;
 import com.taiwei.aiagent.agent.AgentService;
 import com.taiwei.aiagent.agent.SessionManager;
+import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 
@@ -268,6 +269,13 @@ public class ChatPanel extends JPanel implements Disposable {
         pushToJs("onError", escapeJsString(error));
     }
 
+    private void pushUsageToJs(LlmResponse.Usage usage, long elapsedMs) {
+        String json = "{\"promptTokens\":" + usage.getPromptTokens()
+                + ",\"completionTokens\":" + usage.getCompletionTokens()
+                + ",\"totalTokens\":" + usage.getTotalTokens() + "}";
+        pushToJs("updateTokenUsage", json + "," + elapsedMs);
+    }
+
     private void pushHistoryToJs() {
         AgentContext ctx = agentService.getContext();
         if (ctx == null) return;
@@ -386,6 +394,8 @@ public class ChatPanel extends JPanel implements Disposable {
 
         sessionState.isProcessing = true;
         sessionState.accumulatedContent = new StringBuilder();
+        sessionState.startTime = System.currentTimeMillis();
+        sessionState.lastUsage = null;
         sessionState.chatEntries.add(ChatEntry.user(text));
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
@@ -518,6 +528,11 @@ public class ChatPanel extends JPanel implements Disposable {
                 }
 
                 @Override
+                public void onUsage(LlmResponse.Usage usage) {
+                    sessionState.lastUsage = usage;
+                }
+
+                @Override
                 public void onComplete(String fullResponse) {
                     sessionState.isProcessing = false;
                     sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
@@ -534,6 +549,12 @@ public class ChatPanel extends JPanel implements Disposable {
 
                     // 清理待审批命令
                     pendingCommands.clear();
+
+                    // 推送 Token 统计和耗时到前端
+                    long elapsedMs = System.currentTimeMillis() - sessionState.startTime;
+                    if (sessionState.lastUsage != null) {
+                        pushUsageToJs(sessionState.lastUsage, elapsedMs);
+                    }
 
                     // 更新会话列表（标题可能已改变）
                     SwingUtilities.invokeLater(() -> pushSessionListToJs());
@@ -615,6 +636,8 @@ public class ChatPanel extends JPanel implements Disposable {
         List<ChatEntry> chatEntries = new ArrayList<>();
         volatile boolean isProcessing = false;
         StringBuilder accumulatedContent = new StringBuilder();
+        long startTime;
+        LlmResponse.Usage lastUsage;
     }
 
     private static class ChatEntry {

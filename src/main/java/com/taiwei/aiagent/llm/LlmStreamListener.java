@@ -23,6 +23,13 @@ public interface LlmStreamListener {
     void onToolCall(String toolCallId, String functionName, String arguments);
 
     /**
+     * 收到 Token 使用统计
+     *
+     * @param usage Token 使用量信息
+     */
+    default void onUsage(LlmResponse.Usage usage) {}
+
+    /**
      * 流式响应完成
      */
     void onComplete();
