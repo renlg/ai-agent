@@ -715,7 +715,7 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: default;
+    cursor: pointer;
     opacity: 0;
     transition: opacity 0.3s;
     z-index: 5;
@@ -763,8 +763,35 @@ html, body {
     text-align: right;
 }
 
-.token-progress-container:hover .token-progress-tooltip {
+.token-progress-container:not(.warning):not(.danger):hover .token-progress-tooltip {
     opacity: 1;
+}
+
+.token-progress-container.warning:hover .token-progress-tooltip,
+.token-progress-container.danger:hover .token-progress-tooltip {
+    opacity: 1;
+}
+
+/* ===== Compress Notification ===== */
+.compress-notification {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin: 8px 0;
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--accent);
+    animation: fadeIn 0.25s ease;
+}
+
+.dark .compress-notification {
+    background: #1a2d45;
+    border-color: #5ba3f5;
+    color: #7bb8f7;
 }
 
 .token-progress-container.warning .token-progress-fg {

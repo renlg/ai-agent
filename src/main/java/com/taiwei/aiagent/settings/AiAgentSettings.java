@@ -167,6 +167,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         public String baseUrl = "";
         public String apiKey = "";
         public String modelName = "qwen3-max";
+        public int compressionThreshold = 75;
 
         public ModelConfig() {}
 
@@ -177,8 +178,16 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
             this.modelName = modelName;
         }
 
+        public ModelConfig(String name, String baseUrl, String apiKey, String modelName, int compressionThreshold) {
+            this.name = name;
+            this.baseUrl = baseUrl;
+            this.apiKey = apiKey;
+            this.modelName = modelName;
+            this.compressionThreshold = compressionThreshold;
+        }
+
         public ModelConfig copy() {
-            return new ModelConfig(name, baseUrl, apiKey, modelName);
+            return new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold);
         }
     }
 

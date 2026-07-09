@@ -112,6 +112,18 @@ public class Conversation {
     }
 
     /**
+     * 替换消息列表（用于上下文压缩）
+     * 保留系统提示词，替换其余消息
+     */
+    public void replaceMessages(List<ChatMessage> newMessages) {
+        messages.clear();
+        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+            messages.add(ChatMessage.system(systemPrompt));
+        }
+        messages.addAll(newMessages);
+    }
+
+    /**
      * 获取非系统消息列表（用于持久化）
      */
     public List<ChatMessage> getNonSystemMessages() {

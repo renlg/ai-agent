@@ -186,7 +186,8 @@ public class ModelConfigurable implements Configurable {
             AiAgentSettings.ModelConfig a = editingConfigs.get(i);
             AiAgentSettings.ModelConfig b = current.get(i);
             if (!a.name.equals(b.name) || !a.baseUrl.equals(b.baseUrl)
-                    || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)) {
+                    || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)
+                    || a.compressionThreshold != b.compressionThreshold) {
                 return true;
             }
         }
@@ -297,6 +298,7 @@ public class ModelConfigurable implements Configurable {
         private JTextField baseUrlField;
         private JTextField apiKeyField;
         private JTextField modelNameField;
+        private JSpinner compressionThresholdSpinner;
         private AiAgentSettings.ModelConfig config;
 
         protected ModelConfigDialog(Component parent, String title, AiAgentSettings.ModelConfig config) {
@@ -352,6 +354,17 @@ public class ModelConfigurable implements Configurable {
             modelNameField = new JTextField(config.modelName, 30);
             panel.add(modelNameField, gbc);
 
+            gbc.gridx = 0;
+            gbc.gridy = 4;
+            gbc.weightx = 0;
+            panel.add(new JLabel("压缩阈值 (%)"), gbc);
+
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
+            compressionThresholdSpinner = new JSpinner(new SpinnerNumberModel(config.compressionThreshold, 0, 100, 5));
+            compressionThresholdSpinner.setPreferredSize(new Dimension(140, 28));
+            panel.add(compressionThresholdSpinner, gbc);
+
             return panel;
         }
 
@@ -378,6 +391,7 @@ public class ModelConfigurable implements Configurable {
             config.baseUrl = baseUrlField.getText().trim();
             config.apiKey = apiKeyField.getText().trim();
             config.modelName = modelNameField.getText().trim();
+            config.compressionThreshold = (Integer) compressionThresholdSpinner.getValue();
 
             super.doOKAction();
         }

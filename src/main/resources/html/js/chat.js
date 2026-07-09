@@ -627,6 +627,10 @@
             '</svg>' +
             '<div class="token-progress-tooltip"></div>';
         inputWrapper.appendChild(container);
+
+        container.addEventListener('click', function () {
+            callJava('manualCompress', {});
+        });
     }
 
     function updateTokenProgressRing() {
@@ -689,6 +693,27 @@
             messagesArea.scrollTop = messagesArea.scrollHeight;
         });
     }
+
+    /* ===== Compress Notification ===== */
+    window.showCompressNotification = function (data) {
+        whenReady(function () {
+            var parsed;
+            if (typeof data === 'string') {
+                try { parsed = JSON.parse(data); } catch (e) { return; }
+            } else {
+                parsed = data;
+            }
+
+            var el = document.createElement('div');
+            el.className = 'compress-notification';
+            el.textContent = '\ud83d\udce6 \u4e0a\u4e0b\u6587\u5df2\u538b\u7f29\uff08\u538b\u7f29\u524d '
+                + parsed.before.toLocaleString() + ' tokens \u2192 \u538b\u7f29\u540e '
+                + parsed.after.toLocaleString() + ' tokens\uff0c\u8282\u7701 '
+                + parsed.percent + '%\uff09';
+            messagesArea.appendChild(el);
+            scrollToBottom();
+        });
+    };
 
     /* ===== Utility ===== */
     window.escapeHtml = function (text) {

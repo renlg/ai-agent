@@ -48,6 +48,14 @@ public class ChatPanel extends JPanel implements Disposable {
     public ChatPanel(Project project) {
         this.project = project;
         this.agentService = new AgentService(project);
+        this.agentService.setCompressionListener((beforeTokens, afterTokens) -> {
+            SwingUtilities.invokeLater(() -> {
+                int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
+                String json = "{\"before\":" + beforeTokens + ",\"after\":" + afterTokens + ",\"percent\":" + savedPercent + "}";
+                pushToJs("showCompressNotification", escapeJsString(json));
+                pushHistoryToJs();
+            });
+        });
         AiAgentSettings.getInstance().addChangeListener(settingsChangeListener);
         initUI();
     }
@@ -223,6 +231,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "stopGeneration":
                     stopGeneration();
+                    break;
+                case "manualCompress":
+                    triggerManualCompress();
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
@@ -603,6 +614,14 @@ public class ChatPanel extends JPanel implements Disposable {
                     pushError(error);
                 }
             });
+        });
+    }
+
+    // ========== Manual Compress ==========
+
+    private void triggerManualCompress() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            agentService.manualCompress();
         });
     }
 

@@ -119,6 +119,19 @@ public class AgentService {
         void onError(String error);
     }
 
+    /**
+     * 压缩事件监听器
+     */
+    public interface CompressionListener {
+        void onCompressed(int beforeTokens, int afterTokens);
+    }
+
+    private volatile CompressionListener compressionListener;
+
+    public void setCompressionListener(CompressionListener listener) {
+        this.compressionListener = listener;
+    }
+
     public AgentService(Project project) {
         this.project = project;
         this.sessionManager = new SessionManager(project);
@@ -272,6 +285,8 @@ public class AgentService {
                 return;
             }
             LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代（流式）");
+
+            checkAndCompress(context, llmClient);
 
             final StringBuilder iterContent = new StringBuilder();
             final List<ChatMessage.ToolCall> iterToolCalls = new ArrayList<>();
@@ -536,5 +551,171 @@ public class AgentService {
      */
     public void resetConversation() {
         getContext().resetConversation();
+    }
+
+    // ========== 上下文压缩 ==========
+
+    /**
+     * 检查是否需要压缩，如果需要则执行压缩
+     */
+    private void checkAndCompress(AgentContext context, LlmClient llmClient) {
+        AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
+        int threshold = config.compressionThreshold;
+        int maxTokens = AiAgentSettings.getInstance().getMaxTokens();
+
+        List<ChatMessage> messages = context.getConversation().getMessages();
+        int totalTokens = estimateTokens(messages);
+        int thresholdTokens = (int) (maxTokens * threshold / 100.0);
+
+        if (totalTokens > thresholdTokens) {
+            LOG.info("Token 数 " + totalTokens + " 超过阈值 " + thresholdTokens + " (" + threshold + "% of " + maxTokens + ")，开始压缩");
+            compressConversation(context, llmClient, totalTokens);
+        }
+    }
+
+    /**
+     * 执行上下文压缩：摘要压缩，失败则回退到丢弃最旧50%消息
+     */
+    private void compressConversation(AgentContext context, LlmClient llmClient, int beforeTokens) {
+        List<ChatMessage> messages = context.getConversation().getMessages();
+
+        int systemIdx = -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if ("system".equals(messages.get(i).getRole())) {
+                systemIdx = i;
+                break;
+            }
+        }
+
+        int recentStart = findRecentMessagesStart(messages);
+        if (recentStart <= systemIdx + 1) {
+            LOG.info("没有足够的旧消息可以压缩");
+            return;
+        }
+
+        List<ChatMessage> olderMessages = messages.subList(systemIdx + 1, recentStart);
+        List<ChatMessage> recentMessages = messages.subList(recentStart, messages.size());
+
+        StringBuilder oldContent = new StringBuilder();
+        for (ChatMessage msg : olderMessages) {
+            String content = msg.getContent();
+            if (content != null && !content.isEmpty()) {
+                oldContent.append("[").append(msg.getRole()).append("]: ").append(content).append("\n\n");
+            }
+        }
+
+        boolean wasStopped = stopped;
+        stopped = false;
+
+        try {
+            List<ChatMessage> summaryRequest = new ArrayList<>();
+            summaryRequest.add(ChatMessage.system("你是一个对话摘要助手。请将以下对话内容压缩为简洁的摘要。保留关键信息：讨论的主题、做出的决定、代码修改、工具调用结果等。摘要应足够详细以维持对话上下文，但要尽量简洁。"));
+            summaryRequest.add(ChatMessage.user("请摘要以下对话内容：\n\n" + oldContent.toString()));
+
+            LlmResponse summaryResponse = llmClient.chat(summaryRequest, null);
+
+            if (summaryResponse != null && summaryResponse.isSuccess()
+                    && summaryResponse.getContent() != null
+                    && !summaryResponse.getContent().isEmpty()) {
+                String summary = summaryResponse.getContent();
+
+                List<ChatMessage> newMessages = new ArrayList<>();
+                newMessages.add(ChatMessage.system("以下是对之前对话的摘要：\n" + summary));
+                newMessages.addAll(recentMessages);
+
+                context.getConversation().replaceMessages(newMessages);
+
+                int afterTokens = estimateTokens(context.getConversation().getMessages());
+                int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
+
+                LOG.info("上下文压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
+                notifyCompression(beforeTokens, afterTokens);
+            } else {
+                LOG.warn("摘要 LLM 调用失败，回退到丢弃最旧50%消息");
+                fallbackCompress(context, olderMessages, recentMessages, beforeTokens, systemIdx);
+            }
+        } catch (Exception e) {
+            LOG.warn("压缩异常，回退到丢弃最旧50%消息", e);
+            fallbackCompress(context, olderMessages, recentMessages, beforeTokens, systemIdx);
+        } finally {
+            stopped = wasStopped;
+        }
+    }
+
+    /**
+     * 回退压缩：丢弃最旧50%的旧消息
+     */
+    private void fallbackCompress(AgentContext context, List<ChatMessage> olderMessages,
+                                  List<ChatMessage> recentMessages, int beforeTokens, int systemIdx) {
+        int keepCount = olderMessages.size() / 2;
+        List<ChatMessage> keptOlder = olderMessages.subList(olderMessages.size() - keepCount, olderMessages.size());
+
+        List<ChatMessage> newMessages = new ArrayList<>();
+        newMessages.addAll(keptOlder);
+        newMessages.addAll(recentMessages);
+
+        context.getConversation().replaceMessages(newMessages);
+
+        int afterTokens = estimateTokens(context.getConversation().getMessages());
+        int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
+
+        LOG.info("回退压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
+        notifyCompression(beforeTokens, afterTokens);
+    }
+
+    /**
+     * 找到最近2轮对话的起始位置（从后往前找2个user消息）
+     */
+    private int findRecentMessagesStart(List<ChatMessage> messages) {
+        int userCount = 0;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if ("user".equals(messages.get(i).getRole())) {
+                userCount++;
+                if (userCount == 2) {
+                    return i;
+                }
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * 估算消息列表的总 Token 数
+     * content.length() / 2 + 每条消息约4 tokens overhead
+     */
+    private int estimateTokens(List<ChatMessage> messages) {
+        int total = 0;
+        for (ChatMessage msg : messages) {
+            String content = msg.getContent();
+            if (content != null) {
+                total += content.length() / 2;
+            }
+            total += 4;
+        }
+        return total;
+    }
+
+    /**
+     * 通知前端压缩结果
+     */
+    private void notifyCompression(int beforeTokens, int afterTokens) {
+        CompressionListener listener = this.compressionListener;
+        if (listener != null) {
+            listener.onCompressed(beforeTokens, afterTokens);
+        }
+    }
+
+    /**
+     * 手动触发压缩（供 ChatPanel 调用）
+     */
+    public void manualCompress() {
+        AgentContext ctx = getContext();
+        if (ctx == null) return;
+
+        LlmClient llmClient = ctx.getLlmClient();
+        List<ChatMessage> messages = ctx.getConversation().getMessages();
+        int beforeTokens = estimateTokens(messages);
+
+        compressConversation(ctx, llmClient, beforeTokens);
     }
 }
