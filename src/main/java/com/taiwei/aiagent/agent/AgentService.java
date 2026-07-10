@@ -16,6 +16,7 @@ import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -369,46 +370,59 @@ public class AgentService {
                     fullResponse.append(content);
                 }
 
+                // 先在调用线程触发所有工具的 onToolCallStart（用于 UI 更新）
                 for (ChatMessage.ToolCall toolCall : iterToolCalls) {
-                    // 每个工具执行前检查是否已停止
-                    if (stopped) {
-                        LOG.info("Agent 循环被用户停止（工具执行前）");
-                        LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
-                        if (usage != null) listener.onUsage(usage);
-                        listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
-                        return;
-                    }
+                    String toolName = toolCall.getFunction().getName();
+                    String args = toolCall.getFunction().getArguments();
+                    String toolCallId = toolCall.getId();
+                    listener.onToolCallStart(toolCallId, toolName, args);
+                    LOG.info("调用工具: " + toolName + " 参数: " + args);
+                }
 
+                // 异步并行执行所有工具调用
+                List<CompletableFuture<Void>> futures = new ArrayList<>();
+                for (ChatMessage.ToolCall toolCall : iterToolCalls) {
                     String toolName = toolCall.getFunction().getName();
                     String args = toolCall.getFunction().getArguments();
                     String toolCallId = toolCall.getId();
 
-                    listener.onToolCallStart(toolCallId, toolName, args);
-                    LOG.info("调用工具: " + toolName + " 参数: " + args);
-
                     if ("run_command".equals(toolName)) {
-                        // ===== 命令执行特殊流程 =====
-                        handleRunCommand(context, toolCall, listener);
+                        futures.add(CompletableFuture.runAsync(() ->
+                                handleRunCommand(context, toolCall, listener)));
                     } else {
-                        // ===== 普通工具执行（同步） =====
-                        Tool tool = registry.getTool(toolName);
-                        String result;
-                        if (tool != null) {
-                            try {
-                                result = tool.execute(args);
-                            } catch (Exception e) {
-                                LOG.error("工具 " + toolName + " 执行异常", e);
-                                result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
+                        futures.add(CompletableFuture.runAsync(() -> {
+                            Tool tool = registry.getTool(toolName);
+                            String result;
+                            if (tool != null) {
+                                try {
+                                    result = tool.execute(args);
+                                } catch (Exception e) {
+                                    LOG.error("工具 " + toolName + " 执行异常", e);
+                                    result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
+                                }
+                            } else {
+                                result = "错误: 未找到工具 '" + toolName + "'";
                             }
-                        } else {
-                            result = "错误: 未找到工具 '" + toolName + "'";
-                        }
-
-                        listener.onToolCallEnd(toolCallId, toolName, result);
-                        LOG.info("工具 " + toolName + " 执行完成");
-
-                        context.getConversation().addToolResult(result, toolCall.getId());
+                            listener.onToolCallEnd(toolCallId, toolName, result);
+                            LOG.info("工具 " + toolName + " 执行完成");
+                            context.getConversation().addToolResult(result, toolCallId);
+                        }));
                     }
+                }
+
+                try {
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                } catch (Exception e) {
+                    LOG.warn("等待工具异步执行完成时发生异常", e);
+                }
+
+                // 全部工具执行完成后，检查停止标志
+                if (stopped) {
+                    LOG.info("Agent 循环被用户停止（工具执行后）");
+                    LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                    if (usage != null) listener.onUsage(usage);
+                    listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
+                    return;
                 }
 
                 continue;

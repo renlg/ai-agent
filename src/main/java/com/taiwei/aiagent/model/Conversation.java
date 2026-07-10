@@ -1,6 +1,7 @@
 package com.taiwei.aiagent.model;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -37,15 +38,17 @@ public class Conversation {
 
     public Conversation() {
         this.id = UUID.randomUUID().toString();
-        this.messages = new ArrayList<>();
+        this.messages = Collections.synchronizedList(new ArrayList<>());
         this.createdAt = System.currentTimeMillis();
     }
 
     public Conversation(String systemPrompt) {
         this();
         this.systemPrompt = systemPrompt;
-        if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            messages.add(ChatMessage.system(systemPrompt));
+        synchronized (messages) {
+            if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                messages.add(ChatMessage.system(systemPrompt));
+            }
         }
     }
 
@@ -58,14 +61,16 @@ public class Conversation {
         this.title = title;
         this.createdAt = createdAt;
         this.systemPrompt = systemPrompt;
-        this.messages = new ArrayList<>();
-        if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            messages.add(ChatMessage.system(systemPrompt));
-        }
-        if (savedMessages != null) {
-            for (ChatMessage msg : savedMessages) {
-                if (!"system".equals(msg.getRole())) {
-                    messages.add(msg);
+        this.messages = Collections.synchronizedList(new ArrayList<>());
+        synchronized (messages) {
+            if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                messages.add(ChatMessage.system(systemPrompt));
+            }
+            if (savedMessages != null) {
+                for (ChatMessage msg : savedMessages) {
+                    if (!"system".equals(msg.getRole())) {
+                        messages.add(msg);
+                    }
                 }
             }
         }
@@ -74,7 +79,7 @@ public class Conversation {
     /**
      * 添加用户消息
      */
-    public void addUserMessage(String content) {
+    public synchronized void addUserMessage(String content) {
         messages.add(ChatMessage.user(content));
         if (title == null && content != null && !content.isEmpty()) {
             title = content.length() > 30 ? content.substring(0, 30) + "..." : content;
@@ -84,21 +89,21 @@ public class Conversation {
     /**
      * 添加助手消息
      */
-    public void addAssistantMessage(String content) {
+    public synchronized void addAssistantMessage(String content) {
         messages.add(ChatMessage.assistant(content));
     }
 
     /**
      * 添加工具调用结果
      */
-    public void addToolResult(String content, String toolCallId) {
+    public synchronized void addToolResult(String content, String toolCallId) {
         messages.add(ChatMessage.tool(content, toolCallId));
     }
 
     /**
      * 添加带工具调用的助手消息
      */
-    public void addAssistantToolCalls(ChatMessage.ToolCall[] toolCalls, String content) {
+    public synchronized void addAssistantToolCalls(ChatMessage.ToolCall[] toolCalls, String content) {
         ChatMessage msg = new ChatMessage("assistant", content);
         msg.setToolCalls(toolCalls);
         messages.add(msg);
@@ -108,7 +113,9 @@ public class Conversation {
      * 获取消息列表（用于发送给 LLM）
      */
     public List<ChatMessage> getMessages() {
-        return new ArrayList<>(messages);
+        synchronized (messages) {
+            return new ArrayList<>(messages);
+        }
     }
 
     /**
@@ -116,11 +123,13 @@ public class Conversation {
      * 保留系统提示词，替换其余消息
      */
     public void replaceMessages(List<ChatMessage> newMessages) {
-        messages.clear();
-        if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            messages.add(ChatMessage.system(systemPrompt));
+        synchronized (messages) {
+            messages.clear();
+            if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                messages.add(ChatMessage.system(systemPrompt));
+            }
+            messages.addAll(newMessages);
         }
-        messages.addAll(newMessages);
     }
 
     /**
@@ -128,9 +137,11 @@ public class Conversation {
      */
     public List<ChatMessage> getNonSystemMessages() {
         List<ChatMessage> result = new ArrayList<>();
-        for (ChatMessage msg : messages) {
-            if (!"system".equals(msg.getRole())) {
-                result.add(msg);
+        synchronized (messages) {
+            for (ChatMessage msg : messages) {
+                if (!"system".equals(msg.getRole())) {
+                    result.add(msg);
+                }
             }
         }
         return result;
@@ -140,9 +151,11 @@ public class Conversation {
      * 清空消息历史（保留系统提示词）
      */
     public void clear() {
-        messages.clear();
-        if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            messages.add(ChatMessage.system(systemPrompt));
+        synchronized (messages) {
+            messages.clear();
+            if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                messages.add(ChatMessage.system(systemPrompt));
+            }
         }
     }
 
@@ -150,10 +163,12 @@ public class Conversation {
      * 获取最后一条助手消息
      */
     public ChatMessage getLastAssistantMessage() {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if ("assistant".equals(msg.getRole())) {
-                return msg;
+        synchronized (messages) {
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                ChatMessage msg = messages.get(i);
+                if ("assistant".equals(msg.getRole())) {
+                    return msg;
+                }
             }
         }
         return null;
