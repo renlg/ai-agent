@@ -26,6 +26,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -679,7 +680,7 @@ public class ChatPanel extends JPanel implements Disposable {
      * 按会话追踪的状态：包含聊天条目、处理状态和累积内容
      */
     private static class SessionState {
-        List<ChatEntry> chatEntries = new ArrayList<>();
+        List<ChatEntry> chatEntries = Collections.synchronizedList(new ArrayList<>());
         volatile boolean isProcessing = false;
         StringBuilder accumulatedContent = new StringBuilder();
         long startTime;

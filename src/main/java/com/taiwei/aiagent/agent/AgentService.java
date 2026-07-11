@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -36,7 +38,12 @@ public class AgentService {
     private final Project project;
     private volatile boolean stopped = false;
     private volatile LlmClient activeLlmClient = null;
-    private volatile RunCommandTool activeRunCommandTool = null;
+    private final ExecutorService toolExecutor = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "ai-agent-tool-" + r.hashCode());
+        t.setDaemon(true);
+        return t;
+    });
+    private final ConcurrentHashMap<String, RunCommandTool> activeRunCommandTools = new ConcurrentHashMap<>();
 
     /**
      * 命令审批管理器
@@ -247,11 +254,11 @@ public class AgentService {
         if (client != null) {
             client.cancel();
         }
-        // 停止正在执行的命令工具
-        RunCommandTool tool = activeRunCommandTool;
-        if (tool != null) {
+        // 停止所有正在执行的命令工具
+        for (RunCommandTool tool : activeRunCommandTools.values()) {
             tool.stop();
         }
+        activeRunCommandTools.clear();
     }
 
     /**
@@ -381,6 +388,7 @@ public class AgentService {
 
                 // 异步并行执行所有工具调用
                 List<CompletableFuture<Void>> futures = new ArrayList<>();
+                Map<String, String> toolResults = new ConcurrentHashMap<>();
                 for (ChatMessage.ToolCall toolCall : iterToolCalls) {
                     String toolName = toolCall.getFunction().getName();
                     String args = toolCall.getFunction().getArguments();
@@ -388,25 +396,34 @@ public class AgentService {
 
                     if ("run_command".equals(toolName)) {
                         futures.add(CompletableFuture.runAsync(() ->
-                                handleRunCommand(context, toolCall, listener)));
+                                handleRunCommand(context, toolCall, listener, toolResults), toolExecutor));
                     } else {
                         futures.add(CompletableFuture.runAsync(() -> {
-                            Tool tool = registry.getTool(toolName);
-                            String result;
-                            if (tool != null) {
-                                try {
-                                    result = tool.execute(args);
-                                } catch (Exception e) {
-                                    LOG.error("工具 " + toolName + " 执行异常", e);
-                                    result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
+                            if (stopped) return; // Fix 6: 停止检查
+                            try {
+                                Tool tool = registry.getTool(toolName);
+                                String result;
+                                if (tool != null) {
+                                    try {
+                                        result = tool.execute(args);
+                                    } catch (Exception e) {
+                                        LOG.error("工具 " + toolName + " 执行异常", e);
+                                        result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
+                                    }
+                                } else {
+                                    result = "错误: 未找到工具 '" + toolName + "'";
                                 }
-                            } else {
-                                result = "错误: 未找到工具 '" + toolName + "'";
+                                listener.onToolCallEnd(toolCallId, toolName, result);
+                                LOG.info("工具 " + toolName + " 执行完成");
+                                toolResults.put(toolCallId, result);
+                            } catch (Exception e) {
+                                // Fix 2: 确保任何异常都有结果记录
+                                LOG.error("工具 " + toolName + " 回调异常", e);
+                                String errResult = "错误: 工具 '" + toolName + "' 内部异常: " + e.getMessage();
+                                listener.onToolCallEnd(toolCallId, toolName, errResult);
+                                toolResults.put(toolCallId, errResult);
                             }
-                            listener.onToolCallEnd(toolCallId, toolName, result);
-                            LOG.info("工具 " + toolName + " 执行完成");
-                            context.getConversation().addToolResult(result, toolCallId);
-                        }));
+                        }, toolExecutor));
                     }
                 }
 
@@ -414,6 +431,14 @@ public class AgentService {
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                 } catch (Exception e) {
                     LOG.warn("等待工具异步执行完成时发生异常", e);
+                }
+
+                // Fix 5: 按 LLM 输出的 tool_calls 顺序添加结果
+                for (ChatMessage.ToolCall toolCall : iterToolCalls) {
+                    String result = toolResults.get(toolCall.getId());
+                    if (result != null) {
+                        context.getConversation().addToolResult(result, toolCall.getId());
+                    }
                 }
 
                 // 全部工具执行完成后，检查停止标志
@@ -465,7 +490,7 @@ public class AgentService {
      * 处理 run_command 命令执行
      * 使用 IDEA 内置终端执行命令（通过 RunCommandTool），用户可以在终端中实时看到命令和输出
      */
-    private void handleRunCommand(AgentContext context, ChatMessage.ToolCall toolCall, AgentListener listener) {
+    private void handleRunCommand(AgentContext context, ChatMessage.ToolCall toolCall, AgentListener listener, Map<String, String> toolResults) {
         String toolCallId = toolCall.getId();
         String toolName = toolCall.getFunction().getName();
         String args = toolCall.getFunction().getArguments();
@@ -495,7 +520,7 @@ public class AgentService {
                             String err = "命令执行已被用户停止";
                             listener.onToolCallEnd(toolCallId, toolName, err);
                             listener.onCommandResult(toolCallId, err);
-                            context.getConversation().addToolResult(err, toolCallId);
+                            toolResults.put(toolCallId, err);
                             return;
                         }
                         released = ca.latch.await(1, TimeUnit.SECONDS);
@@ -507,14 +532,14 @@ public class AgentService {
                         String err = "命令审批超时，已取消执行";
                         listener.onToolCallEnd(toolCallId, toolName, err);
                         listener.onCommandResult(toolCallId, err);
-                        context.getConversation().addToolResult(err, toolCallId);
+                        toolResults.put(toolCallId, err);
                         return;
                     }
                     if (!ca.approved) {
                         String err = "命令执行已被取消";
                         listener.onToolCallEnd(toolCallId, toolName, err);
                         listener.onCommandResult(toolCallId, err);
-                        context.getConversation().addToolResult(err, toolCallId);
+                        toolResults.put(toolCallId, err);
                         return;
                     }
                 } catch (InterruptedException e) {
@@ -523,7 +548,7 @@ public class AgentService {
                     String err = "等待命令审批被中断";
                     listener.onToolCallEnd(toolCallId, toolName, err);
                     listener.onCommandResult(toolCallId, err);
-                    context.getConversation().addToolResult(err, toolCallId);
+                    toolResults.put(toolCallId, err);
                     return;
                 }
             }
@@ -533,22 +558,22 @@ public class AgentService {
                 String err = "命令执行已被用户停止";
                 listener.onToolCallEnd(toolCallId, toolName, err);
                 listener.onCommandResult(toolCallId, err);
-                context.getConversation().addToolResult(err, toolCallId);
+                toolResults.put(toolCallId, err);
                 return;
             }
 
             // e. 通过 RunCommandTool 在 IDEA 终端中执行命令（安全命令直接执行，危险命令审批后执行）
             listener.onCommandProgress(toolCallId, "开始在终端执行...");
             RunCommandTool runCommandTool = new RunCommandTool(project);
-            activeRunCommandTool = runCommandTool;
+            activeRunCommandTools.put(toolCallId, runCommandTool);
             try {
                 String result = runCommandTool.execute(args);
                 listener.onCommandProgress(toolCallId, "终端执行完成");
                 listener.onCommandResult(toolCallId, result);
                 listener.onToolCallEnd(toolCallId, toolName, result);
-                context.getConversation().addToolResult(result, toolCallId);
+                toolResults.put(toolCallId, result);
             } finally {
-                activeRunCommandTool = null;
+                activeRunCommandTools.remove(toolCallId);
             }
 
         } catch (Exception e) {
@@ -556,7 +581,7 @@ public class AgentService {
             String err = "处理命令失败: " + e.getMessage();
             listener.onToolCallEnd(toolCallId, toolName, err);
             listener.onCommandResult(toolCallId, err);
-            context.getConversation().addToolResult(err, toolCallId);
+            toolResults.put(toolCallId, err);
         }
     }
 
