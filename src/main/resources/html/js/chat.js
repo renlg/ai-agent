@@ -17,7 +17,7 @@
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
-    var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel, newSessionBtn, clearBtn;
+    var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel, newSessionBtn, clearBtn, modeBadge;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -32,6 +32,7 @@
         modelDropdownLabel = document.getElementById('modelDropdownLabel');
         newSessionBtn = document.getElementById('newSessionBtn');
         clearBtn = document.getElementById('clearBtn');
+        modeBadge = document.getElementById('modeBadge');
         inputWrapper = document.querySelector('.input-wrapper');
 
         if (window.__TAIW_THEME__ === 'dark') {
@@ -66,6 +67,11 @@
         modelDropdownTrigger.addEventListener('click', function (e) {
             e.stopPropagation();
             modelDropdown.classList.toggle('open');
+        });
+
+        modeBadge.addEventListener('click', function () {
+            var target = modeBadge.classList.contains('plan') ? 'build' : 'plan';
+            callJava('setMode', { mode: target });
         });
 
         document.addEventListener('click', function () {
@@ -414,6 +420,19 @@
                 sessionList = sessions;
             }
             renderSessionTabs(sessionList, activeId);
+        });
+    };
+
+    window.updateMode = function (mode) {
+        whenReady(function () {
+            if (!modeBadge) return;
+            var isPlan = mode === 'plan';
+            modeBadge.innerHTML = isPlan ? '&#x1f7e1; Plan' : '&#x1f7e2; Build';
+            modeBadge.classList.toggle('plan', isPlan);
+            modeBadge.classList.toggle('build', !isPlan);
+            modeBadge.title = isPlan
+                ? '点击切换到 Build 模式（当前：只读分析）'
+                : '点击切换到 Plan 模式（当前：正常读写）';
         });
     };
 

@@ -1,6 +1,7 @@
 package com.taiwei.aiagent.agent.prompt;
 
 import com.intellij.openapi.project.Project;
+import com.taiwei.aiagent.agent.AgentMode;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import org.apache.velocity.VelocityContext;
 import org.apache.velocity.app.VelocityEngine;
@@ -47,8 +48,10 @@ public class PromptManager {
 
     /**
      * 生成系统提示词
+     *
+     * @param mode 当前 Agent 模式（Plan/Build），决定提示词中工具能力描述与行为约束
      */
-    public String buildSystemPrompt() {
+    public String buildSystemPrompt(AgentMode mode) {
         VelocityContext context = new VelocityContext();
 
         String basePath = project.getBasePath();
@@ -69,22 +72,51 @@ public class PromptManager {
         }
         context.put("model", model != null ? model : "未知");
 
-        String templateContent = loadTemplateContent();
+        boolean isPlanMode = mode == AgentMode.PLAN;
+        context.put("isPlanMode", isPlanMode);
+        context.put("modeLabel", isPlanMode ? "Plan（只读分析）" : "Build（正常）");
+
+        String templateContent = loadTemplateContent("templates/system_prompt.vm");
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "system_prompt", templateContent);
         return writer.toString();
     }
 
-    private String loadTemplateContent() {
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream("templates/system_prompt.vm")) {
+    /**
+     * 生成 /init 命令用于生成 AGENTS.md 的提示词
+     *
+     * @param scanSummary      项目结构扫描结果（目录树、模块、关键配置文件内容）
+     * @param existingAgentsMd 已存在的 AGENTS.md 内容（不存在则为 null）
+     */
+    public String buildInitPrompt(String scanSummary, String existingAgentsMd) {
+        VelocityContext context = new VelocityContext();
+
+        String basePath = project.getBasePath();
+        context.put("workingDir", basePath != null ? basePath : "未知");
+        context.put("platform", detectPlatform());
+        context.put("today", LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE));
+        context.put("scanSummary", scanSummary != null ? scanSummary : "");
+
+        boolean hasExisting = existingAgentsMd != null && !existingAgentsMd.isEmpty();
+        context.put("hasExisting", hasExisting);
+        context.put("existingContent", hasExisting ? existingAgentsMd : "");
+
+        String templateContent = loadTemplateContent("templates/init_prompt.vm");
+        StringWriter writer = new StringWriter();
+        velocityEngine.evaluate(context, writer, "init_prompt", templateContent);
+        return writer.toString();
+    }
+
+    private String loadTemplateContent(String resourcePath) {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
             if (is == null) {
-                throw new RuntimeException("Template not found: templates/system_prompt.vm");
+                throw new RuntimeException("Template not found: " + resourcePath);
             }
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
                 return reader.lines().collect(Collectors.joining("\n"));
             }
         } catch (Exception e) {
-            throw new RuntimeException("Failed to load template", e);
+            throw new RuntimeException("Failed to load template: " + resourcePath, e);
         }
     }
 

@@ -86,6 +86,11 @@ public class FileReplaceTool implements Tool {
     }
 
     @Override
+    public boolean isMutating() {
+        return true;
+    }
+
+    @Override
     public String execute(String arguments) {
         try {
             ReplaceArgs args = gson.fromJson(arguments, ReplaceArgs.class);

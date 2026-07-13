@@ -37,4 +37,12 @@ public interface Tool {
      * @return 工具执行结果（文本形式返回给 LLM）
      */
     String execute(String arguments);
+
+    /**
+     * 是否为修改性工具（写文件、执行命令等会改变项目状态的操作）。
+     * Plan 模式下会过滤掉所有 isMutating() 返回 true 的工具，只保留只读工具。
+     */
+    default boolean isMutating() {
+        return false;
+    }
 }

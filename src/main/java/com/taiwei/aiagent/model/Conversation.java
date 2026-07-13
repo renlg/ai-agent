@@ -188,6 +188,21 @@ public class Conversation {
         this.systemPrompt = systemPrompt;
     }
 
+    /**
+     * 重建系统提示词（如 Plan/Build 模式切换时）
+     * 就地替换消息历史中的系统消息（若存在），否则插入到消息列表头部
+     */
+    public void updateSystemPrompt(String newSystemPrompt) {
+        synchronized (messages) {
+            this.systemPrompt = newSystemPrompt;
+            if (!messages.isEmpty() && "system".equals(messages.get(0).getRole())) {
+                messages.get(0).setContent(newSystemPrompt);
+            } else if (newSystemPrompt != null && !newSystemPrompt.isEmpty()) {
+                messages.add(0, ChatMessage.system(newSystemPrompt));
+            }
+        }
+    }
+
     public String getTitle() {
         return title;
     }

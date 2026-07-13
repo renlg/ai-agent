@@ -117,6 +117,9 @@ public class AgentService {
         /** 命令执行结果 */
         default void onCommandResult(String toolCallId, String result) {}
 
+        /** Agent 模式已切换（"plan" / "build"） */
+        default void onModeChanged(String mode) {}
+
         /** Agent 完成回答 */
         void onComplete(String fullResponse);
 
@@ -204,6 +207,7 @@ public class AgentService {
 
     /**
      * 发送用户消息并执行 Agent 循环
+     * 拦截 /plan、/build、/init 斜杠命令，不进入正常的 LLM 对话流程
      */
     public void sendMessage(String sessionId, String userMessage, AgentListener listener) {
         AgentContext ctx;
@@ -212,6 +216,20 @@ public class AgentService {
             ctx = sessionManager.getContext(sessionId);
         } else {
             ctx = sessionManager.getActiveContext();
+        }
+
+        String trimmed = userMessage == null ? "" : userMessage.trim();
+
+        if ("/plan".equalsIgnoreCase(trimmed) || "/build".equalsIgnoreCase(trimmed)) {
+            handleModeSwitch(ctx, "/plan".equalsIgnoreCase(trimmed) ? AgentMode.PLAN : AgentMode.BUILD, listener);
+            sessionManager.saveState();
+            return;
+        }
+
+        if ("/init".equalsIgnoreCase(trimmed)) {
+            handleInitCommand(ctx, listener);
+            sessionManager.saveState();
+            return;
         }
 
         // 添加用户消息到对话历史
@@ -228,6 +246,81 @@ public class AgentService {
         // 消息处理完成后持久化
         activeLlmClient = null;
         sessionManager.saveState();
+    }
+
+    /**
+     * 处理 /plan、/build 模式切换命令：不发送给 LLM，直接切换模式并提示用户
+     */
+    private void handleModeSwitch(AgentContext ctx, AgentMode newMode, AgentListener listener) {
+        ctx.setMode(newMode);
+        listener.onModeChanged(newMode.toJsValue());
+        String msg = newMode == AgentMode.PLAN
+                ? "已切换到 **Plan 模式**：只读分析，禁止修改文件或执行命令，最终以 Markdown 输出实施计划。"
+                : "已切换到 **Build 模式**：可正常读写文件、执行命令。";
+        listener.onThinking();
+        listener.onContent(msg);
+        listener.onComplete(msg);
+    }
+
+    /**
+     * 处理 /init 命令：扫描项目结构，交给 LLM 生成 AGENTS.md 内容，并直接写入项目根目录
+     */
+    private void handleInitCommand(AgentContext ctx, AgentListener listener) {
+        listener.onThinking();
+        try {
+            String basePath = project.getBasePath();
+            if (basePath == null) {
+                listener.onError("无法获取项目根目录，/init 已取消");
+                return;
+            }
+
+            java.nio.file.Path agentsMdPath = java.nio.file.Paths.get(basePath, "AGENTS.md");
+            String existing = null;
+            if (java.nio.file.Files.exists(agentsMdPath)) {
+                try {
+                    existing = java.nio.file.Files.readString(agentsMdPath, java.nio.charset.StandardCharsets.UTF_8);
+                } catch (Exception e) {
+                    LOG.warn("读取已有 AGENTS.md 失败", e);
+                }
+            }
+
+            String scanSummary = com.taiwei.aiagent.agent.init.ProjectScanner.scan(project);
+
+            String initPrompt = ctx.getPromptManager().buildInitPrompt(scanSummary, existing);
+
+            List<ChatMessage> request = new ArrayList<>();
+            request.add(ChatMessage.system("你是一名资深软件工程师，严格按照用户指示输出 AGENTS.md 正文内容，不要添加任何多余的解释或前后缀。"));
+            request.add(ChatMessage.user(initPrompt));
+
+            stopped = false;
+            LlmClient llmClient = ctx.getLlmClient();
+            activeLlmClient = llmClient;
+
+            LlmResponse response = llmClient.chat(request, null);
+            activeLlmClient = null;
+
+            if (response == null || !response.isSuccess() || response.getContent() == null || response.getContent().isEmpty()) {
+                String err = response != null ? response.getErrorMessage() : "LLM 未返回内容";
+                listener.onError("生成 AGENTS.md 失败: " + err);
+                return;
+            }
+
+            String agentsMdContent = response.getContent().trim();
+            java.nio.file.Files.writeString(agentsMdPath, agentsMdContent, java.nio.charset.StandardCharsets.UTF_8);
+
+            ctx.getConversation().addUserMessage("/init");
+            String summary = (existing != null ? "已更新" : "已生成") + " AGENTS.md（" + agentsMdPath + "）\n\n---\n\n" + agentsMdContent;
+            ctx.getConversation().addAssistantMessage(summary);
+
+            if (response.getUsage() != null) {
+                listener.onUsage(response.getUsage());
+            }
+            listener.onContent(summary);
+            listener.onComplete(summary);
+        } catch (Exception e) {
+            LOG.error("/init 执行失败", e);
+            listener.onError("/init 执行失败: " + e.getMessage());
+        }
     }
 
     /**
@@ -276,9 +369,9 @@ public class AgentService {
      */
     private void executeAgentLoop(AgentContext context, AgentListener listener) {
         LlmClient llmClient = context.getLlmClient();
-        LOG.info("Agent 循环使用模型（流式）: " + llmClient.getModelName());
+        LOG.info("Agent 循环使用模型（流式）: " + llmClient.getModelName() + ", 模式: " + context.getMode());
         ToolRegistry registry = context.getToolRegistry();
-        List<Tool> tools = registry.getAllTools();
+        List<Tool> tools = context.getToolsForMode();
         int maxIterations = context.getMaxIterations();
 
         StringBuilder fullResponse = new StringBuilder();
@@ -393,6 +486,13 @@ public class AgentService {
                     String toolName = toolCall.getFunction().getName();
                     String args = toolCall.getFunction().getArguments();
                     String toolCallId = toolCall.getId();
+
+                    if (!registry.isToolAllowed(toolName, context.getMode())) {
+                        String err = "错误: 当前处于 Plan 模式（只读分析），工具 '" + toolName + "' 已被禁用。请先切换到 Build 模式（/build）再执行修改操作。";
+                        listener.onToolCallEnd(toolCallId, toolName, err);
+                        toolResults.put(toolCallId, err);
+                        continue;
+                    }
 
                     if ("run_command".equals(toolName)) {
                         futures.add(CompletableFuture.runAsync(() ->

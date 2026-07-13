@@ -80,6 +80,11 @@ public class RunCommandTool implements Tool {
     }
 
     @Override
+    public boolean isMutating() {
+        return true;
+    }
+
+    @Override
     public String execute(String arguments) {
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();

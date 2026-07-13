@@ -10,6 +10,7 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import com.taiwei.aiagent.agent.AgentContext;
+import com.taiwei.aiagent.agent.AgentMode;
 import com.taiwei.aiagent.agent.AgentService;
 import com.taiwei.aiagent.agent.SessionManager;
 import com.taiwei.aiagent.llm.LlmResponse;
@@ -134,6 +135,23 @@ public class ChatPanel extends JPanel implements Disposable {
         pushSessionListToJs();
         pushModelListToJs();
         pushHistoryToJs();
+        pushModeToJs();
+    }
+
+    private void pushModeToJs() {
+        AgentContext ctx = agentService.getContext();
+        String mode = ctx != null ? ctx.getMode().toJsValue() : "build";
+        pushToJs("updateMode", escapeJsString(mode));
+    }
+
+    /**
+     * 用户点击模式徽章触发：直接切换当前活跃会话的模式（不经过 Agent 循环）
+     */
+    private void setMode(String modeStr) {
+        AgentContext ctx = agentService.getContext();
+        if (ctx == null) return;
+        ctx.setMode(AgentMode.fromString(modeStr));
+        pushModeToJs();
     }
 
     private void pushSessionListToJs() {
@@ -235,6 +253,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "manualCompress":
                     triggerManualCompress();
+                    break;
+                case "setMode":
+                    setMode(data.get("mode").getAsString());
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
@@ -572,6 +593,13 @@ public class ChatPanel extends JPanel implements Disposable {
                 }
 
                 @Override
+                public void onModeChanged(String mode) {
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushToJs("updateMode", escapeJsString(mode));
+                    }
+                }
+
+                @Override
                 public void onComplete(String fullResponse) {
                     sessionState.isProcessing = false;
                     sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
@@ -639,6 +667,7 @@ public class ChatPanel extends JPanel implements Disposable {
         agentService.switchSession(sessionId);
         pushHistoryToJs();
         pushSessionListToJs();
+        pushModeToJs();
     }
 
     private void deleteSession(String sessionId) {

@@ -28,6 +28,7 @@ public class AgentContext {
     private final Conversation conversation;
     private final ToolRegistry toolRegistry;
     private final PromptManager promptManager;
+    private volatile AgentMode mode = AgentMode.BUILD;
 
     private static final Logger LOG = Logger.getInstance(AgentContext.class);
 
@@ -48,7 +49,7 @@ public class AgentContext {
         this.promptManager = new PromptManager(project);
 
         // 创建对话（带系统提示词）
-        this.conversation = new Conversation(promptManager.buildSystemPrompt());
+        this.conversation = new Conversation(promptManager.buildSystemPrompt(mode));
 
         // 注册工具
         this.toolRegistry = new ToolRegistry();
@@ -64,6 +65,8 @@ public class AgentContext {
         this.conversation = conversation;
         this.toolRegistry = new ToolRegistry();
         registerDefaultTools();
+        // 恢复的会话可能未携带系统提示词（历史持久化数据 systemPrompt 为 null），补齐当前模式对应的系统提示词
+        conversation.updateSystemPrompt(promptManager.buildSystemPrompt(mode));
     }
 
     /**
@@ -141,6 +144,28 @@ public class AgentContext {
 
     public ToolRegistry getToolRegistry() {
         return toolRegistry;
+    }
+
+    /**
+     * 获取当前 Agent 模式
+     */
+    public AgentMode getMode() {
+        return mode;
+    }
+
+    /**
+     * 切换 Agent 模式（Plan/Build），并重建系统提示词写入对话历史
+     */
+    public void setMode(AgentMode mode) {
+        this.mode = mode;
+        conversation.updateSystemPrompt(promptManager.buildSystemPrompt(mode));
+    }
+
+    /**
+     * 获取当前模式下可用的工具列表（Plan 模式过滤掉修改性工具）
+     */
+    public java.util.List<com.taiwei.aiagent.tool.Tool> getToolsForMode() {
+        return toolRegistry.getToolsForMode(mode);
     }
 
     /**
