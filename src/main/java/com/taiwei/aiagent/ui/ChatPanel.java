@@ -151,6 +151,7 @@ public class ChatPanel extends JPanel implements Disposable {
         AgentContext ctx = agentService.getContext();
         if (ctx == null) return;
         ctx.setMode(AgentMode.fromString(modeStr));
+        agentService.getSessionManager().saveState();
         pushModeToJs();
     }
 
@@ -236,6 +237,11 @@ public class ChatPanel extends JPanel implements Disposable {
                 case "selectModel":
                     int modelIndex = data.get("index").getAsInt();
                     AiAgentSettings.getInstance().setActiveModelIndex(modelIndex);
+                    // 保存到当前会话
+                    AgentContext currentCtx = agentService.getContext();
+                    if (currentCtx != null) {
+                        currentCtx.setModelIndex(modelIndex);
+                    }
                     break;
                 case "getSessions":
                     pushSessionListToJs();
@@ -262,6 +268,7 @@ public class ChatPanel extends JPanel implements Disposable {
             }
         } catch (Exception e) {
             LOG.error("Error handling JS message: " + request, e);
+            pushError("Internal error: " + e.getMessage());
         }
     }
 
@@ -484,11 +491,17 @@ public class ChatPanel extends JPanel implements Disposable {
                         }
                     }
                     if (!replaced) {
+                        boolean foundAssistant = false;
                         for (int i = sessionState.chatEntries.size() - 1; i >= 0; i--) {
                             if (sessionState.chatEntries.get(i).type == ChatEntry.Type.ASSISTANT) {
                                 sessionState.chatEntries.get(i).content = sessionState.accumulatedContent.toString();
+                                foundAssistant = true;
                                 break;
                             }
+                        }
+                        if (!foundAssistant) {
+                            // 首次收到内容，创建 ASSISTANT 条目
+                            sessionState.chatEntries.add(ChatEntry.assistant(sessionState.accumulatedContent.toString()));
                         }
                     }
 
@@ -665,9 +678,20 @@ public class ChatPanel extends JPanel implements Disposable {
 
     private void switchToSession(String sessionId) {
         agentService.switchSession(sessionId);
+
+        // 恢复该会话的模式和模型
+        AgentContext ctx = agentService.getContext();
+        if (ctx != null) {
+            // 恢复模型（如果该会话记录过模型索引）
+            if (ctx.getModelIndex() >= 0) {
+                AiAgentSettings.getInstance().setActiveModelIndex(ctx.getModelIndex());
+            }
+        }
+
         pushHistoryToJs();
         pushSessionListToJs();
         pushModeToJs();
+        pushModelListToJs();
     }
 
     private void deleteSession(String sessionId) {

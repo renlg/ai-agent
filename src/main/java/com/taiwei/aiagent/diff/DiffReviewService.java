@@ -10,6 +10,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import org.jetbrains.annotations.NotNull;
 
+import com.intellij.openapi.diagnostic.Logger;
+
 import javax.swing.event.EventListenerList;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -25,6 +27,7 @@ import java.util.stream.Collectors;
  */
 public class DiffReviewService {
 
+    private static final Logger LOG = Logger.getInstance(DiffReviewService.class);
     private static final int MAX_DIFFS = 50;
 
     private final Project project;
@@ -188,7 +191,7 @@ public class DiffReviewService {
                     }
                 }
             } catch (Exception e) {
-                // Log error silently
+                LOG.error("Revert diff 失败: " + entry.getFilePath(), e);
             }
         });
 

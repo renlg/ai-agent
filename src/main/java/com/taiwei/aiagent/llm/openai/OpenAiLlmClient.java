@@ -165,8 +165,22 @@ public class OpenAiLlmClient implements LlmClient {
 
             @Override
             public void onFailure(EventSource eventSource, Throwable t, Response response) {
-                String msg = t != null ? t.getMessage() : "未知错误";
-                listener.onError("流式请求失败: " + msg, t);
+                StringBuilder msg = new StringBuilder("流式请求失败");
+                if (response != null) {
+                    msg.append(", HTTP ").append(response.code());
+                    try {
+                        String body = response.body() != null ? response.body().string() : "";
+                        if (!body.isEmpty()) {
+                            msg.append(", body: ").append(body);
+                        }
+                    } catch (IOException ignored) {}
+                    response.close();
+                }
+                if (t != null) {
+                    msg.append(", error: ").append(t.getMessage());
+                }
+                LOG.warn(msg.toString());
+                listener.onError(msg.toString(), t);
             }
 
             private void flushToolCalls(LlmStreamListener listener) {
@@ -233,6 +247,13 @@ public class OpenAiLlmClient implements LlmClient {
         // 消息列表
         JsonArray messagesArray = new JsonArray();
         for (ChatMessage msg : messages) {
+            // 跳过无效的 assistant 消息（既无 content 也无 tool_calls）
+            if ("assistant".equals(msg.getRole())
+                    && (msg.getContent() == null || msg.getContent().isEmpty())
+                    && (msg.getToolCalls() == null || msg.getToolCalls().length == 0)) {
+                continue;
+            }
+
             JsonObject msgObj = new JsonObject();
             msgObj.addProperty("role", msg.getRole());
 

@@ -13,7 +13,6 @@
                 <div class="tab-list" id="tabList"></div>
             </div>
             <div class="top-actions">
-                <span class="mode-badge build" id="modeBadge" title="点击切换 Plan / Build 模式">&#x1f7e2; Build</span>
                 <button class="top-btn" id="newSessionBtn" title="新建会话">+ 新建</button>
                 <button class="top-btn" id="clearBtn" title="清空当前会话">清空</button>
             </div>
@@ -27,6 +26,13 @@
         </div>
         <div class="input-area">
             <div class="input-wrapper">
+                <div class="mode-dropdown" id="modeDropdown">
+                    <div class="mode-dropdown-trigger" id="modeDropdownTrigger" title="切换模式">
+                        <span class="mode-dropdown-label" id="modeDropdownLabel">Build</span>
+                        <span class="mode-dropdown-arrow">&#x25BE;</span>
+                    </div>
+                    <div class="mode-dropdown-menu" id="modeDropdownMenu"></div>
+                </div>
                 <div class="model-dropdown" id="modelDropdown">
                     <div class="model-dropdown-trigger" id="modelSelectTrigger" title="切换模型">
                         <span class="model-dropdown-label" id="modelDropdownLabel">选择模型</span>
@@ -36,7 +42,7 @@
                 </div>
                 <textarea id="messageInput"
                           placeholder="&#x8f93;&#x5165;&#x6d88;&#x606f;&#xff0c;Enter &#x53d1;&#x9001;&#xff0c;Shift+Enter &#x6362;&#x884c;..."
-                          rows="5"></textarea>
+                          rows="4"></textarea>
                 <button class="send-btn" id="sendBtn" title="&#x53d1;&#x9001; (Enter)">&#x27A4;</button>
             </div>
         </div>

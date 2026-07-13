@@ -78,7 +78,7 @@ public class ModelConfigurable implements Configurable {
         modelSection.add(buttonPanel, BorderLayout.SOUTH);
 
         // ===== 全局参数区域 =====
-        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(2000000, 256, 2000000, 1024));
+        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(8192, 256, 2000000, 1024));
         maxTokensSpinner.setPreferredSize(new Dimension(140, 32));
 
         temperatureSpinner = new JSpinner(new SpinnerNumberModel(0.7, 0.0, 2.0, 0.1));
@@ -296,7 +296,7 @@ public class ModelConfigurable implements Configurable {
     private static class ModelConfigDialog extends DialogWrapper {
         private JTextField nameField;
         private JTextField baseUrlField;
-        private JTextField apiKeyField;
+        private JPasswordField apiKeyField;
         private JTextField modelNameField;
         private JSpinner compressionThresholdSpinner;
         private AiAgentSettings.ModelConfig config;
@@ -341,7 +341,7 @@ public class ModelConfigurable implements Configurable {
 
             gbc.gridx = 1;
             gbc.weightx = 1.0;
-            apiKeyField = new JTextField(config.apiKey, 30);
+            apiKeyField = new JPasswordField(config.apiKey, 30);
             panel.add(apiKeyField, gbc);
 
             gbc.gridx = 0;
@@ -389,7 +389,7 @@ public class ModelConfigurable implements Configurable {
 
             config.name = nameField.getText().trim();
             config.baseUrl = baseUrlField.getText().trim();
-            config.apiKey = apiKeyField.getText().trim();
+            config.apiKey = new String(apiKeyField.getPassword()).trim();
             config.modelName = modelNameField.getText().trim();
             config.compressionThreshold = (Integer) compressionThresholdSpinner.getValue();
 

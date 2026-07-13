@@ -17,7 +17,9 @@
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
-    var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel, newSessionBtn, clearBtn, modeBadge;
+    var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel;
+    var modeDropdown, modeDropdownTrigger, modeDropdownMenu, modeDropdownLabel;
+    var newSessionBtn, clearBtn;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -32,7 +34,10 @@
         modelDropdownLabel = document.getElementById('modelDropdownLabel');
         newSessionBtn = document.getElementById('newSessionBtn');
         clearBtn = document.getElementById('clearBtn');
-        modeBadge = document.getElementById('modeBadge');
+        modeDropdown = document.getElementById('modeDropdown');
+        modeDropdownTrigger = document.getElementById('modeDropdownTrigger');
+        modeDropdownMenu = document.getElementById('modeDropdownMenu');
+        modeDropdownLabel = document.getElementById('modeDropdownLabel');
         inputWrapper = document.querySelector('.input-wrapper');
 
         if (window.__TAIW_THEME__ === 'dark') {
@@ -67,15 +72,20 @@
         modelDropdownTrigger.addEventListener('click', function (e) {
             e.stopPropagation();
             modelDropdown.classList.toggle('open');
+            // 关闭模式下拉框
+            modeDropdown.classList.remove('open');
         });
 
-        modeBadge.addEventListener('click', function () {
-            var target = modeBadge.classList.contains('plan') ? 'build' : 'plan';
-            callJava('setMode', { mode: target });
+        modeDropdownTrigger.addEventListener('click', function (e) {
+            e.stopPropagation();
+            modeDropdown.classList.toggle('open');
+            // 关闭模型下拉框
+            modelDropdown.classList.remove('open');
         });
 
         document.addEventListener('click', function () {
             modelDropdown.classList.remove('open');
+            modeDropdown.classList.remove('open');
         });
 
         ready = true;
@@ -425,14 +435,29 @@
 
     window.updateMode = function (mode) {
         whenReady(function () {
-            if (!modeBadge) return;
+            if (!modeDropdownLabel || !modeDropdownMenu) return;
             var isPlan = mode === 'plan';
-            modeBadge.innerHTML = isPlan ? '&#x1f7e1; Plan' : '&#x1f7e2; Build';
-            modeBadge.classList.toggle('plan', isPlan);
-            modeBadge.classList.toggle('build', !isPlan);
-            modeBadge.title = isPlan
-                ? '点击切换到 Build 模式（当前：只读分析）'
-                : '点击切换到 Plan 模式（当前：正常读写）';
+            modeDropdownLabel.textContent = isPlan ? '\uD83D\uDFE1 Plan' : '\uD83D\uDFE2 Build';
+
+            // 渲染下拉框选项
+            modeDropdownMenu.innerHTML = '';
+            var modes = [
+                { value: 'build', label: '\uD83D\uDFE2 Build', desc: '\u6b63\u5e38\u8bfb\u5199' },
+                { value: 'plan', label: '\uD83D\uDFE1 Plan', desc: '\u53ea\u8bfb\u5206\u6790' }
+            ];
+            for (var i = 0; i < modes.length; i++) {
+                var item = document.createElement('div');
+                item.className = 'mode-dropdown-item' + (modes[i].value === mode ? ' active' : '');
+                item.setAttribute('data-mode', modes[i].value);
+                item.innerHTML = '<span>' + modes[i].label + '</span><span style="color:var(--text-tertiary);font-size:11px">' + modes[i].desc + '</span>';
+                item.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var selectedMode = this.getAttribute('data-mode');
+                    callJava('setMode', { mode: selectedMode });
+                    modeDropdown.classList.remove('open');
+                });
+                modeDropdownMenu.appendChild(item);
+            }
         });
     };
 
@@ -611,6 +636,10 @@
         var el = document.getElementById('thinkingIndicator');
         if (el) el.remove();
     }
+
+    // 暴露给 Java 端调用
+    window.showThinking = showThinking;
+    window.removeThinking = removeThinking;
 
     function showRoundLoading() {
         removeRoundLoading();

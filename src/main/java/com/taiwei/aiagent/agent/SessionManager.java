@@ -47,6 +47,16 @@ public class SessionManager {
             Conversation conversation = new Conversation(
                     data.id, data.title, data.createdAt, null, messages);
             AgentContext context = new AgentContext(project, conversation);
+
+            // 恢复模式
+            if (data.mode != null && !data.mode.isEmpty()) {
+                context.setMode(AgentMode.fromString(data.mode));
+            }
+            // 恢复模型索引
+            if (data.modelIndex >= 0) {
+                context.setModelIndex(data.modelIndex);
+            }
+
             sessions.put(data.id, context);
         }
 
@@ -78,7 +88,9 @@ public class SessionManager {
                     id,
                     conv.getTitle(),
                     conv.getCreatedAt(),
-                    messageDataList
+                    messageDataList,
+                    ctx.getMode().toJsValue(),
+                    ctx.getModelIndex()
             ));
         }
         sessionStore.save(sessionDataList);

@@ -29,6 +29,8 @@ public class AgentContext {
     private final ToolRegistry toolRegistry;
     private final PromptManager promptManager;
     private volatile AgentMode mode = AgentMode.BUILD;
+    /** 会话级模型索引，-1 表示使用全局默认 */
+    private int modelIndex = -1;
 
     private static final Logger LOG = Logger.getInstance(AgentContext.class);
 
@@ -97,12 +99,27 @@ public class AgentContext {
      * 切换模型（使缓存失效，下次 getLlmClient() 时重建）
      */
     public void switchModel(int modelIndex) {
+        this.modelIndex = modelIndex;
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setActiveModelIndex(modelIndex);
         cachedClient = null;
         cachedBaseUrl = null;
         cachedApiKey = null;
         cachedModel = null;
+    }
+
+    /**
+     * 获取会话级模型索引
+     */
+    public int getModelIndex() {
+        return modelIndex;
+    }
+
+    /**
+     * 设置会话级模型索引（不触发全局设置变更）
+     */
+    public void setModelIndex(int modelIndex) {
+        this.modelIndex = modelIndex;
     }
 
     /**

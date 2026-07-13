@@ -12,6 +12,7 @@ import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.tool.Tool;
 import com.taiwei.aiagent.tool.ToolRegistry;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
+import com.taiwei.aiagent.util.TokenCounter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -281,6 +282,7 @@ public class AgentService {
                     existing = java.nio.file.Files.readString(agentsMdPath, java.nio.charset.StandardCharsets.UTF_8);
                 } catch (Exception e) {
                     LOG.warn("读取已有 AGENTS.md 失败", e);
+                    listener.onContent("\n\n⚠️ 读取已有 AGENTS.md 失败: " + e.getMessage());
                 }
             }
 
@@ -376,6 +378,7 @@ public class AgentService {
 
         StringBuilder fullResponse = new StringBuilder();
         int[] totalUsage = {0, 0, 0}; // promptTokens, completionTokens, totalTokens
+        int[] lastPromptTokens = {0}; // 最近一次 LLM 返回的实际 promptTokens，用于压缩决策
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             if (stopped) {
@@ -387,7 +390,7 @@ public class AgentService {
             }
             LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代（流式）");
 
-            checkAndCompress(context, llmClient);
+            checkAndCompress(context, llmClient, lastPromptTokens[0], listener);
 
             final StringBuilder iterContent = new StringBuilder();
             final List<ChatMessage.ToolCall> iterToolCalls = new ArrayList<>();
@@ -421,6 +424,8 @@ public class AgentService {
                             totalUsage[0] += usage.getPromptTokens();
                             totalUsage[1] += usage.getCompletionTokens();
                             totalUsage[2] += usage.getTotalTokens();
+                            // 记录 LLM 返回的实际 promptTokens，供下一轮压缩决策使用
+                            lastPromptTokens[0] = usage.getPromptTokens();
                         }
 
                         @Override
@@ -509,6 +514,7 @@ public class AgentService {
                                     } catch (Exception e) {
                                         LOG.error("工具 " + toolName + " 执行异常", e);
                                         result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
+                                        listener.onContent("\n\n⚠️ 工具 " + toolName + " 执行异常: " + e.getMessage());
                                     }
                                 } else {
                                     result = "错误: 未找到工具 '" + toolName + "'";
@@ -521,6 +527,7 @@ public class AgentService {
                                 LOG.error("工具 " + toolName + " 回调异常", e);
                                 String errResult = "错误: 工具 '" + toolName + "' 内部异常: " + e.getMessage();
                                 listener.onToolCallEnd(toolCallId, toolName, errResult);
+                                listener.onContent("\n\n⚠️ 工具 " + toolName + " 内部异常: " + e.getMessage());
                                 toolResults.put(toolCallId, errResult);
                             }
                         }, toolExecutor));
@@ -530,7 +537,8 @@ public class AgentService {
                 try {
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                 } catch (Exception e) {
-                    LOG.warn("等待工具异步执行完成时发生异常", e);
+                    LOG.error("等待工具异步执行完成时发生异常", e);
+                    listener.onContent("\n\n⚠️ 工具执行异常: " + e.getMessage());
                 }
 
                 // Fix 5: 按 LLM 输出的 tool_calls 顺序添加结果
@@ -557,9 +565,12 @@ public class AgentService {
             String content = iterContent.length() > 0 ? iterContent.toString() : null;
             if (content != null) {
                 fullResponse.append(content);
+                context.getConversation().addAssistantMessage(content);
+            } else {
+                LOG.warn("Agent 循环第 " + (iteration + 1) + " 次迭代未收到任何内容");
+                listener.onError("LLM 未返回任何内容，请检查模型配置或网络连接");
+                return;
             }
-
-            context.getConversation().addAssistantMessage(content);
 
             LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
             if (usage != null) listener.onUsage(usage);
@@ -696,26 +707,39 @@ public class AgentService {
 
     /**
      * 检查是否需要压缩，如果需要则执行压缩
+     * 优先使用 LLM 返回的实际 promptTokens，无历史数据时回退到 tiktoken 计数
+     *
+     * @param lastPromptTokens 上一轮 LLM 返回的实际 promptTokens，0 表示无历史数据
      */
-    private void checkAndCompress(AgentContext context, LlmClient llmClient) {
+    private void checkAndCompress(AgentContext context, LlmClient llmClient, int lastPromptTokens, AgentListener listener) {
         AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
         int threshold = config.compressionThreshold;
         int maxTokens = AiAgentSettings.getInstance().getMaxTokens();
 
         List<ChatMessage> messages = context.getConversation().getMessages();
-        int totalTokens = estimateTokens(messages);
+        int totalTokens;
+        if (lastPromptTokens > 0) {
+            // 使用 LLM 返回的实际 Token 数
+            totalTokens = lastPromptTokens;
+            LOG.info("使用 LLM 实际 Token 数: " + totalTokens);
+        } else {
+            // 首次迭代无历史数据，回退到 tiktoken 计数（根据模型匹配 tokenizer）
+            totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName());
+            LOG.info("使用 tiktoken 估算 Token 数: " + totalTokens);
+        }
         int thresholdTokens = (int) (maxTokens * threshold / 100.0);
 
         if (totalTokens > thresholdTokens) {
             LOG.info("Token 数 " + totalTokens + " 超过阈值 " + thresholdTokens + " (" + threshold + "% of " + maxTokens + ")，开始压缩");
-            compressConversation(context, llmClient, totalTokens);
+            compressConversation(context, llmClient, totalTokens, listener);
         }
     }
+
 
     /**
      * 执行上下文压缩：摘要压缩，失败则回退到丢弃最旧50%消息
      */
-    private void compressConversation(AgentContext context, LlmClient llmClient, int beforeTokens) {
+    private void compressConversation(AgentContext context, LlmClient llmClient, int beforeTokens, AgentListener listener) {
         List<ChatMessage> messages = context.getConversation().getMessages();
 
         int systemIdx = -1;
@@ -764,18 +788,22 @@ public class AgentService {
 
                 context.getConversation().replaceMessages(newMessages);
 
-                int afterTokens = estimateTokens(context.getConversation().getMessages());
+                int afterTokens = TokenCounter.countTokens(context.getConversation().getMessages(), llmClient.getModelName());
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
 
                 LOG.info("上下文压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
                 notifyCompression(beforeTokens, afterTokens);
             } else {
-                LOG.warn("摘要 LLM 调用失败，回退到丢弃最旧50%消息");
-                fallbackCompress(context, olderMessages, recentMessages, beforeTokens, systemIdx);
+                String errMsg = "摘要压缩失败，回退到丢弃旧消息";
+                LOG.warn(errMsg);
+                listener.onContent("\n\n⚠️ " + errMsg);
+                fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens, systemIdx);
             }
         } catch (Exception e) {
-            LOG.warn("压缩异常，回退到丢弃最旧50%消息", e);
-            fallbackCompress(context, olderMessages, recentMessages, beforeTokens, systemIdx);
+            String errMsg = "压缩异常，回退到丢弃旧消息: " + e.getMessage();
+            LOG.warn(errMsg, e);
+            listener.onContent("\n\n⚠️ " + errMsg);
+            fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens, systemIdx);
         } finally {
             stopped = wasStopped;
         }
@@ -784,7 +812,7 @@ public class AgentService {
     /**
      * 回退压缩：丢弃最旧50%的旧消息
      */
-    private void fallbackCompress(AgentContext context, List<ChatMessage> olderMessages,
+    private void fallbackCompress(AgentContext context, LlmClient llmClient, List<ChatMessage> olderMessages,
                                   List<ChatMessage> recentMessages, int beforeTokens, int systemIdx) {
         int keepCount = olderMessages.size() / 2;
         List<ChatMessage> keptOlder = olderMessages.subList(olderMessages.size() - keepCount, olderMessages.size());
@@ -795,7 +823,7 @@ public class AgentService {
 
         context.getConversation().replaceMessages(newMessages);
 
-        int afterTokens = estimateTokens(context.getConversation().getMessages());
+        int afterTokens = TokenCounter.countTokens(context.getConversation().getMessages(), llmClient.getModelName());
         int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
 
         LOG.info("回退压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
@@ -819,22 +847,6 @@ public class AgentService {
     }
 
     /**
-     * 估算消息列表的总 Token 数
-     * content.length() / 2 + 每条消息约4 tokens overhead
-     */
-    private int estimateTokens(List<ChatMessage> messages) {
-        int total = 0;
-        for (ChatMessage msg : messages) {
-            String content = msg.getContent();
-            if (content != null) {
-                total += content.length() / 2;
-            }
-            total += 4;
-        }
-        return total;
-    }
-
-    /**
      * 通知前端压缩结果
      */
     private void notifyCompression(int beforeTokens, int afterTokens) {
@@ -853,8 +865,15 @@ public class AgentService {
 
         LlmClient llmClient = ctx.getLlmClient();
         List<ChatMessage> messages = ctx.getConversation().getMessages();
-        int beforeTokens = estimateTokens(messages);
+        int beforeTokens = TokenCounter.countTokens(messages, llmClient.getModelName());
 
-        compressConversation(ctx, llmClient, beforeTokens);
+        compressConversation(ctx, llmClient, beforeTokens, new AgentListener() {
+            @Override public void onThinking() {}
+            @Override public void onContent(String content) { LOG.info("压缩通知: " + content); }
+            @Override public void onToolCallStart(String toolCallId, String toolName, String arguments) {}
+            @Override public void onToolCallEnd(String toolCallId, String toolName, String result) {}
+            @Override public void onComplete(String fullResponse) {}
+            @Override public void onError(String error) { LOG.warn("手动压缩: " + error); }
+        });
     }
 }

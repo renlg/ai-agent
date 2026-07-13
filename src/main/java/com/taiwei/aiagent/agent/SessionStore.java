@@ -142,6 +142,10 @@ public class SessionStore {
         public String title;
         public long createdAt;
         public List<MessageData> messages;
+        /** Agent 模式（"plan" / "build"），null 表示未记录 */
+        public String mode;
+        /** 模型索引，-1 表示使用全局默认 */
+        public int modelIndex = -1;
 
         public SessionData() {}
 
@@ -150,6 +154,16 @@ public class SessionStore {
             this.title = title;
             this.createdAt = createdAt;
             this.messages = messages;
+        }
+
+        public SessionData(String id, String title, long createdAt, List<MessageData> messages,
+                           String mode, int modelIndex) {
+            this.id = id;
+            this.title = title;
+            this.createdAt = createdAt;
+            this.messages = messages;
+            this.mode = mode;
+            this.modelIndex = modelIndex;
         }
     }
 
