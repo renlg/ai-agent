@@ -159,6 +159,25 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         state.searchEngineType = searchEngineType;
     }
 
+    // ========== 禁用的 Skill 列表 ==========
+
+    public java.util.Set<String> getDisabledSkills() {
+        return state.disabledSkills;
+    }
+
+    public boolean isSkillEnabled(String skillName) {
+        return !state.disabledSkills.contains(skillName);
+    }
+
+    public void setSkillEnabled(String skillName, boolean enabled) {
+        if (enabled) {
+            state.disabledSkills.remove(skillName);
+        } else {
+            state.disabledSkills.add(skillName);
+        }
+        fireSettingsChanged();
+    }
+
     /**
      * 单个模型配置
      */
@@ -228,6 +247,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 搜索引擎类型：LOW_COST（DuckDuckGo 免费）或 ALIYUN_IQS（阿里云 IQS）
          */
         public String searchEngineType = "LOW_COST";
+
+        /**
+         * 已禁用的 Skill 名称集合（禁用的 Skill 不会被注入系统提示词）
+         */
+        public java.util.Set<String> disabledSkills = new java.util.LinkedHashSet<>();
 
         public State() {
             // 默认添加一个模型

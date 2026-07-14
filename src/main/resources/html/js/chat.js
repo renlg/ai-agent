@@ -20,7 +20,7 @@
     var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel;
     var modeDropdown, modeDropdownTrigger, modeDropdownMenu, modeDropdownLabel;
     var newSessionBtn, clearBtn;
-    var settingsBtn, settingsDropdown, settingsDropdownMenu, refreshSkillsItem, skillsBadge;
+    var settingsBtn, settingsDropdown, settingsDropdownMenu, skillManagerItem, skillsBadge;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -43,7 +43,7 @@
         settingsBtn = document.getElementById('settingsBtn');
         settingsDropdown = document.getElementById('settingsDropdown');
         settingsDropdownMenu = document.getElementById('settingsDropdownMenu');
-        refreshSkillsItem = document.getElementById('refreshSkillsItem');
+        skillManagerItem = document.getElementById('skillManagerItem');
         skillsBadge = document.getElementById('skillsBadge');
 
         if (window.__TAIW_THEME__ === 'dark') {
@@ -99,9 +99,9 @@
             modelDropdown.classList.remove('open');
         });
 
-        refreshSkillsItem.addEventListener('click', function (e) {
+        skillManagerItem.addEventListener('click', function (e) {
             e.stopPropagation();
-            callJava('refreshSkills', {});
+            callJava('openSkillManager', {});
             settingsDropdown.classList.remove('open');
         });
 

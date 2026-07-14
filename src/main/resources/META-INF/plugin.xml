@@ -21,6 +21,7 @@
         <!-- 注册配置服务 -->
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.AiAgentSettings"/>
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.IqsSettings"/>
+        <applicationService serviceImplementation="com.taiwei.aiagent.skill.SkillManager"/>
 
         <!-- 注册 Settings 配置页面（Tools → 太微 → 模型 / 终端 / 网络搜索） -->
         <applicationConfigurable parentId="tools"

@@ -31,7 +31,7 @@ public class PromptManager {
     public PromptManager(Project project) {
         this.project = project;
         this.velocityEngine = createVelocityEngine();
-        this.skillManager = new SkillManager(project);
+        this.skillManager = SkillManager.getInstance();
     }
 
     private VelocityEngine createVelocityEngine() {
@@ -116,10 +116,10 @@ public class PromptManager {
     }
 
     /**
-     * 构建技能上下文，用于注入系统提示词
+     * 构建技能上下文，用于注入系统提示词（仅 name/description/tags，完整内容按需加载）
      */
     public String buildSkillsContext() {
-        return skillManager.getSkillsContext();
+        return skillManager.buildSummaryContext();
     }
 
     private String loadTemplateContent(String resourcePath) {

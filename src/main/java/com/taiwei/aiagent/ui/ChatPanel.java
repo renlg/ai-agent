@@ -52,7 +52,7 @@ public class ChatPanel extends JPanel implements Disposable {
     public ChatPanel(Project project) {
         this.project = project;
         this.agentService = new AgentService(project);
-        this.skillManager = new SkillManager(project);
+        this.skillManager = SkillManager.getInstance();
         this.agentService.setCompressionListener((beforeTokens, afterTokens) -> {
             SwingUtilities.invokeLater(() -> {
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
@@ -145,6 +145,70 @@ public class ChatPanel extends JPanel implements Disposable {
     private void pushSkillsCountToJs() {
         int count = skillManager.getSkillCount();
         pushToJs("updateSkillsCount", String.valueOf(count));
+    }
+
+    private void openSkillManager() {
+        SwingUtilities.invokeLater(() -> {
+            SkillManagerDialog dialog = new SkillManagerDialog(project);
+            dialog.getWindow().addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowClosed(java.awt.event.WindowEvent e) {
+                    pushSkillsCountToJs();
+                }
+            });
+            dialog.show();
+        });
+    }
+
+    private void pushSkillsListToJs(List<com.taiwei.aiagent.skill.Skill> skills) {
+        com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+        for (com.taiwei.aiagent.skill.Skill skill : skills) {
+            com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+            obj.addProperty("name", skill.getName());
+            obj.addProperty("description", skill.getDescription());
+            com.google.gson.JsonArray tags = new com.google.gson.JsonArray();
+            skill.getTags().forEach(tags::add);
+            obj.add("tags", tags);
+            array.add(obj);
+        }
+        pushToJs("updateSkillsList", array.toString());
+    }
+
+    private void pushSkillViewToJs(String name) {
+        java.util.Optional<com.taiwei.aiagent.skill.Skill> found = skillManager.getSkill(name);
+        com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+        if (found.isPresent()) {
+            com.taiwei.aiagent.skill.Skill skill = found.get();
+            obj.addProperty("name", skill.getName());
+            obj.addProperty("description", skill.getDescription());
+            com.google.gson.JsonArray tags = new com.google.gson.JsonArray();
+            skill.getTags().forEach(tags::add);
+            obj.add("tags", tags);
+            obj.addProperty("content", skill.getContent());
+        }
+        pushToJs("updateSkillView", obj.toString());
+    }
+
+    private void addSkill(String fileName, String content) {
+        try {
+            skillManager.addSkill(fileName, content);
+            pushSkillsListToJs(skillManager.listSkills());
+            pushSkillsCountToJs();
+        } catch (Exception e) {
+            LOG.warn("Failed to add skill: " + fileName, e);
+            pushError("添加 Skill 失败: " + e.getMessage());
+        }
+    }
+
+    private void removeSkill(String name) {
+        try {
+            skillManager.removeSkill(name);
+            pushSkillsListToJs(skillManager.listSkills());
+            pushSkillsCountToJs();
+        } catch (Exception e) {
+            LOG.warn("Failed to remove skill: " + name, e);
+            pushError("删除 Skill 失败: " + e.getMessage());
+        }
     }
 
     private void pushModeToJs() {
@@ -272,9 +336,24 @@ public class ChatPanel extends JPanel implements Disposable {
                 case "setMode":
                     setMode(data.get("mode").getAsString());
                     break;
-                case "refreshSkills":
-                    skillManager.loadSkills(project);
-                    pushSkillsCountToJs();
+                case "openSkillManager":
+                    openSkillManager();
+                    break;
+                case "listSkills":
+                    pushSkillsListToJs(skillManager.listSkills());
+                    break;
+                case "searchSkills":
+                    String query = data.has("query") ? data.get("query").getAsString() : "";
+                    pushSkillsListToJs(skillManager.searchSkills(query));
+                    break;
+                case "viewSkill":
+                    pushSkillViewToJs(data.get("name").getAsString());
+                    break;
+                case "addSkill":
+                    addSkill(data.get("fileName").getAsString(), data.get("content").getAsString());
+                    break;
+                case "removeSkill":
+                    removeSkill(data.get("name").getAsString());
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
