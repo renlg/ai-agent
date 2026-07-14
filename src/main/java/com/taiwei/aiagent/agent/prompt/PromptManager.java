@@ -2,6 +2,7 @@ package com.taiwei.aiagent.agent.prompt;
 
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.agent.AgentMode;
+import com.taiwei.aiagent.memory.MemoryManager;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.skill.SkillManager;
 import org.apache.velocity.VelocityContext;
@@ -24,14 +25,18 @@ import java.util.stream.Collectors;
  */
 public class PromptManager {
 
+    private static final int RELEVANT_MEMORY_LIMIT = 8;
+
     private final Project project;
     private final VelocityEngine velocityEngine;
     private final SkillManager skillManager;
+    private final MemoryManager memoryManager;
 
     public PromptManager(Project project) {
         this.project = project;
         this.velocityEngine = createVelocityEngine();
         this.skillManager = SkillManager.getInstance(project);
+        this.memoryManager = MemoryManager.getInstance(project);
     }
 
     private VelocityEngine createVelocityEngine() {
@@ -50,11 +55,21 @@ public class PromptManager {
     }
 
     /**
-     * 生成系统提示词
+     * 生成系统提示词（不携带当前用户消息，无法注入相关长期记忆）
      *
      * @param mode 当前 Agent 模式（Plan/Build），决定提示词中工具能力描述与行为约束
      */
     public String buildSystemPrompt(AgentMode mode) {
+        return buildSystemPrompt(mode, null);
+    }
+
+    /**
+     * 生成系统提示词
+     *
+     * @param mode        当前 Agent 模式（Plan/Build），决定提示词中工具能力描述与行为约束
+     * @param userMessage 当前用户消息，用于检索并注入相关的长期记忆；为 null 时跳过记忆注入
+     */
+    public String buildSystemPrompt(AgentMode mode, String userMessage) {
         VelocityContext context = new VelocityContext();
 
         String basePath = project.getBasePath();
@@ -82,6 +97,13 @@ public class PromptManager {
         String skillsContext = buildSkillsContext();
         if (skillsContext != null && !skillsContext.isEmpty()) {
             context.put("skills", skillsContext);
+        }
+
+        if (userMessage != null && !userMessage.isBlank()) {
+            String memoryContext = memoryManager.buildPromptContext(userMessage, RELEVANT_MEMORY_LIMIT);
+            if (memoryContext != null && !memoryContext.isEmpty()) {
+                context.put("memory", memoryContext);
+            }
         }
 
         String templateContent = loadTemplateContent("templates/system_prompt.vm");

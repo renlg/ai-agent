@@ -236,6 +236,9 @@ public class AgentService {
         // 添加用户消息到对话历史
         ctx.getConversation().addUserMessage(userMessage);
 
+        // 基于当前用户消息检索相关长期记忆，重建系统提示词（就地替换，不影响已有对话历史）
+        ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode(), userMessage));
+
         stopped = false;
         activeLlmClient = ctx.getLlmClient();
 

@@ -60,3 +60,10 @@
 
 ${skills}
 #end
+
+#if($memory && !$memory.isEmpty())
+## Memory
+以下是与当前对话相关的长期记忆（本地存储，用户此前要求你记住的内容）：
+
+${memory}
+#end

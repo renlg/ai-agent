@@ -39,6 +39,7 @@
         <!-- Diff 模块：AI 改动的代码变更追踪与审查系统 -->
         <projectService serviceImplementation="com.taiwei.aiagent.diff.DiffReviewService"/>
         <projectService serviceImplementation="com.taiwei.aiagent.skill.SkillManager"/>
+        <projectService serviceImplementation="com.taiwei.aiagent.memory.MemoryManager"/>
         <editorNotificationProvider implementation="com.taiwei.aiagent.diff.DiffEditorNotificationProvider"/>
     </extensions>
 </idea-plugin>

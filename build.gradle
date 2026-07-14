@@ -81,6 +81,9 @@ dependencies {
     // Tiktoken Token 计数（jtokkit 是 OpenAI tiktoken 的 Java 实现）
     implementation 'com.knuddels:jtokkit:1.1.0'
 
+    // SQLite JDBC 驱动（长期记忆本地存储，纯本地无云端）
+    implementation 'org.xerial:sqlite-jdbc:3.45.3.0'
+
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

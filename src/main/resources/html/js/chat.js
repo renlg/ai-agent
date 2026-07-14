@@ -21,6 +21,7 @@
     var modeDropdown, modeDropdownTrigger, modeDropdownMenu, modeDropdownLabel;
     var newSessionBtn, clearBtn;
     var settingsBtn, settingsDropdown, settingsDropdownMenu, skillManagerItem, skillsBadge;
+    var memoryManagerItem, memoryBadge;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -45,6 +46,8 @@
         settingsDropdownMenu = document.getElementById('settingsDropdownMenu');
         skillManagerItem = document.getElementById('skillManagerItem');
         skillsBadge = document.getElementById('skillsBadge');
+        memoryManagerItem = document.getElementById('memoryManagerItem');
+        memoryBadge = document.getElementById('memoryBadge');
 
         if (window.__TAIW_THEME__ === 'dark') {
             document.body.classList.add('dark');
@@ -102,6 +105,12 @@
         skillManagerItem.addEventListener('click', function (e) {
             e.stopPropagation();
             callJava('openSkillManager', {});
+            settingsDropdown.classList.remove('open');
+        });
+
+        memoryManagerItem.addEventListener('click', function (e) {
+            e.stopPropagation();
+            callJava('openMemoryManager', {});
             settingsDropdown.classList.remove('open');
         });
 
@@ -487,6 +496,12 @@
     window.updateSkillsCount = function (count) {
         whenReady(function () {
             if (skillsBadge) skillsBadge.textContent = count;
+        });
+    };
+
+    window.updateMemoriesCount = function (count) {
+        whenReady(function () {
+            if (memoryBadge) memoryBadge.textContent = count;
         });
     };
 

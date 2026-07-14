@@ -14,6 +14,10 @@ import com.taiwei.aiagent.agent.AgentMode;
 import com.taiwei.aiagent.agent.AgentService;
 import com.taiwei.aiagent.agent.SessionManager;
 import com.taiwei.aiagent.llm.LlmResponse;
+import com.taiwei.aiagent.memory.MemoryCategory;
+import com.taiwei.aiagent.memory.MemoryCommandHandler;
+import com.taiwei.aiagent.memory.MemoryEntry;
+import com.taiwei.aiagent.memory.MemoryManager;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.skill.SkillManager;
@@ -31,7 +35,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class ChatPanel extends JPanel implements Disposable {
@@ -41,6 +47,8 @@ public class ChatPanel extends JPanel implements Disposable {
     private final Project project;
     private final AgentService agentService;
     private final SkillManager skillManager;
+    private final MemoryManager memoryManager;
+    private final MemoryCommandHandler memoryCommandHandler;
 
     private JBCefBrowser browser;
     private JBCefJSQuery jsQuery;
@@ -53,6 +61,8 @@ public class ChatPanel extends JPanel implements Disposable {
         this.project = project;
         this.agentService = new AgentService(project);
         this.skillManager = SkillManager.getInstance(project);
+        this.memoryManager = MemoryManager.getInstance(project);
+        this.memoryCommandHandler = new MemoryCommandHandler(memoryManager);
         this.agentService.setCompressionListener((beforeTokens, afterTokens) -> {
             SwingUtilities.invokeLater(() -> {
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
@@ -140,11 +150,83 @@ public class ChatPanel extends JPanel implements Disposable {
         pushHistoryToJs();
         pushModeToJs();
         pushSkillsCountToJs();
+        pushMemoriesCountToJs();
     }
 
     private void pushSkillsCountToJs() {
         int count = skillManager.getSkillCount();
         pushToJs("updateSkillsCount", String.valueOf(count));
+    }
+
+    private void pushMemoriesCountToJs() {
+        pushToJs("updateMemoriesCount", String.valueOf(memoryManager.getMemoryCount()));
+    }
+
+    private void openMemoryManager() {
+        SwingUtilities.invokeLater(() -> {
+            MemoryManagerDialog dialog = new MemoryManagerDialog(project);
+            dialog.getWindow().addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowClosed(java.awt.event.WindowEvent e) {
+                    pushMemoriesCountToJs();
+                }
+            });
+            dialog.show();
+        });
+    }
+
+    private void pushMemoriesListToJs(List<MemoryEntry> memories) {
+        com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+        for (MemoryEntry memory : memories) {
+            com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+            obj.addProperty("id", memory.getId());
+            obj.addProperty("content", memory.getContent());
+            obj.addProperty("category", memory.getCategory().name());
+            com.google.gson.JsonArray tags = new com.google.gson.JsonArray();
+            memory.getTags().forEach(tags::add);
+            obj.add("tags", tags);
+            obj.addProperty("importance", memory.getImportance());
+            obj.addProperty("accessCount", memory.getAccessCount());
+            obj.addProperty("createdAt", memory.getCreatedAt());
+            obj.addProperty("updatedAt", memory.getUpdatedAt());
+            obj.addProperty("lastAccessedAt", memory.getLastAccessedAt());
+            array.add(obj);
+        }
+        pushToJs("updateMemoriesList", array.toString());
+    }
+
+    private void rememberMemory(com.google.gson.JsonObject data) {
+        try {
+            String content = data.get("content").getAsString();
+            MemoryCategory category = parseMemoryCategory(
+                    data.has("category") ? data.get("category").getAsString() : null);
+            List<String> tags = new ArrayList<>();
+            if (data.has("tags")) {
+                for (com.google.gson.JsonElement el : data.getAsJsonArray("tags")) {
+                    tags.add(el.getAsString());
+                }
+            }
+            int importance = data.has("importance") ? data.get("importance").getAsInt() : 5;
+            memoryManager.remember(content, category, tags, importance);
+            pushMemoriesCountToJs();
+        } catch (Exception e) {
+            LOG.warn("Failed to remember memory", e);
+            pushError("记忆保存失败: " + e.getMessage());
+        }
+    }
+
+    private void forgetMemory(String id) {
+        memoryManager.forget(id);
+        pushMemoriesCountToJs();
+    }
+
+    private static MemoryCategory parseMemoryCategory(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return MemoryCategory.valueOf(raw.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private void openSkillManager() {
@@ -355,6 +437,23 @@ public class ChatPanel extends JPanel implements Disposable {
                 case "removeSkill":
                     removeSkill(data.get("name").getAsString());
                     break;
+                case "openMemoryManager":
+                    openMemoryManager();
+                    break;
+                case "listMemories":
+                    String memCategory = data.has("category") ? data.get("category").getAsString() : null;
+                    pushMemoriesListToJs(memoryManager.list(parseMemoryCategory(memCategory), 100));
+                    break;
+                case "searchMemories":
+                    String memQuery = data.has("query") ? data.get("query").getAsString() : "";
+                    pushMemoriesListToJs(memoryManager.recall(memQuery, 20));
+                    break;
+                case "rememberMemory":
+                    rememberMemory(data);
+                    break;
+                case "forgetMemory":
+                    forgetMemory(data.get("id").getAsString());
+                    break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
             }
@@ -554,6 +653,13 @@ public class ChatPanel extends JPanel implements Disposable {
         String sessionId = agentService.getActiveSessionId();
         if (sessionId == null) return;
 
+        // 记忆相关的指令（记住/忘了/我上次说的...）在本地直接处理，不进入 LLM 对话流程
+        Optional<String> memoryReply = memoryCommandHandler.tryHandle(text);
+        if (memoryReply.isPresent()) {
+            respondWithMemoryCommand(sessionId, text, memoryReply.get());
+            return;
+        }
+
         SessionState sessionState = sessionStates.computeIfAbsent(sessionId, k -> new SessionState());
         if (sessionState.isProcessing) return;
 
@@ -749,6 +855,21 @@ public class ChatPanel extends JPanel implements Disposable {
                 }
             });
         });
+    }
+
+    /**
+     * 记忆指令（记住/忘了/我上次说的...）本地直接生成回复，不调用 LLM
+     */
+    private void respondWithMemoryCommand(String sessionId, String userText, String reply) {
+        SessionState sessionState = sessionStates.computeIfAbsent(sessionId, k -> new SessionState());
+        sessionState.chatEntries.add(ChatEntry.user(userText));
+        sessionState.chatEntries.add(ChatEntry.assistant(reply));
+
+        if (sessionId.equals(agentService.getActiveSessionId())) {
+            pushContent(reply);
+            pushComplete();
+        }
+        pushMemoriesCountToJs();
     }
 
     // ========== Manual Compress ==========
