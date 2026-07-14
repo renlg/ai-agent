@@ -28,18 +28,21 @@ public class MemoryStore implements AutoCloseable {
 
     private final Connection connection;
     private final Object lock = new Object();
+    /** Path of the backing DB file on disk, or {@code null} for the in-memory store used by tests. */
+    private final Path dbFilePath;
 
     /** Opens (or creates) a SQLite database file on disk, creating parent directories as needed. */
     public MemoryStore(Path dbFile) {
-        this(jdbcUrlForFile(dbFile));
+        this(jdbcUrlForFile(dbFile), dbFile);
     }
 
     /** Opens a private in-memory SQLite database. Used by tests to avoid touching disk. */
     public MemoryStore() {
-        this("jdbc:sqlite::memory:");
+        this("jdbc:sqlite::memory:", null);
     }
 
-    private MemoryStore(String jdbcUrl) {
+    private MemoryStore(String jdbcUrl, Path dbFilePath) {
+        this.dbFilePath = dbFilePath;
         try {
             Class.forName("org.sqlite.JDBC");
             this.connection = DriverManager.getConnection(jdbcUrl);
@@ -160,6 +163,16 @@ public class MemoryStore implements AutoCloseable {
             } catch (SQLException e) {
                 throw new IllegalStateException("Failed to count memories", e);
             }
+        }
+    }
+
+    /** Size in bytes of the backing DB file on disk, or 0 for the in-memory store. */
+    public long getFileSizeBytes() {
+        if (dbFilePath == null) return 0L;
+        try {
+            return Files.size(dbFilePath);
+        } catch (IOException e) {
+            return 0L;
         }
     }
 

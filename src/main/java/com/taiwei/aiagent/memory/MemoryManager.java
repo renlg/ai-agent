@@ -1,6 +1,7 @@
 package com.taiwei.aiagent.memory;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 
@@ -24,11 +25,17 @@ import java.util.regex.Pattern;
  */
 public class MemoryManager implements Disposable {
 
+    private static final Logger LOG = Logger.getInstance(MemoryManager.class);
+
     private static final Pattern TOKEN_SPLIT = Pattern.compile("[^\\p{IsHan}\\p{L}\\p{N}]+");
     private static final long DAY_MILLIS = 24L * 60 * 60 * 1000;
     private static final long DECAY_PERIOD_MILLIS = 30 * DAY_MILLIS;
 
+    /** Default cap on the on-disk size of the memory database. */
+    public static final long MAX_STORAGE_BYTES = 50 * 1024 * 1024;
+
     private final MemoryStore store;
+    private volatile long maxStorageBytes = MAX_STORAGE_BYTES;
 
     /** Constructor used by the IntelliJ project-service container. */
     public MemoryManager(@NotNull Project project) {
@@ -53,6 +60,16 @@ public class MemoryManager implements Disposable {
     public MemoryEntry remember(String content, MemoryCategory category, List<String> tags, int importance) {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("Memory content must not be blank");
+        }
+        if (getStorageUsageBytes() >= maxStorageBytes) {
+            autoConsolidate();
+            if (getStorageUsageBytes() >= maxStorageBytes) {
+                LOG.warn("Rejecting new memory: storage usage " + getStorageUsageBytes()
+                        + " bytes has reached the limit of " + maxStorageBytes
+                        + " bytes even after auto-consolidation");
+                throw new IllegalStateException(
+                        "Memory storage limit reached (" + maxStorageBytes + " bytes); new memory was not saved");
+            }
         }
         long now = System.currentTimeMillis();
         MemoryEntry entry = MemoryEntry.create(
@@ -262,6 +279,21 @@ public class MemoryManager implements Disposable {
         if (importance < 1) return 1;
         if (importance > 10) return 10;
         return importance;
+    }
+
+    /** Returns the current size of the memory database file on disk, in bytes. */
+    public long getStorageUsageBytes() {
+        return store.getFileSizeBytes();
+    }
+
+    /** Returns the percentage of the configured storage limit currently in use (0.0 – 100.0). */
+    public double getStorageUsagePercent() {
+        return (double) getStorageUsageBytes() / maxStorageBytes * 100.0;
+    }
+
+    /** Dynamically changes the storage cap. Pass 0 or negative to disable the limit. */
+    public void setMaxStorageBytes(long bytes) {
+        this.maxStorageBytes = bytes;
     }
 
     private static class ScoredEntry {
