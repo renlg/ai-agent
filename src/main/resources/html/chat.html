@@ -13,8 +13,17 @@
                 <div class="tab-list" id="tabList"></div>
             </div>
             <div class="top-actions">
+                <button class="top-btn" id="settingsBtn" title="设置">⚙ 设置</button>
                 <button class="top-btn" id="newSessionBtn" title="新建会话">+ 新建</button>
                 <button class="top-btn" id="clearBtn" title="清空当前会话">清空</button>
+            </div>
+        </div>
+        <div class="settings-dropdown" id="settingsDropdown">
+            <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                <div class="settings-item" id="refreshSkillsItem">
+                    <span>🔄 刷新 Skill 加载</span>
+                    <span class="skills-badge" id="skillsBadge">0</span>
+                </div>
             </div>
         </div>
         <div class="messages-area" id="messagesArea">

@@ -89,6 +89,7 @@ html, body {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    position: relative;
 }
 
 /* ===== Top Bar ===== */
@@ -196,6 +197,58 @@ html, body {
 
 .top-btn:hover {
     background: var(--accent-light);
+}
+
+.settings-dropdown {
+    position: absolute;
+    top: 42px;
+    right: 12px;
+    z-index: 1000;
+    display: none;
+}
+
+.settings-dropdown.open {
+    display: block;
+}
+
+.settings-dropdown-menu {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    min-width: 180px;
+    overflow: hidden;
+}
+
+.settings-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-primary);
+    transition: background 0.15s;
+}
+
+.settings-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.settings-item:not(:last-child) {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.skills-badge {
+    background: var(--accent-light);
+    color: var(--accent);
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 500;
+    min-width: 18px;
+    text-align: center;
 }
 
 

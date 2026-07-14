@@ -16,6 +16,7 @@ import com.taiwei.aiagent.agent.SessionManager;
 import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
+import com.taiwei.aiagent.skill.SkillManager;
 
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefLoadHandlerAdapter;
@@ -39,6 +40,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
     private final Project project;
     private final AgentService agentService;
+    private final SkillManager skillManager;
 
     private JBCefBrowser browser;
     private JBCefJSQuery jsQuery;
@@ -50,6 +52,7 @@ public class ChatPanel extends JPanel implements Disposable {
     public ChatPanel(Project project) {
         this.project = project;
         this.agentService = new AgentService(project);
+        this.skillManager = new SkillManager(project);
         this.agentService.setCompressionListener((beforeTokens, afterTokens) -> {
             SwingUtilities.invokeLater(() -> {
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
@@ -136,6 +139,12 @@ public class ChatPanel extends JPanel implements Disposable {
         pushModelListToJs();
         pushHistoryToJs();
         pushModeToJs();
+        pushSkillsCountToJs();
+    }
+
+    private void pushSkillsCountToJs() {
+        int count = skillManager.getSkillCount();
+        pushToJs("updateSkillsCount", String.valueOf(count));
     }
 
     private void pushModeToJs() {
@@ -262,6 +271,10 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "setMode":
                     setMode(data.get("mode").getAsString());
+                    break;
+                case "refreshSkills":
+                    skillManager.loadSkills(project);
+                    pushSkillsCountToJs();
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);

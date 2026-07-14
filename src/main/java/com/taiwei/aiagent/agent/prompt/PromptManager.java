@@ -3,6 +3,7 @@ package com.taiwei.aiagent.agent.prompt;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.agent.AgentMode;
 import com.taiwei.aiagent.settings.AiAgentSettings;
+import com.taiwei.aiagent.skill.SkillManager;
 import org.apache.velocity.VelocityContext;
 import org.apache.velocity.app.VelocityEngine;
 
@@ -25,10 +26,12 @@ public class PromptManager {
 
     private final Project project;
     private final VelocityEngine velocityEngine;
+    private final SkillManager skillManager;
 
     public PromptManager(Project project) {
         this.project = project;
         this.velocityEngine = createVelocityEngine();
+        this.skillManager = new SkillManager(project);
     }
 
     private VelocityEngine createVelocityEngine() {
@@ -76,6 +79,11 @@ public class PromptManager {
         context.put("isPlanMode", isPlanMode);
         context.put("modeLabel", isPlanMode ? "Plan（只读分析）" : "Build（正常）");
 
+        String skillsContext = buildSkillsContext();
+        if (skillsContext != null && !skillsContext.isEmpty()) {
+            context.put("skills", skillsContext);
+        }
+
         String templateContent = loadTemplateContent("templates/system_prompt.vm");
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "system_prompt", templateContent);
@@ -105,6 +113,13 @@ public class PromptManager {
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "init_prompt", templateContent);
         return writer.toString();
+    }
+
+    /**
+     * 构建技能上下文，用于注入系统提示词
+     */
+    public String buildSkillsContext() {
+        return skillManager.getSkillsContext();
     }
 
     private String loadTemplateContent(String resourcePath) {

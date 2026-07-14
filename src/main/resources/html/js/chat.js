@@ -20,6 +20,7 @@
     var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel;
     var modeDropdown, modeDropdownTrigger, modeDropdownMenu, modeDropdownLabel;
     var newSessionBtn, clearBtn;
+    var settingsBtn, settingsDropdown, settingsDropdownMenu, refreshSkillsItem, skillsBadge;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -39,6 +40,11 @@
         modeDropdownMenu = document.getElementById('modeDropdownMenu');
         modeDropdownLabel = document.getElementById('modeDropdownLabel');
         inputWrapper = document.querySelector('.input-wrapper');
+        settingsBtn = document.getElementById('settingsBtn');
+        settingsDropdown = document.getElementById('settingsDropdown');
+        settingsDropdownMenu = document.getElementById('settingsDropdownMenu');
+        refreshSkillsItem = document.getElementById('refreshSkillsItem');
+        skillsBadge = document.getElementById('skillsBadge');
 
         if (window.__TAIW_THEME__ === 'dark') {
             document.body.classList.add('dark');
@@ -72,20 +78,37 @@
         modelDropdownTrigger.addEventListener('click', function (e) {
             e.stopPropagation();
             modelDropdown.classList.toggle('open');
-            // 关闭模式下拉框
+            // 关闭模式下拉框和设置下拉框
             modeDropdown.classList.remove('open');
+            settingsDropdown.classList.remove('open');
         });
 
         modeDropdownTrigger.addEventListener('click', function (e) {
             e.stopPropagation();
             modeDropdown.classList.toggle('open');
-            // 关闭模型下拉框
+            // 关闭模型下拉框和设置下拉框
             modelDropdown.classList.remove('open');
+            settingsDropdown.classList.remove('open');
+        });
+
+        settingsBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            settingsDropdown.classList.toggle('open');
+            // 关闭模式和模型下拉框
+            modeDropdown.classList.remove('open');
+            modelDropdown.classList.remove('open');
+        });
+
+        refreshSkillsItem.addEventListener('click', function (e) {
+            e.stopPropagation();
+            callJava('refreshSkills', {});
+            settingsDropdown.classList.remove('open');
         });
 
         document.addEventListener('click', function () {
             modelDropdown.classList.remove('open');
             modeDropdown.classList.remove('open');
+            settingsDropdown.classList.remove('open');
         });
 
         ready = true;
@@ -458,6 +481,12 @@
                 });
                 modeDropdownMenu.appendChild(item);
             }
+        });
+    };
+
+    window.updateSkillsCount = function (count) {
+        whenReady(function () {
+            if (skillsBadge) skillsBadge.textContent = count;
         });
     };
 
