@@ -178,6 +178,32 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         fireSettingsChanged();
     }
 
+    // ========== MCP 服务器配置 ==========
+
+    public List<McpConfig> getMcpConfigs() {
+        return state.mcpConfigs;
+    }
+
+    public void setMcpConfigs(List<McpConfig> configs) {
+        state.mcpConfigs = configs;
+    }
+
+    public void addMcpConfig(McpConfig config) {
+        state.mcpConfigs.add(config);
+    }
+
+    public void removeMcpConfig(int index) {
+        if (index >= 0 && index < state.mcpConfigs.size()) {
+            state.mcpConfigs.remove(index);
+        }
+    }
+
+    public void updateMcpConfig(int index, McpConfig config) {
+        if (index >= 0 && index < state.mcpConfigs.size()) {
+            state.mcpConfigs.set(index, config);
+        }
+    }
+
     /**
      * 单个模型配置
      */
@@ -207,6 +233,70 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
 
         public ModelConfig copy() {
             return new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold);
+        }
+    }
+
+    /**
+     * 通用键值对（用于 MCP 请求头 / 环境变量的 XML 持久化）
+     */
+    public static class HeaderEntry {
+        public String key = "";
+        public String value = "";
+
+        public HeaderEntry() {}
+
+        public HeaderEntry(String key, String value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        public HeaderEntry copy() {
+            return new HeaderEntry(key, value);
+        }
+    }
+
+    /**
+     * 单个 MCP 服务器配置
+     */
+    public static class McpConfig {
+        public String id = java.util.UUID.randomUUID().toString();
+        public String name = "";
+        public boolean enabled = true;
+        public com.taiwei.aiagent.mcp.McpTransportType transportType = com.taiwei.aiagent.mcp.McpTransportType.STDIO;
+
+        /** STDIO 传输：子进程命令、参数、环境变量 */
+        public String command = "";
+        public List<String> args = new ArrayList<>();
+        public List<HeaderEntry> env = new ArrayList<>();
+
+        /** SSE / STREAMABLE_HTTP 传输：服务地址、自定义请求头 */
+        public String url = "";
+        public List<HeaderEntry> headers = new ArrayList<>();
+
+        /** 单次请求超时时间（秒） */
+        public int timeoutSeconds = 30;
+
+        /** 该服务器下被禁用的工具名称列表（MCP 原始工具名，不带前缀） */
+        public List<String> disabledTools = new ArrayList<>();
+
+        public McpConfig() {}
+
+        public McpConfig copy() {
+            McpConfig c = new McpConfig();
+            c.id = id;
+            c.name = name;
+            c.enabled = enabled;
+            c.transportType = transportType;
+            c.command = command;
+            c.args = new ArrayList<>(args);
+            c.env = new ArrayList<>();
+            for (HeaderEntry e : env) c.env.add(e.copy());
+            c.url = url;
+            c.headers = new ArrayList<>();
+            for (HeaderEntry h : headers) c.headers.add(h.copy());
+            c.timeoutSeconds = timeoutSeconds;
+            c.disabledTools = new ArrayList<>(disabledTools);
+            return c;
         }
     }
 
@@ -252,6 +342,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 已禁用的 Skill 名称集合（禁用的 Skill 不会被注入系统提示词）
          */
         public java.util.Set<String> disabledSkills = new java.util.LinkedHashSet<>();
+
+        /**
+         * MCP（Model Context Protocol）服务器配置列表
+         */
+        public List<McpConfig> mcpConfigs = new ArrayList<>();
 
         public State() {
             // 默认添加一个模型

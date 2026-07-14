@@ -140,6 +140,11 @@ public class AgentContext {
         } else {
             toolRegistry.register(new DdgSearchTool());
         }
+
+        for (com.taiwei.aiagent.mcp.McpToolAdapter mcpTool
+                : com.taiwei.aiagent.mcp.McpManager.getInstance(project).getActiveTools()) {
+            toolRegistry.register(mcpTool);
+        }
     }
 
     /**
