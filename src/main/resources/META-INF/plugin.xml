@@ -21,7 +21,6 @@
         <!-- 注册配置服务 -->
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.AiAgentSettings"/>
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.IqsSettings"/>
-        <applicationService serviceImplementation="com.taiwei.aiagent.skill.SkillManager"/>
 
         <!-- 注册 Settings 配置页面（Tools → 太微 → 模型 / 终端 / 网络搜索） -->
         <applicationConfigurable parentId="tools"
@@ -39,6 +38,7 @@
 
         <!-- Diff 模块：AI 改动的代码变更追踪与审查系统 -->
         <projectService serviceImplementation="com.taiwei.aiagent.diff.DiffReviewService"/>
+        <projectService serviceImplementation="com.taiwei.aiagent.skill.SkillManager"/>
         <editorNotificationProvider implementation="com.taiwei.aiagent.diff.DiffEditorNotificationProvider"/>
     </extensions>
 </idea-plugin>

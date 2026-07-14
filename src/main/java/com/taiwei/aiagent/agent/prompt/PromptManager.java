@@ -31,7 +31,7 @@ public class PromptManager {
     public PromptManager(Project project) {
         this.project = project;
         this.velocityEngine = createVelocityEngine();
-        this.skillManager = SkillManager.getInstance();
+        this.skillManager = SkillManager.getInstance(project);
     }
 
     private VelocityEngine createVelocityEngine() {

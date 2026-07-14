@@ -1,10 +1,10 @@
 package com.taiwei.aiagent.skill;
 
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.settings.AiAgentSettings;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,21 +49,22 @@ public class SkillManager implements Disposable {
     private Thread watchThread;
     private volatile boolean watching = false;
 
-    /** No-arg constructor used by the IntelliJ application-service container. */
-    public SkillManager() {
-        this(defaultSkillsDir());
+    /** Constructor used by the IntelliJ project-service container. */
+    public SkillManager(@NotNull Project project) {
+        this(defaultSkillsDir(project));
     }
 
     public SkillManager(Path skillsDir) {
         this.skillsDir = skillsDir;
     }
 
-    public static SkillManager getInstance() {
-        return ApplicationManager.getApplication().getService(SkillManager.class);
+    public static SkillManager getInstance(@NotNull Project project) {
+        return project.getService(SkillManager.class);
     }
 
-    private static Path defaultSkillsDir() {
-        return Paths.get(PathManager.getConfigPath(), "ai-agent", "skills");
+    private static Path defaultSkillsDir(@NotNull Project project) {
+        String basePath = project.getBasePath();
+        return Paths.get(basePath, ".taiwei", "skills");
     }
 
     public Path getSkillsDir() {

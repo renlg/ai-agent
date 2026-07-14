@@ -52,7 +52,7 @@ public class ChatPanel extends JPanel implements Disposable {
     public ChatPanel(Project project) {
         this.project = project;
         this.agentService = new AgentService(project);
-        this.skillManager = SkillManager.getInstance();
+        this.skillManager = SkillManager.getInstance(project);
         this.agentService.setCompressionListener((beforeTokens, afterTokens) -> {
             SwingUtilities.invokeLater(() -> {
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;

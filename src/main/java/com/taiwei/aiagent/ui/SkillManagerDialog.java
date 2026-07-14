@@ -9,7 +9,6 @@ import com.taiwei.aiagent.skill.Skill;
 import com.taiwei.aiagent.skill.SkillManager;
 import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
@@ -28,9 +27,9 @@ public class SkillManagerDialog extends DialogWrapper {
     private SkillTableModel tableModel;
     private JBTable table;
 
-    public SkillManagerDialog(@Nullable Project project) {
+    public SkillManagerDialog(@NotNull Project project) {
         super(project, false, IdeModalityType.MODELESS);
-        this.skillManager = SkillManager.getInstance();
+        this.skillManager = SkillManager.getInstance(project);
         this.settings = AiAgentSettings.getInstance();
         setTitle(I18nUtil.getMessage("skill.manager.title"));
         setCancelButtonText(I18nUtil.getMessage("skill.manager.closeBtn"));
