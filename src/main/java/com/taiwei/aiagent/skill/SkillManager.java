@@ -8,16 +8,9 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.ClosedWatchServiceException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardWatchEventKinds;
-import java.nio.file.WatchEvent;
-import java.nio.file.WatchKey;
-import java.nio.file.WatchService;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -44,10 +37,6 @@ public class SkillManager implements Disposable {
     private final ConcurrentHashMap<String, Skill> registry = new ConcurrentHashMap<>();
     private final ReentrantLock scanLock = new ReentrantLock();
     private volatile boolean scanned = false;
-
-    private WatchService watchService;
-    private Thread watchThread;
-    private volatile boolean watching = false;
 
     /** Constructor used by the IntelliJ project-service container. */
     public SkillManager(@NotNull Project project) {
@@ -193,7 +182,6 @@ public class SkillManager implements Disposable {
             if (scanned) return;
             scanDirectory();
             scanned = true;
-            startWatching();
         } finally {
             scanLock.unlock();
         }
@@ -205,9 +193,10 @@ public class SkillManager implements Disposable {
                 Files.createDirectories(skillsDir);
                 return;
             }
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(skillsDir, "*.md")) {
-                for (Path file : stream) {
+            try (var paths = Files.walk(skillsDir)) {
+                for (Path file : (Iterable<Path>) paths::iterator) {
                     if (!Files.isRegularFile(file)) continue;
+                    if (!file.getFileName().toString().endsWith(".md")) continue;
                     try {
                         Skill meta = SkillFrontmatterParser.parseMetadata(file);
                         registry.put(meta.getName(), meta);
@@ -238,76 +227,8 @@ public class SkillManager implements Disposable {
         return base;
     }
 
-    // ========== Directory watcher (background thread, started lazily on first scan) ==========
-
-    private synchronized void startWatching() {
-        if (watching) return;
-        try {
-            watchService = FileSystems.getDefault().newWatchService();
-            skillsDir.register(watchService,
-                    StandardWatchEventKinds.ENTRY_CREATE,
-                    StandardWatchEventKinds.ENTRY_DELETE,
-                    StandardWatchEventKinds.ENTRY_MODIFY);
-            watching = true;
-            watchThread = new Thread(this::watchLoop, "ai-agent-skill-watcher");
-            watchThread.setDaemon(true);
-            watchThread.start();
-        } catch (IOException e) {
-            LOG.warn("Failed to start skill directory watcher for " + skillsDir, e);
-        }
-    }
-
-    private void watchLoop() {
-        while (watching) {
-            WatchKey key;
-            try {
-                key = watchService.take();
-            } catch (InterruptedException | ClosedWatchServiceException e) {
-                break;
-            }
-            for (WatchEvent<?> event : key.pollEvents()) {
-                Object context = event.context();
-                if (!(context instanceof Path)) continue;
-                Path changed = skillsDir.resolve((Path) context);
-                if (!changed.getFileName().toString().endsWith(".md")) continue;
-                onFileChanged(changed, event.kind());
-            }
-            if (!key.reset()) break;
-        }
-    }
-
-    private void onFileChanged(Path changed, WatchEvent.Kind<?> kind) {
-        if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-            registry.values().removeIf(skill -> skill.getFilePath().equals(changed));
-            return;
-        }
-        try {
-            Skill meta = SkillFrontmatterParser.parseMetadata(changed);
-            // Drop any stale entry for this file under a previous name before reinserting.
-            registry.values().removeIf(skill -> skill.getFilePath().equals(changed)
-                    && !skill.getName().equals(meta.getName()));
-            registry.put(meta.getName(), meta);
-        } catch (IOException e) {
-            LOG.warn("Failed to refresh skill after change: " + changed, e);
-        }
-    }
-
-    private synchronized void stopWatching() {
-        watching = false;
-        if (watchThread != null) {
-            watchThread.interrupt();
-        }
-        try {
-            if (watchService != null) {
-                watchService.close();
-            }
-        } catch (IOException ignored) {
-            // best-effort shutdown
-        }
-    }
-
     @Override
     public void dispose() {
-        stopWatching();
+        // No background resources to release; skills are loaded via manual refresh().
     }
 }
