@@ -375,7 +375,17 @@ public class ChatPanel extends JPanel implements Disposable {
             switch (action) {
                 case "sendMessage":
                     String content = data.has("content") ? data.get("content").getAsString() : "";
-                    sendMessage(content);
+                    List<ChatMessage.ImageContent> images = null;
+                    if (data.has("images") && data.get("images").isJsonArray()) {
+                        images = new ArrayList<>();
+                        for (com.google.gson.JsonElement el : data.getAsJsonArray("images")) {
+                            com.google.gson.JsonObject imgObj = el.getAsJsonObject();
+                            String base64 = imgObj.get("base64").getAsString();
+                            String mimeType = imgObj.get("mimeType").getAsString();
+                            images.add(new ChatMessage.ImageContent(base64, mimeType));
+                        }
+                    }
+                    sendMessage(content, images);
                     break;
                 case "createSession":
                     createNewSession();
@@ -647,7 +657,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
     // ========== Send Message ==========
 
-    private void sendMessage(String text) {
+    private void sendMessage(String text, List<ChatMessage.ImageContent> images) {
         if (text == null || text.trim().isEmpty()) return;
 
         String sessionId = agentService.getActiveSessionId();
@@ -670,7 +680,7 @@ public class ChatPanel extends JPanel implements Disposable {
         sessionState.chatEntries.add(ChatEntry.user(text));
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            agentService.sendMessage(sessionId, text, new AgentService.AgentListener() {
+            agentService.sendMessage(sessionId, text, images, new AgentService.AgentListener() {
 
                 @Override
                 public void onThinking() {

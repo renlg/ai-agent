@@ -1,5 +1,8 @@
 package com.taiwei.aiagent.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 聊天消息模型
  * 对应 OpenAI Chat Completion API 的 message 结构
@@ -26,6 +29,11 @@ public class ChatMessage {
      */
     private ToolCall[] toolCalls;
 
+    /**
+     * 图片内容列表（视觉输入，仅 role=user 时使用）
+     */
+    private List<ImageContent> imageContents;
+
     public ChatMessage() {
     }
 
@@ -42,6 +50,12 @@ public class ChatMessage {
 
     public static ChatMessage user(String content) {
         return new ChatMessage("user", content);
+    }
+
+    public static ChatMessage userWithImages(String content, List<ImageContent> images) {
+        ChatMessage msg = new ChatMessage("user", content);
+        msg.setImageContents(images);
+        return msg;
     }
 
     public static ChatMessage assistant(String content) {
@@ -86,6 +100,50 @@ public class ChatMessage {
 
     public void setToolCalls(ToolCall[] toolCalls) {
         this.toolCalls = toolCalls;
+    }
+
+    public List<ImageContent> getImageContents() {
+        return imageContents;
+    }
+
+    public void setImageContents(List<ImageContent> imageContents) {
+        this.imageContents = imageContents;
+    }
+
+    public boolean hasImages() {
+        return imageContents != null && !imageContents.isEmpty();
+    }
+
+    /**
+     * 图片内容（视觉输入）
+     */
+    public static class ImageContent {
+        private String base64Data;
+        private String mimeType;
+
+        public ImageContent() {
+        }
+
+        public ImageContent(String base64Data, String mimeType) {
+            this.base64Data = base64Data;
+            this.mimeType = mimeType;
+        }
+
+        public String getBase64Data() {
+            return base64Data;
+        }
+
+        public void setBase64Data(String base64Data) {
+            this.base64Data = base64Data;
+        }
+
+        public String getMimeType() {
+            return mimeType;
+        }
+
+        public void setMimeType(String mimeType) {
+            this.mimeType = mimeType;
+        }
     }
 
     /**

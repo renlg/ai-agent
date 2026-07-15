@@ -257,7 +257,24 @@ public class OpenAiLlmClient implements LlmClient {
             JsonObject msgObj = new JsonObject();
             msgObj.addProperty("role", msg.getRole());
 
-            if (msg.getContent() != null) {
+            if (msg.hasImages()) {
+                JsonArray contentArray = new JsonArray();
+                if (msg.getContent() != null && !msg.getContent().isEmpty()) {
+                    JsonObject textPart = new JsonObject();
+                    textPart.addProperty("type", "text");
+                    textPart.addProperty("text", msg.getContent());
+                    contentArray.add(textPart);
+                }
+                for (ChatMessage.ImageContent img : msg.getImageContents()) {
+                    JsonObject imagePart = new JsonObject();
+                    imagePart.addProperty("type", "image_url");
+                    JsonObject imageUrlObj = new JsonObject();
+                    imageUrlObj.addProperty("url", "data:" + img.getMimeType() + ";base64," + img.getBase64Data());
+                    imagePart.add("image_url", imageUrlObj);
+                    contentArray.add(imagePart);
+                }
+                msgObj.add("content", contentArray);
+            } else if (msg.getContent() != null) {
                 msgObj.addProperty("content", msg.getContent());
             }
 

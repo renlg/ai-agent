@@ -45,5 +45,8 @@
         <projectService serviceImplementation="com.taiwei.aiagent.memory.MemoryManager"/>
         <projectService serviceImplementation="com.taiwei.aiagent.mcp.McpManager"/>
         <editorNotificationProvider implementation="com.taiwei.aiagent.diff.DiffEditorNotificationProvider"/>
+
+        <!-- Tab 自动补全 -->
+        <codeInsight.inlineCompletionProvider implementation="com.taiwei.aiagent.completion.InlineCompletionProvider"/>
     </extensions>
 </idea-plugin>

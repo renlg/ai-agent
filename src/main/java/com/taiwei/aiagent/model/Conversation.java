@@ -87,6 +87,20 @@ public class Conversation {
     }
 
     /**
+     * 添加带图片的用户消息（视觉输入）
+     */
+    public synchronized void addUserMessage(String content, List<ChatMessage.ImageContent> images) {
+        if (images != null && !images.isEmpty()) {
+            messages.add(ChatMessage.userWithImages(content, images));
+        } else {
+            messages.add(ChatMessage.user(content));
+        }
+        if (title == null && content != null && !content.isEmpty()) {
+            title = content.length() > 30 ? content.substring(0, 30) + "..." : content;
+        }
+    }
+
+    /**
      * 添加助手消息
      */
     public synchronized void addAssistantMessage(String content) {

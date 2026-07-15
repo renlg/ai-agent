@@ -211,6 +211,13 @@ public class AgentService {
      * 拦截 /plan、/build、/init 斜杠命令，不进入正常的 LLM 对话流程
      */
     public void sendMessage(String sessionId, String userMessage, AgentListener listener) {
+        sendMessage(sessionId, userMessage, null, listener);
+    }
+
+    /**
+     * 发送带图片的用户消息并执行 Agent 循环（视觉输入）
+     */
+    public void sendMessage(String sessionId, String userMessage, List<ChatMessage.ImageContent> images, AgentListener listener) {
         AgentContext ctx;
         if (sessionId != null && !sessionId.isEmpty()) {
             sessionManager.getOrCreateSession(sessionId);
@@ -234,7 +241,7 @@ public class AgentService {
         }
 
         // 添加用户消息到对话历史
-        ctx.getConversation().addUserMessage(userMessage);
+        ctx.getConversation().addUserMessage(userMessage, images);
 
         // 基于当前用户消息检索相关长期记忆，重建系统提示词（就地替换，不影响已有对话历史）
         ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode(), userMessage));

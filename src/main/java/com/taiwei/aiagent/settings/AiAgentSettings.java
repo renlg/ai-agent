@@ -204,6 +204,16 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         }
     }
 
+    // ========== 视觉输入开关 ==========
+
+    public boolean isVisionEnabled() {
+        return state.visionEnabled;
+    }
+
+    public void setVisionEnabled(boolean visionEnabled) {
+        state.visionEnabled = visionEnabled;
+    }
+
     /**
      * 单个模型配置
      */
@@ -347,6 +357,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * MCP（Model Context Protocol）服务器配置列表
          */
         public List<McpConfig> mcpConfigs = new ArrayList<>();
+
+        /**
+         * 是否启用视觉输入（图片粘贴/拖拽）
+         */
+        public boolean visionEnabled = false;
 
         public State() {
             // 默认添加一个模型

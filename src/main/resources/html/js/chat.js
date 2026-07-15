@@ -14,6 +14,7 @@
     var messageQueue = [];
     var ready = false;
     var totalUsedTokens = 0;
+    var pendingImages = [];
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
@@ -22,6 +23,7 @@
     var newSessionBtn, clearBtn;
     var settingsBtn, settingsDropdown, settingsDropdownMenu, skillManagerItem, skillsBadge;
     var memoryManagerItem, memoryBadge;
+    var imagePreviewArea;
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -48,6 +50,7 @@
         skillsBadge = document.getElementById('skillsBadge');
         memoryManagerItem = document.getElementById('memoryManagerItem');
         memoryBadge = document.getElementById('memoryBadge');
+        imagePreviewArea = document.getElementById('imagePreviewArea');
 
         if (window.__TAIW_THEME__ === 'dark') {
             document.body.classList.add('dark');
@@ -61,6 +64,18 @@
         });
 
         messageInput.addEventListener('input', autoResize);
+
+        messageInput.addEventListener('paste', function (e) {
+            handlePaste(e);
+        });
+
+        messageInput.addEventListener('drop', function (e) {
+            handleDrop(e);
+        });
+
+        messageInput.addEventListener('dragover', function (e) {
+            e.preventDefault();
+        });
 
         sendBtn.addEventListener('click', function () {
             if (isProcessing) {
@@ -145,17 +160,24 @@
     /* ===== User actions ===== */
     function sendMessage() {
         var text = messageInput.value.trim();
-        if (!text || isProcessing) return;
+        if ((!text && pendingImages.length === 0) || isProcessing) return;
 
         messageInput.value = '';
         messageInput.style.height = 'auto';
         isProcessing = true;
         setButtonToStop();
 
-        appendUserMessage(text);
+        var images = pendingImages.slice();
+        clearImagePreviews();
+
+        appendUserMessage(text, images);
         showThinking();
 
-        callJava('sendMessage', { content: text });
+        var imageData = [];
+        for (var i = 0; i < images.length; i++) {
+            imageData.push({ base64: images[i].base64, mimeType: images[i].mimeType });
+        }
+        callJava('sendMessage', { content: text, images: imageData });
     }
 
     function stopGeneration() {
@@ -640,10 +662,24 @@
 
     /* ===== DOM helpers ===== */
 
-    function appendUserMessage(text) {
+    function appendUserMessage(text, images) {
         removeWelcome();
         var el = createMessageEl('user', '&#x1f464; &#x4f60;');
-        el.querySelector('.message-content').textContent = text;
+        var contentEl = el.querySelector('.message-content');
+        if (text) {
+            contentEl.textContent = text;
+        }
+        if (images && images.length > 0) {
+            var imgContainer = document.createElement('div');
+            imgContainer.className = 'message-images';
+            for (var i = 0; i < images.length; i++) {
+                var img = document.createElement('img');
+                img.src = images[i].dataUrl;
+                img.className = 'message-image-thumb';
+                imgContainer.appendChild(img);
+            }
+            contentEl.appendChild(imgContainer);
+        }
         scrollToBottom();
     }
 
@@ -757,6 +793,7 @@
         totalUsedTokens = 0;
         setButtonToSend();
         sendBtn.disabled = false;
+        clearImagePreviews();
 
         var progressContainer = document.querySelector('.token-progress-container');
         if (progressContainer) {
@@ -784,6 +821,82 @@
         requestAnimationFrame(function () {
             messagesArea.scrollTop = messagesArea.scrollHeight;
         });
+    }
+
+    /* ===== Image Handling ===== */
+    function handlePaste(e) {
+        var items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                e.preventDefault();
+                var file = items[i].getAsFile();
+                if (file) {
+                    readFileAsBase64(file);
+                }
+                return;
+            }
+        }
+    }
+
+    function handleDrop(e) {
+        e.preventDefault();
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files) return;
+        for (var i = 0; i < files.length; i++) {
+            if (files[i].type.indexOf('image') !== -1) {
+                readFileAsBase64(files[i]);
+            }
+        }
+    }
+
+    function readFileAsBase64(file) {
+        var reader = new FileReader();
+        reader.onload = function (event) {
+            var dataUrl = event.target.result;
+            var base64 = dataUrl.split(',')[1];
+            var mimeType = file.type || 'image/png';
+            pendingImages.push({ base64: base64, mimeType: mimeType, dataUrl: dataUrl });
+            addImagePreview(pendingImages.length - 1, dataUrl);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function addImagePreview(index, dataUrl) {
+        if (!imagePreviewArea) return;
+        var wrapper = document.createElement('div');
+        wrapper.className = 'image-preview-item';
+        wrapper.setAttribute('data-index', index);
+        wrapper.innerHTML =
+            '<img src="' + dataUrl + '" alt="preview" />' +
+            '<span class="image-preview-remove" data-index="' + index + '">&times;</span>';
+        wrapper.querySelector('.image-preview-remove').addEventListener('click', function () {
+            removeImagePreview(parseInt(this.getAttribute('data-index'), 10));
+        });
+        imagePreviewArea.appendChild(wrapper);
+        imagePreviewArea.style.display = 'flex';
+    }
+
+    function removeImagePreview(index) {
+        pendingImages.splice(index, 1);
+        renderImagePreviews();
+    }
+
+    function clearImagePreviews() {
+        pendingImages = [];
+        renderImagePreviews();
+    }
+
+    function renderImagePreviews() {
+        if (!imagePreviewArea) return;
+        imagePreviewArea.innerHTML = '';
+        if (pendingImages.length === 0) {
+            imagePreviewArea.style.display = 'none';
+            return;
+        }
+        for (var i = 0; i < pendingImages.length; i++) {
+            addImagePreview(i, pendingImages[i].dataUrl);
+        }
     }
 
     /* ===== Compress Notification ===== */
