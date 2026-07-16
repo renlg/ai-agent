@@ -70,6 +70,7 @@ public class ChatPanel extends JPanel implements Disposable {
                 String json = "{\"before\":" + beforeTokens + ",\"after\":" + afterTokens + ",\"percent\":" + savedPercent + "}";
                 pushToJs("showCompressNotification", escapeJsString(json));
                 pushHistoryToJs();
+                pushToJs("updateCompressedTokenCount", String.valueOf(afterTokens));
             });
         });
         AiAgentSettings.getInstance().addChangeListener(settingsChangeListener);

@@ -549,7 +549,11 @@
 
     window.loadHistory = function (messagesJson, isActiveProcessing) {
         whenReady(function () {
+            // Preserve token progress state across history reload
+            var savedTokens = totalUsedTokens;
             clearMessages();
+            // Restore token progress state
+            totalUsedTokens = savedTokens;
             try {
                 var messages;
                 if (typeof messagesJson === 'string') {
@@ -1027,6 +1031,17 @@
         whenReady(function () {
             messageInput.value = text;
             autoResize();
+        });
+    };
+
+    window.updateCompressedTokenCount = function(count) {
+        whenReady(function() {
+            totalUsedTokens = parseInt(count) || 0;
+            var container = document.querySelector('.token-progress-container');
+            if (container && totalUsedTokens > 0) {
+                container.classList.add('visible');
+                updateTokenProgressRing();
+            }
         });
     };
 
