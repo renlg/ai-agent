@@ -69,7 +69,11 @@ public class ChatPanel extends JPanel implements Disposable {
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
                 String json = "{\"before\":" + beforeTokens + ",\"after\":" + afterTokens + ",\"percent\":" + savedPercent + "}";
                 pushToJs("showCompressNotification", escapeJsString(json));
-                pushHistoryToJs();
+                // 注意：压缩只是对"发给 LLM 的上下文"做裁剪（replaceMessages 会物理删除旧消息），
+                // 它不应清空用户可见的聊天记录。此前这里调用 pushHistoryToJs() 会用压缩后的
+                // （已缩短的）会话重新渲染界面（loadHistory → clearMessages），导致每次压缩后
+                // 之前的消息全部消失、只剩最近一轮。改为不重载历史，界面 DOM 保持完整，
+                // 压缩仅通过上面的通知条和下面的 token 环体现。
                 pushToJs("updateCompressedTokenCount", String.valueOf(afterTokens));
             });
         });
