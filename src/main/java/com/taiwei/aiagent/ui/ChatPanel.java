@@ -517,7 +517,8 @@ public class ChatPanel extends JPanel implements Disposable {
         String name = config.modelName != null ? config.modelName.toLowerCase(Locale.ROOT) : "";
         return name.contains("gpt-4o") || name.contains("gpt-4")
                 || name.contains("claude") || name.contains("gemini")
-                || name.contains("vision");
+                || name.contains("vision") || name.contains("qwen")
+                || name.contains("vl");
     }
 
     // ========== Java → JS Push ==========
