@@ -1088,23 +1088,18 @@ html, body {
 .image-preview-area {
     display: none;
     position: absolute;
-    bottom: 44px;
-    left: 14px;
-    right: 14px;
+    top: 6px;
+    left: 104px;
+    right: 52px;
     z-index: 5;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 6px 14px;
-    background: var(--input-bg);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    border-bottom: none;
+    gap: 4px;
 }
 
 .image-preview-item {
     position: relative;
-    width: 48px;
-    height: 48px;
+    width: 32px;
+    height: 32px;
     border-radius: var(--radius-sm);
     overflow: hidden;
     border: 1px solid var(--border-color);
