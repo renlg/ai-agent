@@ -178,6 +178,24 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         fireSettingsChanged();
     }
 
+    // ========== 功能开关 ==========
+
+    public boolean isCompletionEnabled() {
+        return state.completionEnabled;
+    }
+
+    public void setCompletionEnabled(boolean enabled) {
+        state.completionEnabled = enabled;
+    }
+
+    public boolean isGitCommitReviewEnabled() {
+        return state.gitCommitReviewEnabled;
+    }
+
+    public void setGitCommitReviewEnabled(boolean enabled) {
+        state.gitCommitReviewEnabled = enabled;
+    }
+
     // ========== MCP 服务器配置 ==========
 
     public List<McpConfig> getMcpConfigs() {
@@ -359,6 +377,16 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * MCP（Model Context Protocol）服务器配置列表
          */
         public List<McpConfig> mcpConfigs = new ArrayList<>();
+
+        /**
+         * 是否启用自动补全
+         */
+        public boolean completionEnabled = true;
+
+        /**
+         * 是否启用 Git 提交评审（生成提交信息）
+         */
+        public boolean gitCommitReviewEnabled = true;
 
         public State() {
             // 默认添加一个模型

@@ -14,7 +14,7 @@ import com.intellij.openapi.vcs.CommitMessageI;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.ui.Refreshable;
 import com.taiwei.aiagent.llm.LlmClient;
-import com.taiwei.aiagent.llm.LlmResponse;
+import com.taiwei.aiagent.llm.LlmStreamListener;
 import com.taiwei.aiagent.llm.openai.OpenAiLlmClient;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
@@ -23,24 +23,32 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 /**
- * AI 生成提交信息动作（类似 Copilot/Cody 的 commit message generation）：
- * 出现在提交面板的提交信息工具栏中，读取 git 暂存区 diff（为空时回退到工作区 diff），
- * 交给 LLM 生成符合 Conventional Commits 风格的提交信息并填入输入框。
+ * AI 生成提交信息动作：
+ * 出现在提交面板的提交信息工具栏中，读取 git 暂存区 diff，
+ * 流式生成提交信息并实时显示在提交框中。
+ * 点击后显示底部状态栏进度条，生成期间禁止重复点击，生成前先清空当前内容。
  */
 public class GenerateCommitMessageAction extends AnAction {
 
     private static final Logger LOG = Logger.getInstance(GenerateCommitMessageAction.class);
 
-    /** 提交给 LLM 的 diff 最大字符数（过大时截断，避免挤爆上下文） */
     private static final int MAX_DIFF_CHARS = 16000;
     private static final int GIT_TIMEOUT_SECONDS = 10;
+
+    /** 防止重复点击的标志 */
+    private static volatile boolean generating = false;
 
     @Override
     public @NotNull ActionUpdateThread getActionUpdateThread() {
@@ -49,12 +57,22 @@ public class GenerateCommitMessageAction extends AnAction {
 
     @Override
     public void update(@NotNull AnActionEvent e) {
-        e.getPresentation().setEnabledAndVisible(
-                e.getProject() != null && getCommitPanel(e) != null);
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        boolean visible = e.getProject() != null
+                && settings.isGitCommitReviewEnabled()
+                && getCommitPanel(e) != null;
+        e.getPresentation().setVisible(visible);
+        if (visible) {
+            // 生成中保持可见但禁用，并改变文字提示
+            e.getPresentation().setEnabled(!generating);
+            e.getPresentation().setText(generating ? "太微：正在生成..." : "太微：生成提交信息");
+        }
     }
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
+        if (generating) return;
+
         Project project = e.getProject();
         CommitMessageI commitPanel = getCommitPanel(e);
         if (project == null || commitPanel == null) {
@@ -65,12 +83,26 @@ public class GenerateCommitMessageAction extends AnAction {
             return;
         }
 
+        // 标记正在生成，禁止重复点击
+        generating = true;
+
+        // 立即更新按钮状态（在 EDT 上直接修改 presentation）
+        e.getPresentation().setEnabled(false);
+        e.getPresentation().setText("太微：正在生成...");
+
+        // 先清空当前提交框内容
+        ApplicationManager.getApplication().invokeLater(() ->
+                commitPanel.setCommitMessage(""));
+
+        // 使用 Backgroundable 在底部状态栏显示进度条
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "太微：正在生成提交信息...", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
+                indicator.setIndeterminate(true);
+                indicator.setText("太微：正在获取代码变更...");
+
                 String diff = runGit(basePath, "diff", "--cached");
                 if (diff == null || diff.isBlank()) {
-                    // 暂存区为空时回退到工作区变更
                     diff = runGit(basePath, "diff");
                 }
                 String status = runGit(basePath, "status", "--porcelain");
@@ -83,35 +115,81 @@ public class GenerateCommitMessageAction extends AnAction {
                     diff = diff.substring(0, MAX_DIFF_CHARS) + "\n...（diff 过长，已截断）";
                 }
 
+                indicator.setText("太微：AI 正在生成提交信息...");
+
                 AiAgentSettings settings = AiAgentSettings.getInstance();
                 LlmClient client = new OpenAiLlmClient(
                         settings.getBaseUrl(), settings.getApiKey(), settings.getModel());
                 try {
+                    String userPrompt = buildPrompt(status != null ? status : "", diff != null ? diff : "");
                     List<ChatMessage> request = new ArrayList<>();
-                    request.add(ChatMessage.system(
-                            "你是一个 Git 提交信息生成助手。根据给定的变更 diff 生成一条提交信息："
-                                    + "第一行为简洁的中文摘要（Conventional Commits 风格，如 feat:/fix:/refactor: 开头，不超过 72 字符）；"
-                                    + "如变更较复杂，可空一行后用列表补充要点。只输出提交信息本身，不要任何解释或 Markdown 围栏。"));
-                    request.add(ChatMessage.user(
-                            "git status --porcelain:\n" + (status != null ? status : "")
-                                    + "\n\ngit diff:\n" + (diff != null ? diff : "")));
+                    request.add(ChatMessage.user(userPrompt));
 
-                    LlmResponse response = client.chat(request, null);
-                    if (response == null || !response.isSuccess()
-                            || response.getContent() == null || response.getContent().isBlank()) {
-                        String err = response != null ? response.getErrorMessage() : "LLM 未返回内容";
-                        notifyError(project, "生成提交信息失败: " + err);
+                    StringBuilder accumulated = new StringBuilder();
+                    CountDownLatch latch = new CountDownLatch(1);
+                    AtomicBoolean hasError = new AtomicBoolean(false);
+                    AtomicReference<String> errorMsg = new AtomicReference<>();
+
+                    client.chatStream(request, null, new LlmStreamListener() {
+                        @Override
+                        public void onContent(String delta) {
+                            accumulated.append(delta);
+                            String current = EditCodeAction.stripCodeFence(accumulated.toString());
+                            ApplicationManager.getApplication().invokeLater(() ->
+                                    commitPanel.setCommitMessage(current));
+                        }
+
+                        @Override
+                        public void onToolCall(String toolCallId, String functionName, String arguments) {
+                        }
+
+                        @Override
+                        public void onComplete() {
+                            latch.countDown();
+                        }
+
+                        @Override
+                        public void onError(String error, Throwable throwable) {
+                            hasError.set(true);
+                            errorMsg.set(error);
+                            latch.countDown();
+                        }
+                    });
+
+                    // 等待流式响应完成，同时响应取消操作
+                    while (!latch.await(200, TimeUnit.MILLISECONDS)) {
+                        if (indicator.isCanceled()) {
+                            client.cancel();
+                            return;
+                        }
+                    }
+
+                    if (hasError.get()) {
+                        notifyError(project, "生成提交信息失败: " + errorMsg.get());
                         return;
                     }
 
-                    String message = EditCodeAction.stripCodeFence(response.getContent());
+                    String finalMessage = EditCodeAction.stripCodeFence(accumulated.toString());
+                    if (finalMessage.isBlank()) {
+                        notifyError(project, "生成提交信息失败: LLM 未返回有效内容");
+                        return;
+                    }
+
+                    indicator.setText("太微：提交信息已生成");
                     ApplicationManager.getApplication().invokeLater(() ->
-                            commitPanel.setCommitMessage(message));
+                            commitPanel.setCommitMessage(finalMessage));
+
                 } catch (Exception ex) {
                     LOG.warn("生成提交信息失败", ex);
                     notifyError(project, "生成提交信息失败: " + ex.getMessage());
                 } finally {
                     client.close();
+                    generating = false;
+                    // 在 EDT 上恢复按钮状态
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        e.getPresentation().setEnabled(true);
+                        e.getPresentation().setText("太微：生成提交信息");
+                    });
                 }
             }
         });
@@ -126,9 +204,6 @@ public class GenerateCommitMessageAction extends AnAction {
         return VcsDataKeys.COMMIT_MESSAGE_CONTROL.getData(e.getDataContext());
     }
 
-    /**
-     * 在项目根目录执行 git 命令，失败/超时/非 git 仓库时返回 null
-     */
     @Nullable
     static String runGit(String basePath, String... args) {
         try {
@@ -161,6 +236,31 @@ public class GenerateCommitMessageAction extends AnAction {
         } catch (Exception e) {
             LOG.warn("执行 git 命令失败: " + String.join(" ", args) + " - " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 从模板构建提交评审提示词
+     */
+    private static String buildPrompt(String status, String diff) {
+        String template = loadTemplate("templates/commit_review_prompt.vm");
+        return template
+                .replace("${status}", status)
+                .replace("${diff}", diff);
+    }
+
+    private static String loadTemplate(String resourcePath) {
+        try (InputStream is = GenerateCommitMessageAction.class.getClassLoader().getResourceAsStream(resourcePath)) {
+            if (is == null) {
+                LOG.warn("Template not found: " + resourcePath);
+                return "git status:\n${status}\ngit diff:\n${diff}";
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                return reader.lines().collect(Collectors.joining("\n"));
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to load template: " + resourcePath, e);
+            return "git status:\n${status}\ngit diff:\n${diff}";
         }
     }
 

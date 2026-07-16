@@ -1,17 +1,25 @@
 package com.taiwei.aiagent.settings;
 
 import com.intellij.openapi.options.Configurable;
+import com.intellij.util.ui.FormBuilder;
+import com.intellij.util.ui.JBUI;
+import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
 
 /**
- * 太微设置父节点
+ * 太微设置主页面
  * Settings → Tools → 太微
- * 本身无配置界面，仅作为"模型"和"终端"子节点的容器
+ * 提供功能开关：自动补全、Git 提交评审
  */
 public class TaiweiParentConfigurable implements Configurable {
+
+    private JPanel mainPanel;
+    private JCheckBox completionCheckBox;
+    private JCheckBox gitCommitReviewCheckBox;
 
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
@@ -21,15 +29,46 @@ public class TaiweiParentConfigurable implements Configurable {
 
     @Override
     public @Nullable JComponent createComponent() {
-        return null;
+        completionCheckBox = new JCheckBox(I18nUtil.getMessage("general.completionEnabled"));
+        gitCommitReviewCheckBox = new JCheckBox(I18nUtil.getMessage("general.gitCommitReviewEnabled"));
+
+        mainPanel = FormBuilder.createFormBuilder()
+                .addComponent(completionCheckBox)
+                .addComponent(gitCommitReviewCheckBox)
+                .addComponentFillVertically(new JPanel(), 0)
+                .getPanel();
+        mainPanel.setBorder(JBUI.Borders.empty(10));
+
+        reset();
+        return mainPanel;
     }
 
     @Override
     public boolean isModified() {
-        return false;
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        return completionCheckBox.isSelected() != settings.isCompletionEnabled()
+                || gitCommitReviewCheckBox.isSelected() != settings.isGitCommitReviewEnabled();
     }
 
     @Override
     public void apply() {
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        settings.setCompletionEnabled(completionCheckBox.isSelected());
+        settings.setGitCommitReviewEnabled(gitCommitReviewCheckBox.isSelected());
+        settings.fireSettingsChanged();
+    }
+
+    @Override
+    public void reset() {
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        completionCheckBox.setSelected(settings.isCompletionEnabled());
+        gitCommitReviewCheckBox.setSelected(settings.isGitCommitReviewEnabled());
+    }
+
+    @Override
+    public void disposeUIResources() {
+        mainPanel = null;
+        completionCheckBox = null;
+        gitCommitReviewCheckBox = null;
     }
 }

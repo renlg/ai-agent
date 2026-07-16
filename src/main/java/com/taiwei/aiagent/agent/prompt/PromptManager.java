@@ -90,10 +90,6 @@ public class PromptManager {
         }
         context.put("model", model != null ? model : "未知");
 
-        boolean isPlanMode = mode == AgentMode.PLAN;
-        context.put("isPlanMode", isPlanMode);
-        context.put("modeLabel", isPlanMode ? "Plan（只读分析）" : "Build（正常）");
-
         String skillsContext = buildSkillsContext();
         if (skillsContext != null && !skillsContext.isEmpty()) {
             context.put("skills", skillsContext);
@@ -106,7 +102,8 @@ public class PromptManager {
             }
         }
 
-        String templateContent = loadTemplateContent("templates/system_prompt.vm");
+        String templateName = mode == AgentMode.PLAN ? "templates/system_prompt_plan.vm" : "templates/system_prompt_build.vm";
+        String templateContent = loadTemplateContent(templateName);
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "system_prompt", templateContent);
         return writer.toString();
@@ -134,6 +131,21 @@ public class PromptManager {
         String templateContent = loadTemplateContent("templates/init_prompt.vm");
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "init_prompt", templateContent);
+        return writer.toString();
+    }
+
+    /**
+     * 生成上下文压缩提示词
+     *
+     * @param conversationContent 待压缩的对话内容（已格式化的角色+内容文本）
+     */
+    public String buildCompressPrompt(String conversationContent) {
+        VelocityContext context = new VelocityContext();
+        context.put("conversationContent", conversationContent != null ? conversationContent : "");
+
+        String templateContent = loadTemplateContent("templates/compress_prompt.vm");
+        StringWriter writer = new StringWriter();
+        velocityEngine.evaluate(context, writer, "compress_prompt", templateContent);
         return writer.toString();
     }
 

@@ -39,7 +39,6 @@ class SkillFrontmatterParserTest {
                 """);
 
         Skill skill = SkillFrontmatterParser.parseMetadata(file);
-
         assertEquals("git-commit", skill.getName());
         assertEquals("Create well-formed git commits", skill.getDescription());
         assertEquals(List.of("git", "vcs", "workflow"), skill.getTags());

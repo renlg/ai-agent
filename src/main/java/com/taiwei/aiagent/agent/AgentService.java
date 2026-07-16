@@ -808,8 +808,9 @@ public class AgentService {
 
         try {
             List<ChatMessage> summaryRequest = new ArrayList<>();
-            summaryRequest.add(ChatMessage.system("你是一个对话摘要助手。请将以下对话内容压缩为简洁的摘要。保留关键信息：讨论的主题、做出的决定、代码修改、工具调用结果等。摘要应足够详细以维持对话上下文，但要尽量简洁。"));
-            summaryRequest.add(ChatMessage.user("请摘要以下对话内容：\n\n" + oldContent.toString()));
+            String compressPrompt = context.getPromptManager().buildCompressPrompt(oldContent.toString());
+            summaryRequest.add(ChatMessage.system(compressPrompt));
+            summaryRequest.add(ChatMessage.user("请摘要以上对话内容。"));
 
             LlmResponse summaryResponse = llmClient.chat(summaryRequest, null);
 
