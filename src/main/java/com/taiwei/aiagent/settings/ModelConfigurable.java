@@ -29,7 +29,6 @@ public class ModelConfigurable implements Configurable {
     private JBTable table;
     private JSpinner maxTokensSpinner;
     private JSpinner temperatureSpinner;
-    private JCheckBox visionCheckbox;
 
     private List<AiAgentSettings.ModelConfig> editingConfigs;
 
@@ -50,6 +49,7 @@ public class ModelConfigurable implements Configurable {
         table.getColumnModel().getColumn(0).setPreferredWidth(120);
         table.getColumnModel().getColumn(1).setPreferredWidth(250);
         table.getColumnModel().getColumn(2).setPreferredWidth(150);
+        table.getColumnModel().getColumn(3).setPreferredWidth(80);
         table.setRowHeight(32);
 
         JBScrollPane scrollPane = new JBScrollPane(table);
@@ -87,12 +87,9 @@ public class ModelConfigurable implements Configurable {
         JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
         temperatureSpinner.setEditor(tempEditor);
 
-        visionCheckbox = new JCheckBox("启用图片 / 视觉支持");
-
         JPanel paramsPanel = FormBuilder.createFormBuilder()
                 .addLabeledComponent(I18nUtil.getMessage("model.maxTokensLabel"), maxTokensSpinner)
                 .addLabeledComponent(I18nUtil.getMessage("model.temperatureLabel"), temperatureSpinner)
-                .addComponent(visionCheckbox)
                 .getPanel();
 
         // ===== 组装主面板 =====
@@ -183,7 +180,6 @@ public class ModelConfigurable implements Configurable {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ((Integer) maxTokensSpinner.getValue() != settings.getMaxTokens()) return true;
         if ((Double) temperatureSpinner.getValue() != settings.getTemperature()) return true;
-        if (visionCheckbox.isSelected() != settings.isVisionEnabled()) return true;
 
         List<AiAgentSettings.ModelConfig> current = settings.getModelConfigs();
         if (editingConfigs.size() != current.size()) return true;
@@ -192,7 +188,8 @@ public class ModelConfigurable implements Configurable {
             AiAgentSettings.ModelConfig b = current.get(i);
             if (!a.name.equals(b.name) || !a.baseUrl.equals(b.baseUrl)
                     || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)
-                    || a.compressionThreshold != b.compressionThreshold) {
+                    || a.compressionThreshold != b.compressionThreshold
+                    || a.visionCapable != b.visionCapable) {
                 return true;
             }
         }
@@ -221,7 +218,6 @@ public class ModelConfigurable implements Configurable {
         settings.setModelConfigs(new ArrayList<>(editingConfigs));
         settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
         settings.setTemperature((Double) temperatureSpinner.getValue());
-        settings.setVisionEnabled(visionCheckbox.isSelected());
 
         // 保持当前选中的模型索引（如果索引有效）
         int currentActiveIndex = settings.getActiveModelIndex();
@@ -245,7 +241,6 @@ public class ModelConfigurable implements Configurable {
         }
         maxTokensSpinner.setValue(settings.getMaxTokens());
         temperatureSpinner.setValue(settings.getTemperature());
-        visionCheckbox.setSelected(settings.isVisionEnabled());
     }
 
     @Override
@@ -255,7 +250,6 @@ public class ModelConfigurable implements Configurable {
         tableModel = null;
         maxTokensSpinner = null;
         temperatureSpinner = null;
-        visionCheckbox = null;
         editingConfigs = null;
     }
 
@@ -266,7 +260,7 @@ public class ModelConfigurable implements Configurable {
     // ===== Table Model =====
 
     private class ModelTableModel extends AbstractTableModel {
-        private static final String[] COLUMNS = {"显示名称", "API 地址", "模型名称"};
+        private static final String[] COLUMNS = {"显示名称", "API 地址", "模型名称", "视觉支持"};
 
         @Override
         public int getRowCount() {
@@ -288,6 +282,8 @@ public class ModelConfigurable implements Configurable {
                     return config.baseUrl;
                 case 2:
                     return config.modelName;
+                case 3:
+                    return config.visionCapable ? "是" : "否";
                 default:
                     return "";
             }
@@ -307,6 +303,7 @@ public class ModelConfigurable implements Configurable {
         private JPasswordField apiKeyField;
         private JTextField modelNameField;
         private JSpinner compressionThresholdSpinner;
+        private JCheckBox visionCheckbox;
         private AiAgentSettings.ModelConfig config;
 
         protected ModelConfigDialog(Component parent, String title, AiAgentSettings.ModelConfig config) {
@@ -373,6 +370,16 @@ public class ModelConfigurable implements Configurable {
             compressionThresholdSpinner.setPreferredSize(new Dimension(140, 28));
             panel.add(compressionThresholdSpinner, gbc);
 
+            gbc.gridx = 0;
+            gbc.gridy = 5;
+            gbc.weightx = 0;
+            panel.add(new JLabel("视觉支持"), gbc);
+
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
+            visionCheckbox = new JCheckBox("支持视觉 / 图片输入", config.visionCapable);
+            panel.add(visionCheckbox, gbc);
+
             return panel;
         }
 
@@ -400,6 +407,7 @@ public class ModelConfigurable implements Configurable {
             config.apiKey = new String(apiKeyField.getPassword()).trim();
             config.modelName = modelNameField.getText().trim();
             config.compressionThreshold = (Integer) compressionThresholdSpinner.getValue();
+            config.visionCapable = visionCheckbox.isSelected();
 
             super.doOKAction();
         }

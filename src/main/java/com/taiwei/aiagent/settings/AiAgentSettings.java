@@ -204,16 +204,6 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         }
     }
 
-    // ========== 视觉输入开关 ==========
-
-    public boolean isVisionEnabled() {
-        return state.visionEnabled;
-    }
-
-    public void setVisionEnabled(boolean visionEnabled) {
-        state.visionEnabled = visionEnabled;
-    }
-
     /**
      * 单个模型配置
      */
@@ -223,6 +213,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         public String apiKey = "";
         public String modelName = "qwen3-max";
         public int compressionThreshold = 75;
+        public boolean visionCapable = true;
 
         public ModelConfig() {}
 
@@ -231,6 +222,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
             this.modelName = modelName;
+            this.visionCapable = true;
         }
 
         public ModelConfig(String name, String baseUrl, String apiKey, String modelName, int compressionThreshold) {
@@ -239,10 +231,20 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
             this.apiKey = apiKey;
             this.modelName = modelName;
             this.compressionThreshold = compressionThreshold;
+            this.visionCapable = true;
+        }
+
+        public ModelConfig(String name, String baseUrl, String apiKey, String modelName, int compressionThreshold, boolean visionCapable) {
+            this.name = name;
+            this.baseUrl = baseUrl;
+            this.apiKey = apiKey;
+            this.modelName = modelName;
+            this.compressionThreshold = compressionThreshold;
+            this.visionCapable = visionCapable;
         }
 
         public ModelConfig copy() {
-            return new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold);
+            return new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold, visionCapable);
         }
     }
 
@@ -357,11 +359,6 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * MCP（Model Context Protocol）服务器配置列表
          */
         public List<McpConfig> mcpConfigs = new ArrayList<>();
-
-        /**
-         * 是否启用视觉输入（图片粘贴/拖拽）
-         */
-        public boolean visionEnabled = false;
 
         public State() {
             // 默认添加一个模型

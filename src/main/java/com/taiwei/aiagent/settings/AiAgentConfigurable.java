@@ -240,7 +240,8 @@ public class AiAgentConfigurable implements Configurable {
             AiAgentSettings.ModelConfig a = editingConfigs.get(i);
             AiAgentSettings.ModelConfig b = current.get(i);
             if (!a.name.equals(b.name) || !a.baseUrl.equals(b.baseUrl)
-                    || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)) {
+                    || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)
+                    || a.visionCapable != b.visionCapable) {
                 return true;
             }
         }
@@ -370,6 +371,7 @@ public class AiAgentConfigurable implements Configurable {
         private JTextField baseUrlField;
         private JPasswordField apiKeyField;
         private JTextField modelNameField;
+        private JCheckBox visionCheckbox;
         private final AiAgentSettings.ModelConfig config;
 
         ModelConfigDialog(Component parent, String title, AiAgentSettings.ModelConfig config) {
@@ -385,10 +387,11 @@ public class AiAgentConfigurable implements Configurable {
             baseUrlField = new JTextField(config.baseUrl, 30);
             apiKeyField = new JPasswordField(config.apiKey, 30);
             modelNameField = new JTextField(config.modelName, 30);
+            visionCheckbox = new JCheckBox("支持视觉 / 图片输入", config.visionCapable);
 
             JPanel panel = new JPanel();
             panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-            panel.setPreferredSize(new Dimension(450, 200));
+            panel.setPreferredSize(new Dimension(450, 230));
 
             panel.add(createFieldRow("显示名称:", nameField));
             panel.add(Box.createVerticalStrut(8));
@@ -397,6 +400,9 @@ public class AiAgentConfigurable implements Configurable {
             panel.add(createFieldRow("API Key:", apiKeyField));
             panel.add(Box.createVerticalStrut(8));
             panel.add(createFieldRow("模型名称:", modelNameField));
+            panel.add(Box.createVerticalStrut(8));
+            visionCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(visionCheckbox);
 
             return panel;
         }
@@ -418,6 +424,7 @@ public class AiAgentConfigurable implements Configurable {
             config.baseUrl = baseUrlField.getText().trim();
             config.apiKey = new String(apiKeyField.getPassword()).trim();
             config.modelName = modelNameField.getText().trim();
+            config.visionCapable = visionCheckbox.isSelected();
             return config;
         }
     }

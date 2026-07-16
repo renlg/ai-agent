@@ -405,11 +405,8 @@ public class ChatPanel extends JPanel implements Disposable {
                     List<ChatMessage.ImageContent> images = null;
                     if (data.has("images") && data.get("images").isJsonArray()
                             && data.getAsJsonArray("images").size() > 0) {
-                        // 图片输入前的两道校验：全局视觉开关 + 当前模型的视觉能力
-                        if (!AiAgentSettings.getInstance().isVisionEnabled()) {
-                            pushToJs("showNotification",
-                                    escapeJsString("Vision is disabled. Enable it in settings to send images."));
-                        } else if (!isActiveModelVisionCapable()) {
+                        // 图片输入前校验当前模型是否支持视觉
+                        if (!isActiveModelVisionCapable()) {
                             pushToJs("showNotification",
                                     escapeJsString("Current model does not support image input."));
                         } else {
@@ -514,18 +511,9 @@ public class ChatPanel extends JPanel implements Disposable {
         }
     }
 
-    /**
-     * 判断当前激活模型是否支持视觉（图片）输入。
-     * 采用简单启发式：模型名称包含常见多模态模型关键字则视为支持。
-     */
     private boolean isActiveModelVisionCapable() {
         AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
-        if (config == null) return false;
-        String name = config.modelName != null ? config.modelName.toLowerCase(Locale.ROOT) : "";
-        return name.contains("gpt-4o") || name.contains("gpt-4")
-                || name.contains("claude") || name.contains("gemini")
-                || name.contains("vision") || name.contains("qwen")
-                || name.contains("vl");
+        return config != null && config.visionCapable;
     }
 
     private void pushVisionCapableToJs() {
