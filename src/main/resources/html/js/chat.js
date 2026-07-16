@@ -15,6 +15,7 @@
     var ready = false;
     var totalUsedTokens = 0;
     var pendingImages = [];
+    var visionCapable = false;
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
@@ -530,6 +531,10 @@
         });
     };
 
+    window.updateVisionCapable = function (capable) {
+        visionCapable = capable;
+    };
+
     window.updateModelList = function (models, activeIndex) {
         whenReady(function () {
             var modelList;
@@ -840,6 +845,10 @@
                         e.preventDefault();
                         handledImage = true;
                     }
+                    if (!visionCapable) {
+                        window.showNotification('Current model does not support image input. Please switch to a model that supports images (e.g., GPT-4o, Claude, Gemini, Qwen).');
+                        continue;
+                    }
                     readFileAsBase64(file);
                 }
             }
@@ -852,6 +861,10 @@
         if (!files) return;
         for (var i = 0; i < files.length; i++) {
             if (files[i].type.indexOf('image') !== -1) {
+                if (!visionCapable) {
+                    window.showNotification('Current model does not support image input. Please switch to a model that supports images (e.g., GPT-4o, Claude, Gemini, Qwen).');
+                    continue;
+                }
                 readFileAsBase64(files[i]);
             }
         }

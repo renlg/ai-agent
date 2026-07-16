@@ -152,6 +152,7 @@ public class ChatPanel extends JPanel implements Disposable {
         pushModeToJs();
         pushSkillsCountToJs();
         pushMemoriesCountToJs();
+        pushVisionCapableToJs();
     }
 
     private void pushSkillsCountToJs() {
@@ -438,6 +439,7 @@ public class ChatPanel extends JPanel implements Disposable {
                     if (currentCtx != null) {
                         currentCtx.setModelIndex(modelIndex);
                     }
+                    pushVisionCapableToJs();
                     break;
                 case "getSessions":
                     pushSessionListToJs();
@@ -519,6 +521,21 @@ public class ChatPanel extends JPanel implements Disposable {
                 || name.contains("claude") || name.contains("gemini")
                 || name.contains("vision") || name.contains("qwen")
                 || name.contains("vl");
+    }
+
+    private void pushVisionCapableToJs() {
+        Runnable task = () -> {
+            String js = "if(typeof updateVisionCapable==='function'){updateVisionCapable(" + isActiveModelVisionCapable() + ");}";
+            CefBrowser cef = browser.getCefBrowser();
+            if (cef != null) {
+                cef.executeJavaScript(js, "taiwei-push", 0);
+            }
+        };
+        if (SwingUtilities.isEventDispatchThread()) {
+            task.run();
+        } else {
+            SwingUtilities.invokeLater(task);
+        }
     }
 
     // ========== Java → JS Push ==========
