@@ -57,6 +57,7 @@ public class ChatPanel extends JPanel implements Disposable {
     private final Map<String, SessionState> sessionStates = new HashMap<>();
     private final Map<String, PendingCommand> pendingCommands = new HashMap<>();
     private final Runnable settingsChangeListener = this::onSettingsChanged;
+    private volatile boolean isCompressing = false;
 
     public ChatPanel(Project project) {
         this.project = project;
@@ -75,6 +76,7 @@ public class ChatPanel extends JPanel implements Disposable {
                 // 之前的消息全部消失、只剩最近一轮。改为不重载历史，界面 DOM 保持完整，
                 // 压缩仅通过上面的通知条和下面的 token 环体现。
                 pushToJs("updateCompressedTokenCount", String.valueOf(afterTokens));
+                pushToJs("enableManualCompress", "");
             });
         });
         AiAgentSettings.getInstance().addChangeListener(settingsChangeListener);
@@ -960,8 +962,14 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Manual Compress ==========
 
     private void triggerManualCompress() {
+        if (isCompressing) return;
+        isCompressing = true;
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            agentService.manualCompress();
+            try {
+                agentService.manualCompress();
+            } finally {
+                isCompressing = false;
+            }
         });
     }
 

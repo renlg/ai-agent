@@ -896,6 +896,12 @@ html, body {
     opacity: 1;
 }
 
+.token-progress-container.compressing {
+    pointer-events: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .token-progress-ring {
     display: block;
 }

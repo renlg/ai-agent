@@ -769,8 +769,14 @@
         inputWrapper.appendChild(container);
 
         container.addEventListener('click', function () {
+            container.classList.add('compressing');
             callJava('manualCompress', {});
         });
+    }
+
+    function enableManualCompress() {
+        var container = document.querySelector('.token-progress-container');
+        if (container) container.classList.remove('compressing');
     }
 
     function updateTokenProgressRing() {
