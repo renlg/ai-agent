@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.taiwei.aiagent.agent.context.ContextMentionResolver;
 import com.taiwei.aiagent.llm.LlmClient;
 import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.llm.LlmStreamListener;
@@ -240,11 +241,14 @@ public class AgentService {
             return;
         }
 
-        // 添加用户消息到对话历史
-        ctx.getConversation().addUserMessage(userMessage, images);
+        // 解析 @ 提及，增强用户消息（附加文件内容、项目结构、Git 上下文等）
+        String augmentedMessage = ContextMentionResolver.augment(project, userMessage);
+
+        // 添加用户消息到对话历史（使用增强后的消息，包含 @ 引用的上下文）
+        ctx.getConversation().addUserMessage(augmentedMessage, images);
 
         // 基于当前用户消息检索相关长期记忆，重建系统提示词（就地替换，不影响已有对话历史）
-        ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode(), userMessage));
+        ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode(), augmentedMessage));
 
         stopped = false;
         activeLlmClient = ctx.getLlmClient();

@@ -543,6 +543,7 @@ html, body {
 
 /* ===== Input Area ===== */
 .input-area {
+    position: relative;
     padding: 12px 20px 16px;
     background: var(--bg-primary);
     border-top: 1px solid var(--border-color);
@@ -1170,3 +1171,71 @@ html, body {
     border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* ===== Mention Autocomplete Dropdown ===== */
+.mention-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 20px;
+    right: 20px;
+    z-index: 200;
+    min-width: 220px;
+    max-width: 420px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+    margin-bottom: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.12s;
+    user-select: none;
+}
+
+.mention-item:hover,
+.mention-item.active {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+.mention-keyword {
+    font-weight: 600;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.mention-desc {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mention-type {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.mention-empty {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    text-align: center;
+}

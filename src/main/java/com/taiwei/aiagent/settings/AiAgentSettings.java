@@ -196,6 +196,16 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         state.gitCommitReviewEnabled = enabled;
     }
 
+    // ========== 自定义规则 ==========
+
+    public String getCustomRules() {
+        return state.customRules;
+    }
+
+    public void setCustomRules(String rules) {
+        state.customRules = rules != null ? rules : "";
+    }
+
     // ========== MCP 服务器配置 ==========
 
     public List<McpConfig> getMcpConfigs() {
@@ -387,6 +397,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 是否启用 Git 提交评审（生成提交信息）
          */
         public boolean gitCommitReviewEnabled = true;
+
+        /**
+         * 用户自定义规则（全局），会注入到系统提示词中
+         */
+        public String customRules = "";
 
         public State() {
             // 默认添加一个模型

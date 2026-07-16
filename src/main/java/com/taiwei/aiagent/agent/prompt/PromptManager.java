@@ -14,6 +14,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Properties;
@@ -102,6 +105,11 @@ public class PromptManager {
             }
         }
 
+        String rulesContext = buildRulesContext();
+        if (rulesContext != null && !rulesContext.isEmpty()) {
+            context.put("rules", rulesContext);
+        }
+
         String templateName = mode == AgentMode.PLAN ? "templates/system_prompt_plan.vm" : "templates/system_prompt_build.vm";
         String templateContent = loadTemplateContent(templateName);
         StringWriter writer = new StringWriter();
@@ -147,6 +155,52 @@ public class PromptManager {
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "compress_prompt", templateContent);
         return writer.toString();
+    }
+
+    /**
+     * 构建规则上下文：合并全局规则（Settings）和项目级规则（.taiwei/rules.md）
+     */
+    public String buildRulesContext() {
+        StringBuilder sb = new StringBuilder();
+
+        // 1. 全局规则（Settings 中配置）
+        String globalRules;
+        try {
+            globalRules = AiAgentSettings.getInstance().getCustomRules();
+        } catch (Exception e) {
+            globalRules = "";
+        }
+        if (globalRules != null && !globalRules.isBlank()) {
+            sb.append(globalRules.trim());
+        }
+
+        // 2. 项目级规则（.taiwei/rules.md）
+        String projectRules = loadProjectRules();
+        if (projectRules != null && !projectRules.isBlank()) {
+            if (sb.length() > 0) {
+                sb.append("\n\n");
+            }
+            sb.append(projectRules.trim());
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * 读取项目级规则文件（.taiwei/rules.md）
+     */
+    private String loadProjectRules() {
+        String basePath = project.getBasePath();
+        if (basePath == null) return null;
+
+        Path rulesFile = Paths.get(basePath, ".taiwei", "rules.md");
+        if (!Files.exists(rulesFile)) return null;
+
+        try {
+            return Files.readString(rulesFile, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

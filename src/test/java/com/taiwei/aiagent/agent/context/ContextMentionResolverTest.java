@@ -78,6 +78,6 @@ class ContextMentionResolverTest {
     @Test
     void handlesNullBasePathWithRelativeMention() {
         String msg = "看看 @src/Main.java";
-        assertEquals(msg, ContextMentionResolver.augment(null, msg));
+        assertEquals(msg, ContextMentionResolver.augment((String) null, msg));
     }
 }

@@ -14,6 +14,7 @@ import com.taiwei.aiagent.agent.AgentContext;
 import com.taiwei.aiagent.agent.AgentMode;
 import com.taiwei.aiagent.agent.AgentService;
 import com.taiwei.aiagent.agent.SessionManager;
+import com.taiwei.aiagent.agent.context.ContextMentionResolver;
 import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.memory.MemoryCategory;
 import com.taiwei.aiagent.memory.MemoryCommandHandler;
@@ -169,6 +170,25 @@ public class ChatPanel extends JPanel implements Disposable {
 
     private void pushMemoriesCountToJs() {
         pushToJs("updateMemoriesCount", String.valueOf(memoryManager.getMemoryCount()));
+    }
+
+    private void pushMentionSuggestionsToJs(String query) {
+        List<ContextMentionResolver.MentionSuggestion> suggestions =
+                ContextMentionResolver.getSuggestions(query);
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < suggestions.size(); i++) {
+            if (i > 0) json.append(",");
+            ContextMentionResolver.MentionSuggestion s = suggestions.get(i);
+            json.append("{\"keyword\":\"")
+                    .append(s.getKeyword())
+                    .append("\",\"description\":\"")
+                    .append(escapeJsString(s.getDescription()).replace("\"", ""))
+                    .append("\",\"type\":\"")
+                    .append(s.getType())
+                    .append("\"}");
+        }
+        json.append("]");
+        pushToJs("updateMentionSuggestions", escapeJsString(json.toString()));
     }
 
     private void openMemoryManager() {
@@ -503,6 +523,10 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "forgetMemory":
                     forgetMemory(data.get("id").getAsString());
+                    break;
+                case "getMentionSuggestions":
+                    String mentionQuery = data.has("query") ? data.get("query").getAsString() : "";
+                    pushMentionSuggestionsToJs(mentionQuery);
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);

@@ -27,6 +27,10 @@
     var memoryManagerItem, memoryBadge;
     var mcpSettingsItem;
     var imagePreviewArea;
+    var mentionDropdown;
+    var mentionItems = [];
+    var mentionActiveIndex = -1;
+    var mentionTriggerIndex = -1; // cursor position where @ was typed
 
     /* ===== Init ===== */
     document.addEventListener('DOMContentLoaded', function () {
@@ -54,19 +58,48 @@
         memoryBadge = document.getElementById('memoryBadge');
         mcpSettingsItem = document.getElementById('mcpSettingsItem');
         imagePreviewArea = document.getElementById('imagePreviewArea');
+        mentionDropdown = document.getElementById('mentionDropdown');
 
         if (window.__TAIW_THEME__ === 'dark') {
             document.body.classList.add('dark');
         }
 
         messageInput.addEventListener('keydown', function (e) {
+            // Mention dropdown navigation
+            if (mentionDropdown && mentionDropdown.style.display !== 'none') {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    navigateMention(1);
+                    return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    navigateMention(-1);
+                    return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                    if (mentionActiveIndex >= 0 && mentionActiveIndex < mentionItems.length) {
+                        e.preventDefault();
+                        selectMention(mentionActiveIndex);
+                        return;
+                    }
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    hideMentionDropdown();
+                    return;
+                }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
             }
         });
 
-        messageInput.addEventListener('input', autoResize);
+        messageInput.addEventListener('input', function () {
+            autoResize();
+            checkMentionTrigger();
+        });
 
         messageInput.addEventListener('paste', function (e) {
             handlePaste(e);
@@ -167,6 +200,7 @@
         var text = messageInput.value.trim();
         if ((!text && pendingImages.length === 0) || isProcessing) return;
 
+        hideMentionDropdown();
         messageInput.value = '';
         messageInput.style.height = 'auto';
         isProcessing = true;
@@ -1070,5 +1104,126 @@
             }
         });
     };
+
+    /* ===== @ Mention Autocomplete ===== */
+
+    function checkMentionTrigger() {
+        if (!mentionDropdown) return;
+        var val = messageInput.value;
+        var cursorPos = messageInput.selectionStart;
+
+        // Find @ before cursor: look backwards from cursor for @ that isn't preceded by a word char
+        var atIndex = -1;
+        for (var i = cursorPos - 1; i >= 0; i--) {
+            if (val[i] === '@') {
+                // Check that @ is at start of string or preceded by whitespace
+                if (i === 0 || /\s/.test(val[i - 1])) {
+                    atIndex = i;
+                }
+                break;
+            }
+            // If we hit a space or newline before finding @, stop
+            if (val[i] === ' ' || val[i] === '\n') break;
+        }
+
+        if (atIndex >= 0) {
+            var query = val.substring(atIndex + 1, cursorPos);
+            // Only show if query looks like a mention (alphanumeric, no spaces)
+            if (/^[\w]*$/.test(query)) {
+                mentionTriggerIndex = atIndex;
+                callJava('getMentionSuggestions', { query: query });
+                return;
+            }
+        }
+        hideMentionDropdown();
+    }
+
+    window.updateMentionSuggestions = function (suggestionsJson) {
+        whenReady(function () {
+            var suggestions;
+            try {
+                suggestions = JSON.parse(suggestionsJson);
+            } catch (e) {
+                hideMentionDropdown();
+                return;
+            }
+            if (!suggestions || suggestions.length === 0) {
+                hideMentionDropdown();
+                return;
+            }
+
+            mentionItems = suggestions;
+            mentionActiveIndex = 0;
+            renderMentionDropdown();
+            mentionDropdown.style.display = 'block';
+        });
+    };
+
+    function renderMentionDropdown() {
+        if (!mentionDropdown) return;
+        var html = '';
+        for (var i = 0; i < mentionItems.length; i++) {
+            var item = mentionItems[i];
+            var activeClass = i === mentionActiveIndex ? ' active' : '';
+            html += '<div class="mention-item' + activeClass + '" data-index="' + i + '">'
+                + '<span class="mention-keyword">@' + escapeHtmlSimple(item.keyword) + '</span>'
+                + '<span class="mention-desc">' + escapeHtmlSimple(item.description) + '</span>'
+                + '<span class="mention-type">' + escapeHtmlSimple(item.type) + '</span>'
+                + '</div>';
+        }
+        mentionDropdown.innerHTML = html;
+
+        // Add click handlers
+        var items = mentionDropdown.querySelectorAll('.mention-item');
+        for (var j = 0; j < items.length; j++) {
+            items[j].addEventListener('mousedown', (function (idx) {
+                return function (e) {
+                    e.preventDefault(); // prevent textarea blur
+                    selectMention(idx);
+                };
+            })(j));
+        }
+    }
+
+    function navigateMention(direction) {
+        if (mentionItems.length === 0) return;
+        mentionActiveIndex += direction;
+        if (mentionActiveIndex < 0) mentionActiveIndex = mentionItems.length - 1;
+        if (mentionActiveIndex >= mentionItems.length) mentionActiveIndex = 0;
+        renderMentionDropdown();
+    }
+
+    function selectMention(index) {
+        if (index < 0 || index >= mentionItems.length) return;
+        var item = mentionItems[index];
+        var val = messageInput.value;
+        var cursorPos = messageInput.selectionStart;
+
+        // Replace @query with @keyword + space
+        var before = val.substring(0, mentionTriggerIndex);
+        var after = val.substring(cursorPos);
+        messageInput.value = before + '@' + item.keyword + ' ' + after;
+
+        // Set cursor after the inserted mention
+        var newPos = before.length + item.keyword.length + 2; // @keyword + space
+        messageInput.setSelectionRange(newPos, newPos);
+        messageInput.focus();
+        autoResize();
+        hideMentionDropdown();
+    }
+
+    function hideMentionDropdown() {
+        if (mentionDropdown) {
+            mentionDropdown.style.display = 'none';
+        }
+        mentionItems = [];
+        mentionActiveIndex = -1;
+        mentionTriggerIndex = -1;
+    }
+
+    function escapeHtmlSimple(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
 
 })();
