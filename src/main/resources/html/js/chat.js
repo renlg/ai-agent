@@ -928,4 +928,11 @@
         return MarkdownRenderer.escapeHtml(text);
     };
 
+    window.setInputText = function (text) {
+        whenReady(function () {
+            messageInput.value = text;
+            autoResize();
+        });
+    };
+
 })();

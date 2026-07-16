@@ -182,6 +182,20 @@ public class ChatPanel extends JPanel implements Disposable {
         });
     }
 
+    public void submitExternalPrompt(String prompt) {
+        String sessionId = agentService.getActiveSessionId();
+        if (sessionId == null) {
+            createNewSession();
+            sessionId = agentService.getActiveSessionId();
+            if (sessionId == null) return;
+        }
+        sendMessage(prompt, null);
+    }
+
+    public void insertExternalInputText(String text) {
+        pushToJs("setInputText", escapeJsString(text));
+    }
+
     private void pushMemoriesListToJs(List<MemoryEntry> memories) {
         com.google.gson.JsonArray array = new com.google.gson.JsonArray();
         for (MemoryEntry memory : memories) {
