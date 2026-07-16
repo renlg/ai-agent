@@ -120,6 +120,25 @@ public class TokenCounter {
     }
 
     /**
+     * 估算单张图片消耗的 Token 数
+     * 采用 OpenAI 的图块（tile）计算公式：
+     *   tiles = ceil(width/512) * ceil(height/512)
+     *   tokens = 170 * tiles + 85
+     * 当宽高未知（<= 0）时，回退到每张图片 200 tokens 的启发式估算。
+     *
+     * @param width    图片宽度（像素），未知时传 0
+     * @param height   图片高度（像素），未知时传 0
+     * @param mimeType 图片 MIME 类型（当前不影响估算，保留以便未来扩展）
+     */
+    public static int estimateImageTokens(int width, int height, String mimeType) {
+        if (width <= 0 || height <= 0) {
+            return 200; // 未知尺寸时的启发式估算
+        }
+        int tiles = (int) (Math.ceil(width / 512.0) * Math.ceil(height / 512.0));
+        return 170 * tiles + 85;
+    }
+
+    /**
      * 清除缓存（模型切换时调用）
      */
     public static void clearCache() {

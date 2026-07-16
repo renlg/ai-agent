@@ -11,7 +11,8 @@ var MarkdownRenderer = (function () {
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function render(src) {
@@ -148,6 +149,28 @@ var MarkdownRenderer = (function () {
         return line.split('|').map(function (c) { return c.trim(); });
     }
 
+    /**
+     * 校验 URL 协议是否安全。
+     * 链接允许：http:、https:、mailto:
+     * 图片额外允许：data:image/
+     * 相对地址（无协议）视为安全。
+     */
+    function isSafeUrl(url, isImage) {
+        if (!url) return false;
+        var trimmed = url.replace(/^\s+/, '');
+        var lower = trimmed.toLowerCase();
+        // 提取协议部分（首个冒号之前）；若冒号出现在 / ? # 之后则视为相对地址
+        var colonIdx = lower.indexOf(':');
+        var slashIdx = lower.search(/[\/?#]/);
+        if (colonIdx === -1 || (slashIdx !== -1 && slashIdx < colonIdx)) {
+            return true; // 相对地址，安全
+        }
+        if (isImage && lower.indexOf('data:image/') === 0) return true;
+        return lower.indexOf('http:') === 0
+            || lower.indexOf('https:') === 0
+            || lower.indexOf('mailto:') === 0;
+    }
+
     /* ---- inline parser ---- */
     function processInline(text) {
         if (!text) return '';
@@ -160,10 +183,20 @@ var MarkdownRenderer = (function () {
 
         text = escapeHtml(text);
 
-        // images (before links)
-        text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%">');
-        // links
-        text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        // images (before links) — 仅允许 http/https/mailto/data:image 协议
+        text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (m, alt, url) {
+            if (isSafeUrl(url, true)) {
+                return '<img src="' + url + '" alt="' + alt + '" style="max-width:100%">';
+            }
+            return alt; // 协议不允许时仅渲染替代文本
+        });
+        // links — 仅允许 http/https/mailto 协议
+        text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (m, label, url) {
+            if (isSafeUrl(url, false)) {
+                return '<a href="' + url + '" target="_blank">' + label + '</a>';
+            }
+            return label; // 协议不允许时仅渲染链接文本，不包裹 <a>
+        });
         // bold
         text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');

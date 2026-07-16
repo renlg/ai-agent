@@ -555,7 +555,7 @@
                 for (var i = 0; i < messages.length; i++) {
                     var m = messages[i];
                     if (m.role === 'user') {
-                        appendUserMessage(m.content);
+                        appendUserMessage(m.content, m.images);
                     } else if (m.role === 'assistant' && m.content) {
                         var el = createMessageEl('assistant', 'AI');
                         el.querySelector('.message-content').innerHTML = MarkdownRenderer.render(m.content);
@@ -830,14 +830,18 @@
     function handlePaste(e) {
         var items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
+        var handledImage = false;
+        // 收集剪贴板中的所有图片项（与 handleDrop 行为一致）
         for (var i = 0; i < items.length; i++) {
             if (items[i].type.indexOf('image') !== -1) {
-                e.preventDefault();
                 var file = items[i].getAsFile();
                 if (file) {
+                    if (!handledImage) {
+                        e.preventDefault();
+                        handledImage = true;
+                    }
                     readFileAsBase64(file);
                 }
-                return;
             }
         }
     }
@@ -853,16 +857,83 @@
         }
     }
 
+    var MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 单张图片最大 10MB
+    var MAX_IMAGES = 5;                      // 每条消息最多 5 张图片
+    var MAX_IMAGE_DIMENSION = 1568;          // 最长边上限（像素）
+    var ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
     function readFileAsBase64(file) {
+        // 数量限制
+        if (pendingImages.length >= MAX_IMAGES) {
+            window.showNotification('Too many images. A maximum of ' + MAX_IMAGES + ' images per message is allowed.');
+            return;
+        }
+        // 类型限制
+        if (ALLOWED_IMAGE_TYPES.indexOf(file.type) === -1) {
+            window.showNotification('Unsupported image type: ' + (file.type || 'unknown') + '. Allowed: PNG, JPEG, GIF, WEBP.');
+            return;
+        }
+        // 大小限制（编码前的原始文件大小）
+        if (file.size > MAX_IMAGE_BYTES) {
+            window.showNotification('Image is too large (' + (file.size / (1024 * 1024)).toFixed(1) + 'MB). Maximum allowed is 10MB.');
+            return;
+        }
+
         var reader = new FileReader();
         reader.onload = function (event) {
             var dataUrl = event.target.result;
-            var base64 = dataUrl.split(',')[1];
             var mimeType = file.type || 'image/png';
-            pendingImages.push({ base64: base64, mimeType: mimeType, dataUrl: dataUrl });
-            addImagePreview(pendingImages.length - 1, dataUrl);
+            downscaleImage(dataUrl, mimeType, function (finalDataUrl, finalMime) {
+                var base64 = finalDataUrl.split(',')[1];
+                pendingImages.push({ base64: base64, mimeType: finalMime, dataUrl: finalDataUrl });
+                addImagePreview(pendingImages.length - 1, finalDataUrl);
+            });
+        };
+        reader.onerror = function () {
+            console.error('Failed to read image file', reader.error);
+            window.showNotification('Failed to read the image file. Please try again.');
         };
         reader.readAsDataURL(file);
+    }
+
+    /**
+     * 将图片缩放到最长边不超过 MAX_IMAGE_DIMENSION，并重新编码。
+     * 含透明通道（png/webp/gif）优先输出 PNG，否则输出 JPEG（质量 0.85）。
+     * 失败时回退到原始 dataUrl。
+     */
+    function downscaleImage(dataUrl, mimeType, callback) {
+        var img = new Image();
+        img.onload = function () {
+            try {
+                var w = img.naturalWidth || img.width;
+                var h = img.naturalHeight || img.height;
+                var longest = Math.max(w, h);
+                var scale = longest > MAX_IMAGE_DIMENSION ? (MAX_IMAGE_DIMENSION / longest) : 1;
+                var targetW = Math.max(1, Math.round(w * scale));
+                var targetH = Math.max(1, Math.round(h * scale));
+
+                var canvas = document.createElement('canvas');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, targetW, targetH);
+
+                var hasAlpha = mimeType === 'image/png' || mimeType === 'image/webp' || mimeType === 'image/gif';
+                var outMime = hasAlpha ? 'image/png' : 'image/jpeg';
+                var outDataUrl = hasAlpha
+                    ? canvas.toDataURL('image/png')
+                    : canvas.toDataURL('image/jpeg', 0.85);
+                callback(outDataUrl, outMime);
+            } catch (err) {
+                console.error('Failed to downscale image', err);
+                callback(dataUrl, mimeType);
+            }
+        };
+        img.onerror = function () {
+            console.error('Failed to load image for downscaling');
+            callback(dataUrl, mimeType);
+        };
+        img.src = dataUrl;
     }
 
     function addImagePreview(index, dataUrl) {
@@ -918,6 +989,17 @@
                 + parsed.before.toLocaleString() + ' tokens \u2192 \u538b\u7f29\u540e '
                 + parsed.after.toLocaleString() + ' tokens\uff0c\u8282\u7701 '
                 + parsed.percent + '%\uff09';
+            messagesArea.appendChild(el);
+            scrollToBottom();
+        });
+    };
+
+    /* ===== Notifications ===== */
+    window.showNotification = function (message) {
+        whenReady(function () {
+            var el = document.createElement('div');
+            el.className = 'compress-notification';
+            el.textContent = message;
             messagesArea.appendChild(el);
             scrollToBottom();
         });

@@ -226,9 +226,20 @@ public class SessionManager {
                 toolResult = msg.getContent();
             }
 
-            result.add(new SessionStore.MessageData(
+            SessionStore.MessageData data = new SessionStore.MessageData(
                     msg.getRole(), msg.getContent(), toolName, toolArgs, toolResult,
-                    msg.getToolCallId(), toolCallsData));
+                    msg.getToolCallId(), toolCallsData);
+
+            // 序列化图片内容（视觉输入），供重启/切换会话后恢复
+            if (msg.getImageContents() != null && !msg.getImageContents().isEmpty()) {
+                List<SessionStore.ImageData> imageDataList = new ArrayList<>();
+                for (ChatMessage.ImageContent img : msg.getImageContents()) {
+                    imageDataList.add(new SessionStore.ImageData(img.getBase64Data(), img.getMimeType()));
+                }
+                data.images = imageDataList;
+            }
+
+            result.add(data);
         }
         return result;
     }
@@ -240,6 +251,14 @@ public class SessionManager {
         for (SessionStore.MessageData md : messageDataList) {
             ChatMessage msg = new ChatMessage(md.role, md.content);
             msg.setToolCallId(md.toolCallId);
+            // 恢复图片内容（视觉输入）
+            if (md.images != null && !md.images.isEmpty()) {
+                List<ChatMessage.ImageContent> imageContents = new ArrayList<>();
+                for (SessionStore.ImageData img : md.images) {
+                    imageContents.add(new ChatMessage.ImageContent(img.base64Data, img.mimeType));
+                }
+                msg.setImageContents(imageContents);
+            }
             if (md.toolCalls != null) {
                 ChatMessage.ToolCall[] toolCalls = new ChatMessage.ToolCall[md.toolCalls.size()];
                 for (int i = 0; i < md.toolCalls.size(); i++) {

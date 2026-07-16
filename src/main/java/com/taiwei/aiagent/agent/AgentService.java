@@ -729,13 +729,15 @@ public class AgentService {
         List<ChatMessage> messages = context.getConversation().getMessages();
         int totalTokens;
         if (lastPromptTokens > 0) {
-            // 使用 LLM 返回的实际 Token 数
+            // 使用 LLM 返回的实际 Token 数（已包含图片 token）
             totalTokens = lastPromptTokens;
             LOG.info("使用 LLM 实际 Token 数: " + totalTokens);
         } else {
             // 首次迭代无历史数据，回退到 tiktoken 计数（根据模型匹配 tokenizer）
-            totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName());
-            LOG.info("使用 tiktoken 估算 Token 数: " + totalTokens);
+            // 文本 tokenizer 无法统计图片，需额外加上图片 token 估算
+            totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName())
+                    + estimateImageTokens(messages);
+            LOG.info("使用 tiktoken 估算 Token 数（含图片）: " + totalTokens);
         }
         int thresholdTokens = (int) (maxTokens * threshold / 100.0);
 
@@ -745,6 +747,22 @@ public class AgentService {
         }
     }
 
+
+    /**
+     * 估算消息列表中所有图片消耗的 Token 数
+     */
+    private int estimateImageTokens(List<ChatMessage> messages) {
+        int imageTokens = 0;
+        for (ChatMessage msg : messages) {
+            if (msg.getImageContents() != null) {
+                for (ChatMessage.ImageContent img : msg.getImageContents()) {
+                    // 尺寸未知，使用启发式估算
+                    imageTokens += TokenCounter.estimateImageTokens(0, 0, img.getMimeType());
+                }
+            }
+        }
+        return imageTokens;
+    }
 
     /**
      * 执行上下文压缩：摘要压缩，失败则回退到丢弃最旧50%消息
@@ -794,6 +812,12 @@ public class AgentService {
 
                 List<ChatMessage> newMessages = new ArrayList<>();
                 newMessages.add(ChatMessage.system("以下是对之前对话的摘要：\n" + summary));
+                // 保留携带图片的历史消息（不因摘要压缩而丢弃图片内容）
+                for (ChatMessage older : olderMessages) {
+                    if (older.hasImages()) {
+                        newMessages.add(older);
+                    }
+                }
                 newMessages.addAll(recentMessages);
 
                 context.getConversation().replaceMessages(newMessages);

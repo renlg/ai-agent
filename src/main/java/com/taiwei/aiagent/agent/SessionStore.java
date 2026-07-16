@@ -175,6 +175,8 @@ public class SessionStore {
         public String toolResult;
         public String toolCallId;
         public List<ToolCallData> toolCalls;
+        /** 图片内容列表（视觉输入，仅 user 消息可能存在），null 表示无图片 */
+        public List<ImageData> images;
 
         public MessageData() {}
 
@@ -187,6 +189,21 @@ public class SessionStore {
             this.toolResult = toolResult;
             this.toolCallId = toolCallId;
             this.toolCalls = toolCalls;
+        }
+    }
+
+    /**
+     * 图片内容（视觉输入）持久化数据
+     */
+    public static class ImageData {
+        public String base64Data;
+        public String mimeType;
+
+        public ImageData() {}
+
+        public ImageData(String base64Data, String mimeType) {
+            this.base64Data = base64Data;
+            this.mimeType = mimeType;
         }
     }
 

@@ -397,13 +397,23 @@ public class ChatPanel extends JPanel implements Disposable {
                 case "sendMessage":
                     String content = data.has("content") ? data.get("content").getAsString() : "";
                     List<ChatMessage.ImageContent> images = null;
-                    if (data.has("images") && data.get("images").isJsonArray()) {
-                        images = new ArrayList<>();
-                        for (com.google.gson.JsonElement el : data.getAsJsonArray("images")) {
-                            com.google.gson.JsonObject imgObj = el.getAsJsonObject();
-                            String base64 = imgObj.get("base64").getAsString();
-                            String mimeType = imgObj.get("mimeType").getAsString();
-                            images.add(new ChatMessage.ImageContent(base64, mimeType));
+                    if (data.has("images") && data.get("images").isJsonArray()
+                            && data.getAsJsonArray("images").size() > 0) {
+                        // 图片输入前的两道校验：全局视觉开关 + 当前模型的视觉能力
+                        if (!AiAgentSettings.getInstance().isVisionEnabled()) {
+                            pushToJs("showNotification",
+                                    escapeJsString("Vision is disabled. Enable it in settings to send images."));
+                        } else if (!isActiveModelVisionCapable()) {
+                            pushToJs("showNotification",
+                                    escapeJsString("Current model does not support image input."));
+                        } else {
+                            images = new ArrayList<>();
+                            for (com.google.gson.JsonElement el : data.getAsJsonArray("images")) {
+                                com.google.gson.JsonObject imgObj = el.getAsJsonObject();
+                                String base64 = imgObj.get("base64").getAsString();
+                                String mimeType = imgObj.get("mimeType").getAsString();
+                                images.add(new ChatMessage.ImageContent(base64, mimeType));
+                            }
                         }
                     }
                     sendMessage(content, images);
@@ -497,6 +507,19 @@ public class ChatPanel extends JPanel implements Disposable {
         }
     }
 
+    /**
+     * 判断当前激活模型是否支持视觉（图片）输入。
+     * 采用简单启发式：模型名称包含常见多模态模型关键字则视为支持。
+     */
+    private boolean isActiveModelVisionCapable() {
+        AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
+        if (config == null) return false;
+        String name = config.modelName != null ? config.modelName.toLowerCase(Locale.ROOT) : "";
+        return name.contains("gpt-4o") || name.contains("gpt-4")
+                || name.contains("claude") || name.contains("gemini")
+                || name.contains("vision");
+    }
+
     // ========== Java → JS Push ==========
 
     private void pushToJs(String func, String data) {
@@ -556,7 +579,15 @@ public class ChatPanel extends JPanel implements Disposable {
             String role = msg.getRole();
             if ("user".equals(role)) {
                 pendingAssistant = null;
-                displayEntries.add(new SimpleEntry("user", msg.getContent()));
+                SimpleEntry userEntry = new SimpleEntry("user", msg.getContent());
+                // 携带图片数据（data:mimeType;base64,base64Data），供前端重新渲染缩略图
+                if (msg.getImageContents() != null && !msg.getImageContents().isEmpty()) {
+                    userEntry.images = new ArrayList<>();
+                    for (ChatMessage.ImageContent img : msg.getImageContents()) {
+                        userEntry.images.add("data:" + img.getMimeType() + ";base64," + img.getBase64Data());
+                    }
+                }
+                displayEntries.add(userEntry);
             } else if ("assistant".equals(role)
                     && msg.getContent() != null && !msg.getContent().isEmpty()) {
                 if (pendingAssistant != null) {
@@ -577,8 +608,16 @@ public class ChatPanel extends JPanel implements Disposable {
             json.append("{\"role\":")
                     .append(escapeJsString(entry.role))
                     .append(",\"content\":")
-                    .append(escapeJsString(entry.content))
-                    .append("}");
+                    .append(escapeJsString(entry.content));
+            if (entry.images != null && !entry.images.isEmpty()) {
+                json.append(",\"images\":[");
+                for (int k = 0; k < entry.images.size(); k++) {
+                    if (k > 0) json.append(",");
+                    json.append("{\"dataUrl\":").append(escapeJsString(entry.images.get(k))).append("}");
+                }
+                json.append("]");
+            }
+            json.append("}");
             first = false;
         }
 
@@ -603,6 +642,7 @@ public class ChatPanel extends JPanel implements Disposable {
     private static class SimpleEntry {
         final String role;
         String content;
+        List<String> images;
 
         SimpleEntry(String role, String content) {
             this.role = role;

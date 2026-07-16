@@ -29,6 +29,7 @@ public class ModelConfigurable implements Configurable {
     private JBTable table;
     private JSpinner maxTokensSpinner;
     private JSpinner temperatureSpinner;
+    private JCheckBox visionCheckbox;
 
     private List<AiAgentSettings.ModelConfig> editingConfigs;
 
@@ -86,9 +87,12 @@ public class ModelConfigurable implements Configurable {
         JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
         temperatureSpinner.setEditor(tempEditor);
 
+        visionCheckbox = new JCheckBox("启用图片 / 视觉支持");
+
         JPanel paramsPanel = FormBuilder.createFormBuilder()
                 .addLabeledComponent(I18nUtil.getMessage("model.maxTokensLabel"), maxTokensSpinner)
                 .addLabeledComponent(I18nUtil.getMessage("model.temperatureLabel"), temperatureSpinner)
+                .addComponent(visionCheckbox)
                 .getPanel();
 
         // ===== 组装主面板 =====
@@ -179,6 +183,7 @@ public class ModelConfigurable implements Configurable {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ((Integer) maxTokensSpinner.getValue() != settings.getMaxTokens()) return true;
         if ((Double) temperatureSpinner.getValue() != settings.getTemperature()) return true;
+        if (visionCheckbox.isSelected() != settings.isVisionEnabled()) return true;
 
         List<AiAgentSettings.ModelConfig> current = settings.getModelConfigs();
         if (editingConfigs.size() != current.size()) return true;
@@ -216,6 +221,7 @@ public class ModelConfigurable implements Configurable {
         settings.setModelConfigs(new ArrayList<>(editingConfigs));
         settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
         settings.setTemperature((Double) temperatureSpinner.getValue());
+        settings.setVisionEnabled(visionCheckbox.isSelected());
 
         // 保持当前选中的模型索引（如果索引有效）
         int currentActiveIndex = settings.getActiveModelIndex();
@@ -239,6 +245,7 @@ public class ModelConfigurable implements Configurable {
         }
         maxTokensSpinner.setValue(settings.getMaxTokens());
         temperatureSpinner.setValue(settings.getTemperature());
+        visionCheckbox.setSelected(settings.isVisionEnabled());
     }
 
     @Override
@@ -248,6 +255,7 @@ public class ModelConfigurable implements Configurable {
         tableModel = null;
         maxTokensSpinner = null;
         temperatureSpinner = null;
+        visionCheckbox = null;
         editingConfigs = null;
     }
 
