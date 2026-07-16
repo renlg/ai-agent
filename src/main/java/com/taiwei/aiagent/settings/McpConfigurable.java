@@ -21,7 +21,7 @@ import java.util.List;
 
 /**
  * MCP 服务器配置页面
- * Settings → Tools → 太微 → 连接
+ * Settings → Tools → 太微 → MCP
  */
 public class McpConfigurable implements Configurable {
 

@@ -20,9 +20,10 @@
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
     var tabList, modelDropdown, modelDropdownTrigger, modelDropdownMenu, modelDropdownLabel;
     var modeDropdown, modeDropdownTrigger, modeDropdownMenu, modeDropdownLabel;
-    var newSessionBtn, clearBtn;
+    var newSessionBtn;
     var settingsBtn, settingsDropdown, settingsDropdownMenu, skillManagerItem, skillsBadge;
     var memoryManagerItem, memoryBadge;
+    var mcpSettingsItem;
     var imagePreviewArea;
 
     /* ===== Init ===== */
@@ -37,7 +38,6 @@
         modelDropdownMenu = document.getElementById('modelDropdownMenu');
         modelDropdownLabel = document.getElementById('modelDropdownLabel');
         newSessionBtn = document.getElementById('newSessionBtn');
-        clearBtn = document.getElementById('clearBtn');
         modeDropdown = document.getElementById('modeDropdown');
         modeDropdownTrigger = document.getElementById('modeDropdownTrigger');
         modeDropdownMenu = document.getElementById('modeDropdownMenu');
@@ -50,6 +50,7 @@
         skillsBadge = document.getElementById('skillsBadge');
         memoryManagerItem = document.getElementById('memoryManagerItem');
         memoryBadge = document.getElementById('memoryBadge');
+        mcpSettingsItem = document.getElementById('mcpSettingsItem');
         imagePreviewArea = document.getElementById('imagePreviewArea');
 
         if (window.__TAIW_THEME__ === 'dark') {
@@ -89,10 +90,6 @@
             createNewSession();
         });
 
-        clearBtn.addEventListener('click', function () {
-            clearChat();
-        });
-
         modelDropdownTrigger.addEventListener('click', function (e) {
             e.stopPropagation();
             modelDropdown.classList.toggle('open');
@@ -126,6 +123,12 @@
         memoryManagerItem.addEventListener('click', function (e) {
             e.stopPropagation();
             callJava('openMemoryManager', {});
+            settingsDropdown.classList.remove('open');
+        });
+
+        mcpSettingsItem.addEventListener('click', function (e) {
+            e.stopPropagation();
+            callJava('openMcpSettings', {});
             settingsDropdown.classList.remove('open');
         });
 

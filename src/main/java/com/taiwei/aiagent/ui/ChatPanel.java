@@ -3,6 +3,7 @@ package com.taiwei.aiagent.ui;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.JBColor;
@@ -172,6 +173,12 @@ public class ChatPanel extends JPanel implements Disposable {
                 }
             });
             dialog.show();
+        });
+    }
+
+    private void openMcpSettings() {
+        SwingUtilities.invokeLater(() -> {
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, "com.taiwei.aiagent.settings.mcp");
         });
     }
 
@@ -449,6 +456,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "openMemoryManager":
                     openMemoryManager();
+                    break;
+                case "openMcpSettings":
+                    openMcpSettings();
                     break;
                 case "listMemories":
                     String memCategory = data.has("category") ? data.get("category").getAsString() : null;
