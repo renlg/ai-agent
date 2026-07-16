@@ -42,7 +42,7 @@ public class OpenAiLlmClient implements LlmClient {
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(120, TimeUnit.SECONDS)
                 .build();
         this.gson = new GsonBuilder().create();
     }
@@ -76,6 +76,7 @@ public class OpenAiLlmClient implements LlmClient {
 
         EventSource.Factory factory = EventSources.createFactory(httpClient);
 
+        LOG.info("chatStream 开始 - model=" + model + ", messages=" + messages.size() + ", tools=" + (tools != null ? tools.size() : 0));
         EventSource eventSource = factory.newEventSource(request, new EventSourceListener() {
 
             // 用于累积流式工具调用
@@ -85,11 +86,14 @@ public class OpenAiLlmClient implements LlmClient {
 
             @Override
             public void onOpen(EventSource eventSource, Response response) {
+                LOG.info("SSE onOpen - HTTP " + response.code() + ", model=" + model);
                 currentEventSource = eventSource;
             }
 
             @Override
             public void onEvent(EventSource eventSource, String id, String type, String data) {
+                LOG.info("SSE onEvent 收到数据: " + (data.length() > 500 ? data.substring(0, 500) + "..." : data));
+
                 if ("[DONE]".equals(data)) {
                     // 如果有累积的工具调用，回调
                     flushToolCalls(listener);
@@ -100,6 +104,15 @@ public class OpenAiLlmClient implements LlmClient {
                 try {
                     JsonObject chunk = gson.fromJson(data, JsonObject.class);
                     if (chunk == null) return;
+
+                    // 检查 API 错误响应（很多 OpenAI 兼容 API 在流式模式下通过 SSE 事件返回错误）
+                    if (chunk.has("error") && !chunk.get("error").isJsonNull()) {
+                        JsonObject errorObj = chunk.getAsJsonObject("error");
+                        String errorMsg = errorObj.has("message") ? errorObj.get("message").getAsString() : "未知 API 错误";
+                        LOG.warn("SSE 流中收到 API 错误: " + errorMsg);
+                        listener.onError("API 错误: " + errorMsg, null);
+                        return;
+                    }
 
                     // 解析 usage（通常在最后一个 chunk 中，choices 可能为空）
                     if (chunk.has("usage") && !chunk.get("usage").isJsonNull()) {
@@ -180,6 +193,9 @@ public class OpenAiLlmClient implements LlmClient {
                     msg.append(", error: ").append(t.getMessage());
                 }
                 LOG.warn(msg.toString());
+                if (t != null) {
+                    LOG.warn("流式请求失败异常详情", t);
+                }
                 listener.onError(msg.toString(), t);
             }
 

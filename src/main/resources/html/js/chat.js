@@ -16,6 +16,7 @@
     var totalUsedTokens = 0;
     var pendingImages = [];
     var visionCapable = false;
+    var safetyTimeoutId = null; // 安全超时定时器，防止 UI 永久卡住
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
@@ -182,6 +183,15 @@
             imageData.push({ base64: images[i].base64, mimeType: images[i].mimeType });
         }
         callJava('sendMessage', { content: text, images: imageData });
+
+        // 启动安全超时定时器（200秒），防止 Java 端未回调导致 UI 永久卡住
+        if (safetyTimeoutId) clearTimeout(safetyTimeoutId);
+        safetyTimeoutId = setTimeout(function() {
+            if (isProcessing) {
+                console.warn('Safety timeout triggered, resetting UI state');
+                window.onError('请求超时（200秒无响应），请检查网络连接或模型配置');
+            }
+        }, 200000);
     }
 
     function stopGeneration() {
@@ -422,6 +432,11 @@
 
     window.onComplete = function () {
         whenReady(function () {
+            // 清除安全超时定时器
+            if (safetyTimeoutId) {
+                clearTimeout(safetyTimeoutId);
+                safetyTimeoutId = null;
+            }
             removeThinking();
             removeRoundLoading();
             isProcessing = false;
@@ -442,6 +457,11 @@
 
     window.onError = function (error) {
         whenReady(function () {
+            // 清除安全超时定时器
+            if (safetyTimeoutId) {
+                clearTimeout(safetyTimeoutId);
+                safetyTimeoutId = null;
+            }
             removeThinking();
             removeRoundLoading();
             // 先做最终 Markdown 渲染

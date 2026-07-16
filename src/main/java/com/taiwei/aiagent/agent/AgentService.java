@@ -452,7 +452,14 @@ public class AgentService {
             );
 
             try {
-                latch.await();
+                // 使用超时等待，防止 onFailure 未被调用导致线程永久阻塞
+                boolean completed = latch.await(180, java.util.concurrent.TimeUnit.SECONDS);
+                if (!completed) {
+                    LOG.warn("Agent 循环第 " + (iteration + 1) + " 次迭代等待 LLM 响应超时（180s）");
+                    llmClient.cancel();
+                    listener.onError("LLM 响应超时（180秒），请检查网络连接或模型配置");
+                    return;
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 listener.onError("Agent 循环被中断");
@@ -470,6 +477,7 @@ public class AgentService {
 
             if (iterError[0] != null) {
                 LOG.warn("流式调用错误: " + iterError[0]);
+                LOG.info("流式调用错误 - 迭代次数: " + (iteration + 1) + ", 模型: " + llmClient.getModelName());
                 listener.onError(iterError[0]);
                 return;
             }

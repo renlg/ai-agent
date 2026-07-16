@@ -929,6 +929,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onError(String error) {
+                    LOG.warn("ChatPanel onError 回调触发 - sessionId=" + sessionId + ", error=" + error);
                     sessionState.isProcessing = false;
                     sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
                     sessionState.chatEntries.add(ChatEntry.error(error));
@@ -939,6 +940,7 @@ public class ChatPanel extends JPanel implements Disposable {
                     pushToJs("clearAllProgress", "");
                     pushToJs("clearAllRunButtons", "");
                     pushError(error);
+                    LOG.info("ChatPanel onError 处理完成，已重置 isProcessing 状态");
                 }
             });
         });
