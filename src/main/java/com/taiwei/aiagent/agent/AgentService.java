@@ -743,18 +743,6 @@ public class AgentService {
 
         List<ChatMessage> messages = context.getConversation().getMessages();
 
-        // 跳过压缩：对话消息太少时没有压缩的必要
-        int nonSystemMessageCount = 0;
-        for (ChatMessage msg : messages) {
-            if (!"system".equals(msg.getRole())) {
-                nonSystemMessageCount++;
-            }
-        }
-        if (nonSystemMessageCount <= 3) {
-            LOG.info("非系统消息数量 " + nonSystemMessageCount + " <= 3，跳过自动压缩");
-            return;
-        }
-
         // 始终实时计算 Token 数，确保准确性
         int totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName())
                 + estimateImageTokens(messages);
@@ -993,15 +981,22 @@ public class AgentService {
         }
 
         int userCount = 0;
+        int recentStart = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
             if ("user".equals(messages.get(i).getRole())) {
                 userCount++;
                 if (userCount == turnsToKeep) {
-                    return i;
+                    recentStart = i;
+                    break;
                 }
             }
         }
-        return 0;
+
+        if (totalUserMessages <= turnsToKeep && messages.size() - recentStart > 4) {
+            recentStart = messages.size() - 4;
+        }
+
+        return recentStart;
     }
 
     /**
