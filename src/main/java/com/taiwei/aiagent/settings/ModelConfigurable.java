@@ -29,6 +29,8 @@ public class ModelConfigurable implements Configurable {
     private JBTable table;
     private JSpinner maxTokensSpinner;
     private JSpinner temperatureSpinner;
+    private JCheckBox inlineCompletionCheckbox;
+    private JCheckBox inlineActionCheckbox;
 
     private List<AiAgentSettings.ModelConfig> editingConfigs;
 
@@ -87,9 +89,14 @@ public class ModelConfigurable implements Configurable {
         JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
         temperatureSpinner.setEditor(tempEditor);
 
+        inlineCompletionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineCompletionEnabled"));
+        inlineActionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineActionEnabled"));
+
         JPanel paramsPanel = FormBuilder.createFormBuilder()
                 .addLabeledComponent(I18nUtil.getMessage("model.maxTokensLabel"), maxTokensSpinner)
                 .addLabeledComponent(I18nUtil.getMessage("model.temperatureLabel"), temperatureSpinner)
+                .addComponent(inlineCompletionCheckbox)
+                .addComponent(inlineActionCheckbox)
                 .getPanel();
 
         // ===== 组装主面板 =====
@@ -180,6 +187,8 @@ public class ModelConfigurable implements Configurable {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ((Integer) maxTokensSpinner.getValue() != settings.getMaxTokens()) return true;
         if ((Double) temperatureSpinner.getValue() != settings.getTemperature()) return true;
+        if (inlineCompletionCheckbox.isSelected() != settings.isCompletionEnabled()) return true;
+        if (inlineActionCheckbox.isSelected() != settings.isInlineActionEnabled()) return true;
 
         List<AiAgentSettings.ModelConfig> current = settings.getModelConfigs();
         if (editingConfigs.size() != current.size()) return true;
@@ -218,6 +227,8 @@ public class ModelConfigurable implements Configurable {
         settings.setModelConfigs(new ArrayList<>(editingConfigs));
         settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
         settings.setTemperature((Double) temperatureSpinner.getValue());
+        settings.setCompletionEnabled(inlineCompletionCheckbox.isSelected());
+        settings.setInlineActionEnabled(inlineActionCheckbox.isSelected());
 
         // 保持当前选中的模型索引（如果索引有效）
         int currentActiveIndex = settings.getActiveModelIndex();
@@ -241,6 +252,8 @@ public class ModelConfigurable implements Configurable {
         }
         maxTokensSpinner.setValue(settings.getMaxTokens());
         temperatureSpinner.setValue(settings.getTemperature());
+        inlineCompletionCheckbox.setSelected(settings.isCompletionEnabled());
+        inlineActionCheckbox.setSelected(settings.isInlineActionEnabled());
     }
 
     @Override
@@ -250,6 +263,8 @@ public class ModelConfigurable implements Configurable {
         tableModel = null;
         maxTokensSpinner = null;
         temperatureSpinner = null;
+        inlineCompletionCheckbox = null;
+        inlineActionCheckbox = null;
         editingConfigs = null;
     }
 

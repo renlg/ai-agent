@@ -51,6 +51,9 @@
 
         <!-- Tab 自动补全 -->
         <codeInsight.inlineCompletionProvider implementation="com.taiwei.aiagent.completion.InlineCompletionProvider"/>
+
+        <!-- Inline Action：选中文本后显示浮动操作栏 -->
+        <editorFactoryListener implementation="com.taiwei.aiagent.completion.InlineActionProvider"/>
     </extensions>
 
     <!-- VCS 可选功能：提交页面生成提交信息按钮 -->

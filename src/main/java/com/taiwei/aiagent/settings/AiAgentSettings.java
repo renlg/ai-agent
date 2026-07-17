@@ -196,6 +196,14 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         state.gitCommitReviewEnabled = enabled;
     }
 
+    public boolean isInlineActionEnabled() {
+        return state.inlineActionEnabled;
+    }
+
+    public void setInlineActionEnabled(boolean enabled) {
+        state.inlineActionEnabled = enabled;
+    }
+
     // ========== 自定义规则 ==========
 
     public String getCustomRules() {
@@ -397,6 +405,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 是否启用 Git 提交评审（生成提交信息）
          */
         public boolean gitCommitReviewEnabled = true;
+
+        /**
+         * 是否启用 Inline Action（选中文本后显示浮动操作栏）
+         */
+        public boolean inlineActionEnabled = true;
 
         /**
          * 用户自定义规则（全局），会注入到系统提示词中
