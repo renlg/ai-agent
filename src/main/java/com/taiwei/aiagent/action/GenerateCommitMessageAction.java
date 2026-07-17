@@ -108,6 +108,7 @@ public class GenerateCommitMessageAction extends AnAction {
                 String status = runGit(basePath, "status", "--porcelain");
 
                 if (diff == null || diff.isBlank()) {
+                    resetButtonState(e);
                     notifyError(project, "没有检测到任何变更（git diff 为空），无法生成提交信息。");
                     return;
                 }
@@ -118,8 +119,16 @@ public class GenerateCommitMessageAction extends AnAction {
                 indicator.setText("太微：AI 正在生成提交信息...");
 
                 AiAgentSettings settings = AiAgentSettings.getInstance();
-                LlmClient client = new OpenAiLlmClient(
-                        settings.getBaseUrl(), settings.getApiKey(), settings.getModel());
+                LlmClient client;
+                try {
+                    client = new OpenAiLlmClient(
+                            settings.getBaseUrl(), settings.getApiKey(), settings.getModel());
+                } catch (Exception ex) {
+                    LOG.warn("创建 LLM 客户端失败", ex);
+                    resetButtonState(e);
+                    notifyError(project, "创建 LLM 客户端失败: " + ex.getMessage());
+                    return;
+                }
                 try {
                     String userPrompt = buildPrompt(status != null ? status : "", diff != null ? diff : "");
                     List<ChatMessage> request = new ArrayList<>();
@@ -184,12 +193,7 @@ public class GenerateCommitMessageAction extends AnAction {
                     notifyError(project, "生成提交信息失败: " + ex.getMessage());
                 } finally {
                     client.close();
-                    generating = false;
-                    // 在 EDT 上恢复按钮状态
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        e.getPresentation().setEnabled(true);
-                        e.getPresentation().setText("太微：生成提交信息");
-                    });
+                    resetButtonState(e);
                 }
             }
         });
@@ -267,5 +271,13 @@ public class GenerateCommitMessageAction extends AnAction {
     private static void notifyError(Project project, String message) {
         ApplicationManager.getApplication().invokeLater(() ->
                 Messages.showErrorDialog(project, message, "太微 - 生成提交信息"));
+    }
+
+    private static void resetButtonState(@NotNull AnActionEvent e) {
+        generating = false;
+        ApplicationManager.getApplication().invokeLater(() -> {
+            e.getPresentation().setEnabled(true);
+            e.getPresentation().setText("太微：生成提交信息");
+        });
     }
 }
