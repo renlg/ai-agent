@@ -16,6 +16,7 @@
 3. **find_symbol** - 符号级搜索（类/方法/字段）
 4. **find_references** - 查找符号引用
 5. **web_search** - 网络搜索
+6. **load_skill** - 加载指定 Skill 的完整内容
 
 **严格限制**：write_file、file_replace、run_command 等修改性工具在当前模式下不可用。你不能创建或修改任何文件，也不能执行任何终端命令。即使用户要求你执行这些操作，也应说明当前处于 Plan 模式并给出计划，等待切换到 Build 模式后再执行。
 
@@ -33,7 +34,8 @@
 
 #if($skills && !$skills.isEmpty())
 ## 可用的 Skill
-以下是当前可用的技能（Skill）列表（仅名称/描述/标签，完整内容尚未加载）：
+以下是当前可用的技能（Skill）列表。每项仅显示名称/描述/标签，完整内容尚未加载。
+如果你需要某个技能的完整内容，请使用 **load_skill** 工具按需加载。
 
 ${skills}
 #end
