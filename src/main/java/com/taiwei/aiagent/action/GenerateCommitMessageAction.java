@@ -107,7 +107,7 @@ public class GenerateCommitMessageAction extends AnAction {
                 }
                 String status = runGit(basePath, "status", "--porcelain");
 
-                if ((diff == null || diff.isBlank()) && (status == null || status.isBlank())) {
+                if (diff == null || diff.isBlank()) {
                     notifyError(project, "没有检测到任何变更（git diff 为空），无法生成提交信息。");
                     return;
                 }
