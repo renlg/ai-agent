@@ -24,7 +24,9 @@ public class TaiweiParentConfigurable implements Configurable {
     private JPanel mainPanel;
     private JCheckBox completionCheckBox;
     private JCheckBox gitCommitReviewCheckBox;
-    private JComboBox<String> toolManagerComboBox;
+    private JComboBox<String> toolManagerCombo;
+    private static final String PLACEHOLDER = "────── 操作 ──────";
+    private static final String ACTION_MANAGE = "管理工具...";
 
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
@@ -37,10 +39,16 @@ public class TaiweiParentConfigurable implements Configurable {
         completionCheckBox = new JCheckBox(I18nUtil.getMessage("general.completionEnabled"));
         gitCommitReviewCheckBox = new JCheckBox(I18nUtil.getMessage("general.gitCommitReviewEnabled"));
 
-        toolManagerComboBox = new JComboBox<>(new String[]{I18nUtil.getMessage("tool.manager.dropdown.option")});
-        toolManagerComboBox.addActionListener(e -> openToolManager());
+        toolManagerCombo = new JComboBox<>(new String[]{PLACEHOLDER, ACTION_MANAGE});
+        toolManagerCombo.addItemListener(e -> {
+            if (e.getStateChange() == ItemEvent.SELECTED && ACTION_MANAGE.equals(e.getItem())) {
+                openToolManager();
+                toolManagerCombo.setSelectedItem(PLACEHOLDER);
+            }
+        });
         JPanel toolManagerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        toolManagerPanel.add(toolManagerComboBox);
+        toolManagerPanel.add(new JLabel("工具管理: "));
+        toolManagerPanel.add(toolManagerCombo);
 
         mainPanel = FormBuilder.createFormBuilder()
                 .addComponent(completionCheckBox)
@@ -81,7 +89,7 @@ public class TaiweiParentConfigurable implements Configurable {
         mainPanel = null;
         completionCheckBox = null;
         gitCommitReviewCheckBox = null;
-        toolManagerComboBox = null;
+        toolManagerCombo = null;
     }
 
     private void openToolManager() {
