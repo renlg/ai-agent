@@ -601,13 +601,10 @@
         });
     };
 
-    window.loadHistory = function (messagesJson, isActiveProcessing) {
+    window.loadHistory = function (messagesJson, isActiveProcessing, totalTokens) {
         whenReady(function () {
-            // Preserve token progress state across history reload
-            var savedTokens = totalUsedTokens;
             clearMessages();
-            // Restore token progress state
-            totalUsedTokens = savedTokens;
+            totalUsedTokens = totalTokens || 0;
             if (totalUsedTokens > 0) {
                 updateTokenProgressRing();
             }

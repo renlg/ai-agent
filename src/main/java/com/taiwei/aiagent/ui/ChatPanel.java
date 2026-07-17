@@ -23,6 +23,7 @@ import com.taiwei.aiagent.memory.MemoryManager;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.skill.SkillManager;
+import com.taiwei.aiagent.util.TokenCounter;
 
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefLoadHandlerAdapter;
@@ -693,7 +694,16 @@ public class ChatPanel extends JPanel implements Disposable {
         }
 
         json.append("]");
-        pushToJs("loadHistory", escapeJsString(json.toString()) + "," + isActiveProcessing);
+
+        int totalTokens = 0;
+        try {
+            String modelName = AiAgentSettings.getInstance().getModel();
+            totalTokens = TokenCounter.countTokens(messages, modelName);
+        } catch (Exception e) {
+            LOG.warn("计算历史 Token 数失败", e);
+        }
+
+        pushToJs("loadHistory", escapeJsString(json.toString()) + "," + isActiveProcessing + "," + totalTokens);
     }
 
     /**
