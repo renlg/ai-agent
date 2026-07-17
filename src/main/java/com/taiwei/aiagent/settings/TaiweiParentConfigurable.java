@@ -24,7 +24,7 @@ public class TaiweiParentConfigurable implements Configurable {
     private JPanel mainPanel;
     private JCheckBox completionCheckBox;
     private JCheckBox gitCommitReviewCheckBox;
-    private JButton toolManagerButton;
+    private JComboBox<String> toolManagerComboBox;
 
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
@@ -37,10 +37,10 @@ public class TaiweiParentConfigurable implements Configurable {
         completionCheckBox = new JCheckBox(I18nUtil.getMessage("general.completionEnabled"));
         gitCommitReviewCheckBox = new JCheckBox(I18nUtil.getMessage("general.gitCommitReviewEnabled"));
 
-        toolManagerButton = new JButton(I18nUtil.getMessage("tool.manager.button"));
-        toolManagerButton.addActionListener(e -> openToolManager());
+        toolManagerComboBox = new JComboBox<>(new String[]{I18nUtil.getMessage("tool.manager.dropdown.option")});
+        toolManagerComboBox.addActionListener(e -> openToolManager());
         JPanel toolManagerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        toolManagerPanel.add(toolManagerButton);
+        toolManagerPanel.add(toolManagerComboBox);
 
         mainPanel = FormBuilder.createFormBuilder()
                 .addComponent(completionCheckBox)
@@ -81,7 +81,7 @@ public class TaiweiParentConfigurable implements Configurable {
         mainPanel = null;
         completionCheckBox = null;
         gitCommitReviewCheckBox = null;
-        toolManagerButton = null;
+        toolManagerComboBox = null;
     }
 
     private void openToolManager() {
