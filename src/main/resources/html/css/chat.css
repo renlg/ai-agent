@@ -899,8 +899,13 @@ html, body {
 
 .token-progress-container.compressing {
     pointer-events: none;
-    opacity: 0.5;
     cursor: not-allowed;
+    opacity: 1;
+}
+
+.token-progress-container.compressing .token-progress-ring {
+    animation: spin 1s linear infinite;
+    transform-origin: center;
 }
 
 .token-progress-ring {
