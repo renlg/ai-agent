@@ -828,10 +828,10 @@
         });
     }
 
-    function enableManualCompress() {
+    window.enableManualCompress = function enableManualCompress() {
         var container = document.querySelector('.token-progress-container');
         if (container) container.classList.remove('compressing');
-    }
+    };
 
     function updateTokenProgressRing() {
         var ring = document.querySelector('.token-progress-fg');
