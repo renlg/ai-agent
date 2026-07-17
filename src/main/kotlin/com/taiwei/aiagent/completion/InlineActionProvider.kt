@@ -18,7 +18,11 @@ class InlineActionProvider : EditorFactoryListener {
 
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor
-        editor.addSelectionListener(SelectionHandler(editor))
+        editor.selectionModel.addSelectionListener(SelectionHandler(editor))
+    }
+
+    override fun editorReleased(event: EditorFactoryEvent) {
+        hideToolbar(event.editor)
     }
 
     private inner class SelectionHandler(private val editor: Editor) : SelectionListener {
@@ -29,7 +33,7 @@ class InlineActionProvider : EditorFactoryListener {
                 return
             }
 
-            val selection = e.newText
+            val selection = editor.selectionModel.selectedText ?: ""
             if (selection.length > 3) {
                 showToolbar(editor, project, selection)
             } else {
