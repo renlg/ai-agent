@@ -731,32 +731,39 @@ public class AgentService {
 
     /**
      * 检查是否需要压缩，如果需要则执行压缩
-     * 优先使用 LLM 返回的实际 promptTokens，无历史数据时回退到 tiktoken 计数
+     * 始终实时计算当前消息的 Token 数，不依赖可能过时的 lastPromptTokens
+     * 使用模型的 contextWindowSize（上下文窗口大小）而非 maxTokens（最大输出 Token）计算阈值
      *
-     * @param lastPromptTokens 上一轮 LLM 返回的实际 promptTokens，0 表示无历史数据
+     * @param lastPromptTokens 上一轮 LLM 返回的实际 promptTokens（已弃用，保留参数兼容性）
      */
     private void checkAndCompress(AgentContext context, LlmClient llmClient, int lastPromptTokens, AgentListener listener) {
         AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
         int threshold = config.compressionThreshold;
-        int maxTokens = AiAgentSettings.getInstance().getMaxTokens();
+        int contextWindowSize = config.contextWindowSize;
 
         List<ChatMessage> messages = context.getConversation().getMessages();
-        int totalTokens;
-        if (lastPromptTokens > 0) {
-            // 使用 LLM 返回的实际 Token 数（已包含图片 token）
-            totalTokens = lastPromptTokens;
-            LOG.info("使用 LLM 实际 Token 数: " + totalTokens);
-        } else {
-            // 首次迭代无历史数据，回退到 tiktoken 计数（根据模型匹配 tokenizer）
-            // 文本 tokenizer 无法统计图片，需额外加上图片 token 估算
-            totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName())
-                    + estimateImageTokens(messages);
-            LOG.info("使用 tiktoken 估算 Token 数（含图片）: " + totalTokens);
+
+        // 跳过压缩：对话消息太少时没有压缩的必要
+        int nonSystemMessageCount = 0;
+        for (ChatMessage msg : messages) {
+            if (!"system".equals(msg.getRole())) {
+                nonSystemMessageCount++;
+            }
         }
-        int thresholdTokens = (int) (maxTokens * threshold / 100.0);
+        if (nonSystemMessageCount <= 3) {
+            LOG.info("非系统消息数量 " + nonSystemMessageCount + " <= 3，跳过自动压缩");
+            return;
+        }
+
+        // 始终实时计算 Token 数，确保准确性
+        int totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName())
+                + estimateImageTokens(messages);
+        LOG.info("实时计算 Token 数（含图片）: " + totalTokens);
+
+        int thresholdTokens = (int) (contextWindowSize * threshold / 100.0);
 
         if (totalTokens > thresholdTokens) {
-            LOG.info("Token 数 " + totalTokens + " 超过阈值 " + thresholdTokens + " (" + threshold + "% of " + maxTokens + ")，开始压缩");
+            LOG.info("Token 数 " + totalTokens + " 超过阈值 " + thresholdTokens + " (" + threshold + "% of " + contextWindowSize + ")，开始压缩");
             compressConversation(context, llmClient, totalTokens, listener);
         }
     }
@@ -867,8 +874,8 @@ public class AgentService {
 
                 // P1: 检查是否仍超过阈值，需要再次压缩
                 AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
-                int maxTokens = AiAgentSettings.getInstance().getMaxTokens();
-                int thresholdTokens = (int) (maxTokens * config.compressionThreshold / 100.0);
+                int contextWindowSize = config.contextWindowSize;
+                int thresholdTokens = (int) (contextWindowSize * config.compressionThreshold / 100.0);
 
                 if (afterTokens > thresholdTokens && !olderMessages.isEmpty()) {
                     LOG.info("压缩后仍超阈值 (" + afterTokens + " > " + thresholdTokens + ")，执行二次压缩");
