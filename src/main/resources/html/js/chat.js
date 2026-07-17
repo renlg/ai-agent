@@ -1082,6 +1082,16 @@
         });
     };
 
+    window.showCompressFailedNotification = function (reason) {
+        whenReady(function () {
+            var el = document.createElement('div');
+            el.className = 'compress-notification compress-failed';
+            el.textContent = '⚠️ 压缩失败：' + reason + '，回退到丢弃旧消息';
+            messagesArea.appendChild(el);
+            scrollToBottom();
+        });
+    };
+
     /* ===== Utility ===== */
     window.escapeHtml = function (text) {
         return MarkdownRenderer.escapeHtml(text);

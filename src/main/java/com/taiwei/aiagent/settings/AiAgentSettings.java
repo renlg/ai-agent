@@ -250,6 +250,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         public String modelName = "qwen3-max";
         public int compressionThreshold = 75;
         public boolean visionCapable = true;
+        public int recentTurnsToKeep = 2;          // 压缩时保留的最近对话轮数
 
         public ModelConfig() {}
 
@@ -280,7 +281,9 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         }
 
         public ModelConfig copy() {
-            return new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold, visionCapable);
+            ModelConfig c = new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold, visionCapable);
+            c.recentTurnsToKeep = this.recentTurnsToKeep;
+            return c;
         }
     }
 

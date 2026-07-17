@@ -137,6 +137,8 @@ public class AgentService {
      */
     public interface CompressionListener {
         void onCompressed(int beforeTokens, int afterTokens);
+        default void onCompressionStarted() {}
+        default void onCompressionFailed(String reason) {}
     }
 
     private volatile CompressionListener compressionListener;
@@ -777,9 +779,27 @@ public class AgentService {
     }
 
     /**
-     * 执行上下文压缩：摘要压缩，失败则回退到丢弃最旧50%消息
+     * 执行上下文压缩：摘要压缩，失败则回退到优先级丢弃
      */
     private void compressConversation(AgentContext context, LlmClient llmClient, int beforeTokens, AgentListener listener) {
+        compressConversationInternal(context, llmClient, beforeTokens, listener, true);
+    }
+
+    /**
+     * 内部压缩实现
+     *
+     * P0: 修复 UI 脱节问题 — 通过 CompressionListener 回调通知前端
+     * P1: 改进压缩提示词 — 使用结构化输出
+     * P1: 智能回退压缩 — 按消息优先级排序后丢弃
+     * P1: 循环压缩直到低于阈值
+     * P2: 保留图片消息的原始上下文
+     */
+    private void compressConversationInternal(AgentContext context, LlmClient llmClient, int beforeTokens,
+                                               AgentListener listener, boolean notifyStart) {
+        if (notifyStart) {
+            notifyCompressionStarted();
+        }
+
         List<ChatMessage> messages = context.getConversation().getMessages();
 
         int systemIdx = -1;
@@ -793,11 +813,12 @@ public class AgentService {
         int recentStart = findRecentMessagesStart(messages);
         if (recentStart <= systemIdx + 1) {
             LOG.info("没有足够的旧消息可以压缩");
+            notifyCompressionFailed("没有足够的旧消息可以压缩");
             return;
         }
 
-        List<ChatMessage> olderMessages = messages.subList(systemIdx + 1, recentStart);
-        List<ChatMessage> recentMessages = messages.subList(recentStart, messages.size());
+        List<ChatMessage> olderMessages = new ArrayList<>(messages.subList(systemIdx + 1, recentStart));
+        List<ChatMessage> recentMessages = new ArrayList<>(messages.subList(recentStart, messages.size()));
 
         StringBuilder oldContent = new StringBuilder();
         for (ChatMessage msg : olderMessages) {
@@ -814,7 +835,7 @@ public class AgentService {
             List<ChatMessage> summaryRequest = new ArrayList<>();
             String compressPrompt = context.getPromptManager().buildCompressPrompt(oldContent.toString());
             summaryRequest.add(ChatMessage.system(compressPrompt));
-            summaryRequest.add(ChatMessage.user("请摘要以上对话内容。"));
+            summaryRequest.add(ChatMessage.user("请根据上述格式要求输出 JSON 摘要。"));
 
             LlmResponse summaryResponse = llmClient.chat(summaryRequest, null);
 
@@ -824,11 +845,18 @@ public class AgentService {
                 String summary = summaryResponse.getContent();
 
                 List<ChatMessage> newMessages = new ArrayList<>();
-                newMessages.add(ChatMessage.system("以下是对之前对话的摘要：\n" + summary));
-                // 保留携带图片的历史消息（不因摘要压缩而丢弃图片内容）
+                newMessages.add(ChatMessage.system("以下是对之前对话的结构化摘要：\n" + summary));
+
+                // P2: 保留携带图片的历史消息，同时附带原始文本上下文
                 for (ChatMessage older : olderMessages) {
                     if (older.hasImages()) {
-                        newMessages.add(older);
+                        String originalText = older.getContent();
+                        String contextNote = (originalText != null && !originalText.isEmpty())
+                                ? "[用户上传图片时的问题：" + truncateText(originalText, 100) + "]"
+                                : "[用户上传的图片]";
+                        ChatMessage imageWithContext = ChatMessage.user(contextNote);
+                        imageWithContext.setImageContents(older.getImageContents());
+                        newMessages.add(imageWithContext);
                     }
                 }
                 newMessages.addAll(recentMessages);
@@ -836,33 +864,72 @@ public class AgentService {
                 context.getConversation().replaceMessages(newMessages);
 
                 int afterTokens = TokenCounter.countTokens(context.getConversation().getMessages(), llmClient.getModelName());
-                int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
 
+                // P1: 检查是否仍超过阈值，需要再次压缩
+                AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
+                int maxTokens = AiAgentSettings.getInstance().getMaxTokens();
+                int thresholdTokens = (int) (maxTokens * config.compressionThreshold / 100.0);
+
+                if (afterTokens > thresholdTokens && !olderMessages.isEmpty()) {
+                    LOG.info("压缩后仍超阈值 (" + afterTokens + " > " + thresholdTokens + ")，执行二次压缩");
+                    compressConversationInternal(context, llmClient, afterTokens, listener, false);
+                    return;
+                }
+
+                int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
                 LOG.info("上下文压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
                 notifyCompression(beforeTokens, afterTokens);
             } else {
-                String errMsg = "摘要压缩失败，回退到丢弃旧消息";
+                String errMsg = "LLM 摘要失败";
                 LOG.warn(errMsg);
-                listener.onContent("\n\n⚠️ " + errMsg);
-                fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens, systemIdx);
+                notifyCompressionFailed(errMsg);
+                fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens);
             }
         } catch (Exception e) {
-            String errMsg = "压缩异常，回退到丢弃旧消息: " + e.getMessage();
-            LOG.warn(errMsg, e);
-            listener.onContent("\n\n⚠️ " + errMsg);
-            fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens, systemIdx);
+            String errMsg = e.getMessage();
+            LOG.warn("压缩异常: " + errMsg, e);
+            notifyCompressionFailed(errMsg);
+            fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens);
         } finally {
             stopped = wasStopped;
         }
     }
 
     /**
-     * 回退压缩：丢弃最旧50%的旧消息
+     * 截断文本到指定长度
+     */
+    private String truncateText(String text, int maxLen) {
+        if (text == null) return "";
+        if (text.length() <= maxLen) return text;
+        return text.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * 回退压缩：按优先级保留消息（P1 修复）
+     *
+     * 优先级（从高到低）:
+     * 1. tool 结果消息（包含重要的工具执行结果）
+     * 2. assistant 消息中包含代码块的
+     * 3. 其他 assistant 消息
+     * 4. user 消息
      */
     private void fallbackCompress(AgentContext context, LlmClient llmClient, List<ChatMessage> olderMessages,
-                                  List<ChatMessage> recentMessages, int beforeTokens, int systemIdx) {
-        int keepCount = olderMessages.size() / 2;
-        List<ChatMessage> keptOlder = olderMessages.subList(olderMessages.size() - keepCount, olderMessages.size());
+                                  List<ChatMessage> recentMessages, int beforeTokens) {
+        int keepCount = Math.max(1, olderMessages.size() / 2);
+
+        List<ChatMessage> sortedOlder = new ArrayList<>(olderMessages);
+        sortedOlder.sort((a, b) -> {
+            int pa = getMessagePriority(a);
+            int pb = getMessagePriority(b);
+            if (pa != pb) return pb - pa;
+            return olderMessages.indexOf(a) - olderMessages.indexOf(b);
+        });
+
+        List<ChatMessage> keptOlder = new ArrayList<>();
+        for (int i = 0; i < Math.min(keepCount, sortedOlder.size()); i++) {
+            keptOlder.add(sortedOlder.get(i));
+        }
+        keptOlder.sort((a, b) -> olderMessages.indexOf(a) - olderMessages.indexOf(b));
 
         List<ChatMessage> newMessages = new ArrayList<>();
         newMessages.addAll(keptOlder);
@@ -878,14 +945,51 @@ public class AgentService {
     }
 
     /**
-     * 找到最近2轮对话的起始位置（从后往前找2个user消息）
+     * 获取消息优先级（用于回退压缩排序）
+     */
+    private int getMessagePriority(ChatMessage msg) {
+        String role = msg.getRole();
+        String content = msg.getContent();
+
+        if ("tool".equals(role)) {
+            return 100;
+        }
+        if ("assistant".equals(role)) {
+            if (content != null && content.contains("```")) {
+                return 80;
+            }
+            return 60;
+        }
+        if ("user".equals(role)) {
+            return 40;
+        }
+        return 20;
+    }
+
+    /**
+     * 找到最近N轮对话的起始位置（P2 修复：可配置保留轮数）
+     *
+     * 默认保留最近 2 轮，可通过 ModelConfig.recentTurnsToKeep 配置。
+     * 如果对话总轮数较少（<=3 轮），则只保留最后 1 轮以便有内容可压缩。
      */
     private int findRecentMessagesStart(List<ChatMessage> messages) {
+        AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
+        int turnsToKeep = config.recentTurnsToKeep;
+
+        int totalUserMessages = 0;
+        for (ChatMessage msg : messages) {
+            if ("user".equals(msg.getRole())) totalUserMessages++;
+        }
+
+        if (totalUserMessages <= 3) {
+            turnsToKeep = 1;
+        }
+
         int userCount = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
             if ("user".equals(messages.get(i).getRole())) {
                 userCount++;
-                if (userCount == 2) {
+                if (userCount == turnsToKeep) {
                     return i;
                 }
             }
@@ -904,11 +1008,34 @@ public class AgentService {
     }
 
     /**
+     * 通知前端压缩开始（P2: 进度提示）
+     */
+    private void notifyCompressionStarted() {
+        CompressionListener listener = this.compressionListener;
+        if (listener != null) {
+            listener.onCompressionStarted();
+        }
+    }
+
+    /**
+     * 通知前端压缩失败（P0: 确保 UI 状态恢复）
+     */
+    private void notifyCompressionFailed(String reason) {
+        CompressionListener listener = this.compressionListener;
+        if (listener != null) {
+            listener.onCompressionFailed(reason);
+        }
+    }
+
+    /**
      * 手动触发压缩（供 ChatPanel 调用）
      */
     public void manualCompress() {
         AgentContext ctx = getContext();
-        if (ctx == null) return;
+        if (ctx == null) {
+            notifyCompressionFailed("无可用会话");
+            return;
+        }
 
         LlmClient llmClient = ctx.getLlmClient();
         List<ChatMessage> messages = ctx.getConversation().getMessages();
