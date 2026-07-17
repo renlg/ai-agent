@@ -1,8 +1,12 @@
 package com.taiwei.aiagent.settings;
 
 import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
+import com.taiwei.aiagent.ui.ToolManagerDialog;
 import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
@@ -20,6 +24,7 @@ public class TaiweiParentConfigurable implements Configurable {
     private JPanel mainPanel;
     private JCheckBox completionCheckBox;
     private JCheckBox gitCommitReviewCheckBox;
+    private JButton toolManagerButton;
 
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
@@ -32,9 +37,15 @@ public class TaiweiParentConfigurable implements Configurable {
         completionCheckBox = new JCheckBox(I18nUtil.getMessage("general.completionEnabled"));
         gitCommitReviewCheckBox = new JCheckBox(I18nUtil.getMessage("general.gitCommitReviewEnabled"));
 
+        toolManagerButton = new JButton(I18nUtil.getMessage("tool.manager.button"));
+        toolManagerButton.addActionListener(e -> openToolManager());
+        JPanel toolManagerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        toolManagerPanel.add(toolManagerButton);
+
         mainPanel = FormBuilder.createFormBuilder()
                 .addComponent(completionCheckBox)
                 .addComponent(gitCommitReviewCheckBox)
+                .addComponent(toolManagerPanel)
                 .addComponentFillVertically(new JPanel(), 0)
                 .getPanel();
         mainPanel.setBorder(JBUI.Borders.empty(10));
@@ -70,5 +81,15 @@ public class TaiweiParentConfigurable implements Configurable {
         mainPanel = null;
         completionCheckBox = null;
         gitCommitReviewCheckBox = null;
+        toolManagerButton = null;
+    }
+
+    private void openToolManager() {
+        Project[] projects = ProjectManager.getInstance().getOpenProjects();
+        if (projects.length == 0) {
+            Messages.showInfoMessage(mainPanel, I18nUtil.getMessage("tool.manager.noProject"), I18nUtil.getMessage("tool.manager.button"));
+            return;
+        }
+        new ToolManagerDialog(projects[0]).show();
     }
 }

@@ -1,6 +1,7 @@
 package com.taiwei.aiagent.tool;
 
 import com.taiwei.aiagent.agent.AgentMode;
+import com.taiwei.aiagent.settings.AiAgentSettings;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,27 +48,33 @@ public class ToolRegistry {
     /**
      * 根据当前 Agent 模式获取可用工具列表
      * Plan 模式下过滤掉所有修改性工具（isMutating() == true），只保留只读工具
+     * 用户在设置中禁用的工具始终会被过滤掉
      */
     public List<Tool> getToolsForMode(AgentMode mode) {
-        if (mode != AgentMode.PLAN) {
-            return getAllTools();
-        }
+        AiAgentSettings settings = AiAgentSettings.getInstance();
         List<Tool> result = new ArrayList<>();
         for (Tool tool : tools.values()) {
-            if (!tool.isMutating()) {
-                result.add(tool);
+            if (!settings.isToolEnabled(tool.getName())) {
+                continue;
             }
+            if (mode == AgentMode.PLAN && tool.isMutating()) {
+                continue;
+            }
+            result.add(tool);
         }
         return result;
     }
 
     /**
      * 检查指定工具在当前模式下是否允许调用
-     * 用于防御 LLM 在 Plan 模式下仍尝试调用未提供的修改性工具
+     * 用于防御 LLM 在 Plan 模式下仍尝试调用未提供的修改性工具，或调用已被用户禁用的工具
      */
     public boolean isToolAllowed(String name, AgentMode mode) {
         Tool tool = tools.get(name);
         if (tool == null) {
+            return false;
+        }
+        if (!AiAgentSettings.getInstance().isToolEnabled(name)) {
             return false;
         }
         return mode != AgentMode.PLAN || !tool.isMutating();

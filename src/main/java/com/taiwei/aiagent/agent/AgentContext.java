@@ -126,25 +126,37 @@ public class AgentContext {
      * 注册默认工具
      */
     private void registerDefaultTools() {
-        toolRegistry.register(new FileReadTool(project));
-        toolRegistry.register(new FileWriteTool(project));
-        toolRegistry.register(new FileReplaceTool(project));
-        toolRegistry.register(new SearchCodeTool(project));
-        toolRegistry.register(new FindSymbolTool(project));
-        toolRegistry.register(new FindReferencesTool(project));
-        toolRegistry.register(new RunCommandTool(project));
+        for (com.taiwei.aiagent.tool.Tool tool : buildDefaultTools(project)) {
+            toolRegistry.register(tool);
+        }
+    }
+
+    /**
+     * 构建当前项目下的完整默认工具列表（内置工具 + 已启用的 MCP 工具）
+     * 供工具注册以及设置页的工具管理面板复用，不受用户启用/禁用设置过滤
+     */
+    public static java.util.List<com.taiwei.aiagent.tool.Tool> buildDefaultTools(Project project) {
+        java.util.List<com.taiwei.aiagent.tool.Tool> result = new java.util.ArrayList<>();
+        result.add(new FileReadTool(project));
+        result.add(new FileWriteTool(project));
+        result.add(new FileReplaceTool(project));
+        result.add(new SearchCodeTool(project));
+        result.add(new FindSymbolTool(project));
+        result.add(new FindReferencesTool(project));
+        result.add(new RunCommandTool(project));
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ("ALIYUN_IQS".equals(settings.getSearchEngineType())) {
-            toolRegistry.register(new WebSearchTool());
+            result.add(new WebSearchTool());
         } else {
-            toolRegistry.register(new DdgSearchTool());
+            result.add(new DdgSearchTool());
         }
 
         for (com.taiwei.aiagent.mcp.McpToolAdapter mcpTool
                 : com.taiwei.aiagent.mcp.McpManager.getInstance(project).getActiveTools()) {
-            toolRegistry.register(mcpTool);
+            result.add(mcpTool);
         }
+        return result;
     }
 
     /**

@@ -178,6 +178,25 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         fireSettingsChanged();
     }
 
+    // ========== 禁用的工具列表 ==========
+
+    public java.util.Set<String> getDisabledTools() {
+        return state.disabledTools;
+    }
+
+    public boolean isToolEnabled(String toolName) {
+        return !state.disabledTools.contains(toolName);
+    }
+
+    public void setToolEnabled(String toolName, boolean enabled) {
+        if (enabled) {
+            state.disabledTools.remove(toolName);
+        } else {
+            state.disabledTools.add(toolName);
+        }
+        fireSettingsChanged();
+    }
+
     // ========== 功能开关 ==========
 
     public boolean isCompletionEnabled() {
@@ -399,6 +418,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 已禁用的 Skill 名称集合（禁用的 Skill 不会被注入系统提示词）
          */
         public java.util.Set<String> disabledSkills = new java.util.LinkedHashSet<>();
+
+        /**
+         * 已禁用的工具名称集合（禁用的工具不会提供给 LLM 调用）
+         */
+        public java.util.Set<String> disabledTools = new java.util.LinkedHashSet<>();
 
         /**
          * MCP（Model Context Protocol）服务器配置列表
