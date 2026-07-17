@@ -27,6 +27,20 @@ public class OpenAiLlmClient implements LlmClient {
 
     private static final Logger LOG = Logger.getInstance(OpenAiLlmClient.class);
 
+    private static final Map<String, Integer> MODEL_CONTEXT_WINDOWS = Map.ofEntries(
+            Map.entry("qwen3-max", 128000),
+            Map.entry("deepseek-chat", 128000),
+            Map.entry("deepseek-v3", 128000),
+            Map.entry("deepseek-reasoner", 128000),
+            Map.entry("gpt-4o", 128000),
+            Map.entry("gpt-4o-mini", 128000),
+            Map.entry("claude-sonnet-4", 200000),
+            Map.entry("claude-opus-4", 200000),
+            Map.entry("claude-fable-5", 1000000)
+    );
+
+    private static final int DEFAULT_CONTEXT_WINDOW = 128000;
+
     private final String baseUrl;
     private final String apiKey;
     private final String model;
@@ -235,6 +249,11 @@ public class OpenAiLlmClient implements LlmClient {
     public void close() {
         httpClient.dispatcher().executorService().shutdown();
         httpClient.connectionPool().evictAll();
+    }
+
+    @Override
+    public int getContextWindowSize() {
+        return MODEL_CONTEXT_WINDOWS.getOrDefault(model, DEFAULT_CONTEXT_WINDOW);
     }
 
     // ========== 内部方法 ==========

@@ -251,7 +251,6 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         public int compressionThreshold = 75;
         public boolean visionCapable = true;
         public int recentTurnsToKeep = 2;          // 压缩时保留的最近对话轮数
-        public int contextWindowSize = 128000;     // 模型上下文窗口大小（用于压缩阈值计算）
 
         public ModelConfig() {}
 
@@ -281,18 +280,8 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
             this.visionCapable = visionCapable;
         }
 
-        public ModelConfig(String name, String baseUrl, String apiKey, String modelName, int compressionThreshold, boolean visionCapable, int contextWindowSize) {
-            this.name = name;
-            this.baseUrl = baseUrl;
-            this.apiKey = apiKey;
-            this.modelName = modelName;
-            this.compressionThreshold = compressionThreshold;
-            this.visionCapable = visionCapable;
-            this.contextWindowSize = contextWindowSize;
-        }
-
         public ModelConfig copy() {
-            ModelConfig c = new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold, visionCapable, contextWindowSize);
+            ModelConfig c = new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold, visionCapable);
             c.recentTurnsToKeep = this.recentTurnsToKeep;
             return c;
         }

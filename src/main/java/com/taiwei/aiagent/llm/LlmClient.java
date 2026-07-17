@@ -51,4 +51,14 @@ public interface LlmClient {
      */
     default void close() {
     }
+
+    /**
+     * 获取当前模型的上下文窗口大小
+     * 用于计算压缩阈值
+     *
+     * @return 上下文窗口大小（Token 数），0 表示未知
+     */
+    default int getContextWindowSize() {
+        return 0;
+    }
 }
