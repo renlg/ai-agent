@@ -15,6 +15,7 @@ import com.taiwei.aiagent.tool.impl.FileWriteTool;
 import com.taiwei.aiagent.tool.impl.FindReferencesTool;
 import com.taiwei.aiagent.tool.impl.FindSymbolTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
+import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
 
@@ -144,6 +145,7 @@ public class AgentContext {
         result.add(new FindSymbolTool(project));
         result.add(new FindReferencesTool(project));
         result.add(new RunCommandTool(project));
+        result.add(new LoadSkillTool(project));
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ("ALIYUN_IQS".equals(settings.getSearchEngineType())) {
