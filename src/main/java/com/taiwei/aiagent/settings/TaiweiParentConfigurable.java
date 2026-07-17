@@ -10,10 +10,9 @@ import com.taiwei.aiagent.ui.ToolManagerDialog;
 import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
-
 import javax.swing.*;
 import java.awt.*;
-
+import java.awt.event.*;
 /**
  * 太微设置主页面
  * Settings → Tools → 太微
