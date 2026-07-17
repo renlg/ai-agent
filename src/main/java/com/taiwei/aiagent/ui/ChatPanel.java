@@ -176,6 +176,7 @@ public class ChatPanel extends JPanel implements Disposable {
         pushSkillsCountToJs();
         pushMemoriesCountToJs();
         pushVisionCapableToJs();
+        pushTokenBudgetToJs();
     }
 
     private void pushSkillsCountToJs() {
@@ -479,6 +480,7 @@ public class ChatPanel extends JPanel implements Disposable {
                         currentCtx.setModelIndex(modelIndex);
                     }
                     pushVisionCapableToJs();
+                    pushTokenBudgetToJs();
                     break;
                 case "getSessions":
                     pushSessionListToJs();
@@ -570,6 +572,12 @@ public class ChatPanel extends JPanel implements Disposable {
         } else {
             SwingUtilities.invokeLater(task);
         }
+    }
+
+    private void pushTokenBudgetToJs() {
+        AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
+        int contextWindow = config != null && config.contextWindowSize > 0 ? config.contextWindowSize : 200000;
+        pushToJs("updateTokenBudget", String.valueOf(contextWindow));
     }
 
     // ========== Java → JS Push ==========
@@ -1056,7 +1064,10 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void onSettingsChanged() {
-        SwingUtilities.invokeLater(this::pushModelListToJs);
+        SwingUtilities.invokeLater(() -> {
+            pushModelListToJs();
+            pushTokenBudgetToJs();
+        });
     }
 
     @Override

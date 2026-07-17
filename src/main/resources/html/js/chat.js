@@ -608,6 +608,9 @@
             clearMessages();
             // Restore token progress state
             totalUsedTokens = savedTokens;
+            if (totalUsedTokens > 0) {
+                updateTokenProgressRing();
+            }
             try {
                 var messages;
                 if (typeof messagesJson === 'string') {
@@ -1101,6 +1104,16 @@
         whenReady(function () {
             messageInput.value = text;
             autoResize();
+        });
+    };
+
+    window.updateTokenBudget = function (contextWindowSize) {
+        whenReady(function () {
+            var size = parseInt(contextWindowSize) || 0;
+            if (size > 0) {
+                TOKEN_BUDGET = size;
+                updateTokenProgressRing();
+            }
         });
     };
 
