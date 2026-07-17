@@ -26,6 +26,7 @@
     var settingsBtn, settingsDropdown, settingsDropdownMenu, skillManagerItem, skillsBadge;
     var memoryManagerItem, memoryBadge;
     var mcpSettingsItem;
+    var toolManagerItem;
     var imagePreviewArea;
     var mentionDropdown;
     var mentionItems = [];
@@ -57,6 +58,7 @@
         memoryManagerItem = document.getElementById('memoryManagerItem');
         memoryBadge = document.getElementById('memoryBadge');
         mcpSettingsItem = document.getElementById('mcpSettingsItem');
+        toolManagerItem = document.getElementById('toolManagerItem');
         imagePreviewArea = document.getElementById('imagePreviewArea');
         mentionDropdown = document.getElementById('mentionDropdown');
 
@@ -164,6 +166,12 @@
         mcpSettingsItem.addEventListener('click', function (e) {
             e.stopPropagation();
             callJava('openMcpSettings', {});
+            settingsDropdown.classList.remove('open');
+        });
+
+        toolManagerItem.addEventListener('click', function (e) {
+            e.stopPropagation();
+            callJava('openToolManager', {});
             settingsDropdown.classList.remove('open');
         });
 

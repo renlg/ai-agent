@@ -227,6 +227,12 @@ public class ChatPanel extends JPanel implements Disposable {
         });
     }
 
+    private void openToolManager() {
+        SwingUtilities.invokeLater(() -> {
+            new ToolManagerDialog(project).show();
+        });
+    }
+
     public void submitExternalPrompt(String prompt) {
         String sessionId = agentService.getActiveSessionId();
         if (sessionId == null) {
@@ -527,6 +533,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "openMcpSettings":
                     openMcpSettings();
+                    break;
+                case "openToolManager":
+                    openToolManager();
                     break;
                 case "listMemories":
                     String memCategory = data.has("category") ? data.get("category").getAsString() : null;
