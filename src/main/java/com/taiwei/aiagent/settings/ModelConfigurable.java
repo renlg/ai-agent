@@ -6,7 +6,6 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
-import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.Nls;
@@ -27,8 +26,6 @@ public class ModelConfigurable implements Configurable {
     private JPanel mainPanel;
     private ModelTableModel tableModel;
     private JBTable table;
-    private JSpinner maxTokensSpinner;
-    private JSpinner temperatureSpinner;
     private JCheckBox inlineCompletionCheckbox;
     private JCheckBox inlineActionCheckbox;
 
@@ -80,24 +77,18 @@ public class ModelConfigurable implements Configurable {
         modelSection.add(scrollPane, BorderLayout.CENTER);
         modelSection.add(buttonPanel, BorderLayout.SOUTH);
 
-        // ===== 全局参数区域 =====
-        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(8192, 256, 2000000, 1024));
-        maxTokensSpinner.setPreferredSize(new Dimension(140, 32));
-
-        temperatureSpinner = new JSpinner(new SpinnerNumberModel(0.7, 0.0, 2.0, 0.1));
-        temperatureSpinner.setPreferredSize(new Dimension(140, 32));
-        JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
-        temperatureSpinner.setEditor(tempEditor);
-
+        // ===== 功能开关 =====
         inlineCompletionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineCompletionEnabled"));
         inlineActionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineActionEnabled"));
 
-        JPanel paramsPanel = FormBuilder.createFormBuilder()
-                .addLabeledComponent(I18nUtil.getMessage("model.maxTokensLabel"), maxTokensSpinner)
-                .addLabeledComponent(I18nUtil.getMessage("model.temperatureLabel"), temperatureSpinner)
-                .addComponent(inlineCompletionCheckbox)
-                .addComponent(inlineActionCheckbox)
-                .getPanel();
+        JPanel checkboxPanel = new JPanel();
+        checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
+        checkboxPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        inlineCompletionCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        inlineActionCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        checkboxPanel.add(inlineCompletionCheckbox);
+        checkboxPanel.add(Box.createVerticalStrut(4));
+        checkboxPanel.add(inlineActionCheckbox);
 
         // ===== 组装主面板 =====
         mainPanel = new JPanel();
@@ -108,16 +99,7 @@ public class ModelConfigurable implements Configurable {
         mainPanel.add(modelSection);
         mainPanel.add(Box.createVerticalStrut(20));
 
-        JPanel paramsWrapper = new JPanel(new BorderLayout());
-        paramsWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JLabel paramsLabel = new JLabel(I18nUtil.getMessage("model.globalParamsTitle"));
-        paramsLabel.setFont(paramsLabel.getFont().deriveFont(Font.BOLD, 14f));
-        paramsWrapper.add(paramsLabel, BorderLayout.NORTH);
-        mainPanel.add(paramsWrapper);
-        mainPanel.add(Box.createVerticalStrut(10));
-
-        paramsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        mainPanel.add(paramsPanel);
+        mainPanel.add(checkboxPanel);
         mainPanel.add(Box.createVerticalGlue());
 
         reset();
@@ -185,8 +167,6 @@ public class ModelConfigurable implements Configurable {
     @Override
     public boolean isModified() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
-        if ((Integer) maxTokensSpinner.getValue() != settings.getMaxTokens()) return true;
-        if ((Double) temperatureSpinner.getValue() != settings.getTemperature()) return true;
         if (inlineCompletionCheckbox.isSelected() != settings.isCompletionEnabled()) return true;
         if (inlineActionCheckbox.isSelected() != settings.isInlineActionEnabled()) return true;
 
@@ -198,7 +178,10 @@ public class ModelConfigurable implements Configurable {
             if (!a.name.equals(b.name) || !a.baseUrl.equals(b.baseUrl)
                     || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)
                     || a.compressionThreshold != b.compressionThreshold
-                    || a.visionCapable != b.visionCapable) {
+                    || a.visionCapable != b.visionCapable
+                    || a.contextWindowSize != b.contextWindowSize
+                    || a.temperature != b.temperature
+                    || a.maxTokens != b.maxTokens) {
                 return true;
             }
         }
@@ -225,8 +208,6 @@ public class ModelConfigurable implements Configurable {
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setModelConfigs(new ArrayList<>(editingConfigs));
-        settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
-        settings.setTemperature((Double) temperatureSpinner.getValue());
         settings.setCompletionEnabled(inlineCompletionCheckbox.isSelected());
         settings.setInlineActionEnabled(inlineActionCheckbox.isSelected());
 
@@ -250,8 +231,6 @@ public class ModelConfigurable implements Configurable {
         if (!editingConfigs.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
         }
-        maxTokensSpinner.setValue(settings.getMaxTokens());
-        temperatureSpinner.setValue(settings.getTemperature());
         inlineCompletionCheckbox.setSelected(settings.isCompletionEnabled());
         inlineActionCheckbox.setSelected(settings.isInlineActionEnabled());
     }
@@ -261,8 +240,6 @@ public class ModelConfigurable implements Configurable {
         mainPanel = null;
         table = null;
         tableModel = null;
-        maxTokensSpinner = null;
-        temperatureSpinner = null;
         inlineCompletionCheckbox = null;
         inlineActionCheckbox = null;
         editingConfigs = null;
@@ -318,6 +295,9 @@ public class ModelConfigurable implements Configurable {
         private JPasswordField apiKeyField;
         private JTextField modelNameField;
         private JSpinner compressionThresholdSpinner;
+        private JSpinner contextWindowSpinner;
+        private JSpinner temperatureSpinner;
+        private JSpinner maxTokensSpinner;
         private JCheckBox visionCheckbox;
         private AiAgentSettings.ModelConfig config;
 
@@ -377,6 +357,41 @@ public class ModelConfigurable implements Configurable {
             gbc.gridx = 0;
             gbc.gridy = 4;
             gbc.weightx = 0;
+            panel.add(new JLabel("上下文窗口"), gbc);
+
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
+            contextWindowSpinner = new JSpinner(new SpinnerNumberModel(config.contextWindowSize, 4096, 2000000, 1024));
+            contextWindowSpinner.setPreferredSize(new Dimension(140, 28));
+            panel.add(contextWindowSpinner, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 5;
+            gbc.weightx = 0;
+            panel.add(new JLabel("温度"), gbc);
+
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
+            temperatureSpinner = new JSpinner(new SpinnerNumberModel(config.temperature, 0.0, 2.0, 0.1));
+            temperatureSpinner.setPreferredSize(new Dimension(140, 28));
+            JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
+            temperatureSpinner.setEditor(tempEditor);
+            panel.add(temperatureSpinner, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 6;
+            gbc.weightx = 0;
+            panel.add(new JLabel("最大输出"), gbc);
+
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
+            maxTokensSpinner = new JSpinner(new SpinnerNumberModel(config.maxTokens, 256, 128000, 256));
+            maxTokensSpinner.setPreferredSize(new Dimension(140, 28));
+            panel.add(maxTokensSpinner, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 7;
+            gbc.weightx = 0;
             panel.add(new JLabel("压缩阈值 (%)"), gbc);
 
             gbc.gridx = 1;
@@ -386,7 +401,7 @@ public class ModelConfigurable implements Configurable {
             panel.add(compressionThresholdSpinner, gbc);
 
             gbc.gridx = 0;
-            gbc.gridy = 5;
+            gbc.gridy = 8;
             gbc.weightx = 0;
             panel.add(new JLabel("视觉支持"), gbc);
 
@@ -421,6 +436,9 @@ public class ModelConfigurable implements Configurable {
             config.baseUrl = baseUrlField.getText().trim();
             config.apiKey = new String(apiKeyField.getPassword()).trim();
             config.modelName = modelNameField.getText().trim();
+            config.contextWindowSize = (Integer) contextWindowSpinner.getValue();
+            config.temperature = (Double) temperatureSpinner.getValue();
+            config.maxTokens = (Integer) maxTokensSpinner.getValue();
             config.compressionThreshold = (Integer) compressionThresholdSpinner.getValue();
             config.visionCapable = visionCheckbox.isSelected();
 

@@ -739,10 +739,7 @@ public class AgentService {
     private void checkAndCompress(AgentContext context, LlmClient llmClient, int lastPromptTokens, AgentListener listener) {
         AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
         int threshold = config.compressionThreshold;
-        int contextWindowSize = llmClient.getContextWindowSize();
-        if (contextWindowSize <= 0) {
-            contextWindowSize = 128000;
-        }
+        int contextWindowSize = config.contextWindowSize > 0 ? config.contextWindowSize : 128000;
 
         List<ChatMessage> messages = context.getConversation().getMessages();
 
@@ -877,10 +874,7 @@ public class AgentService {
 
                 // P1: 检查是否仍超过阈值，需要再次压缩
                 AiAgentSettings.ModelConfig config = AiAgentSettings.getInstance().getActiveModelConfig();
-                int contextWindowSize = llmClient.getContextWindowSize();
-                if (contextWindowSize <= 0) {
-                    contextWindowSize = 128000;
-                }
+                int contextWindowSize = config.contextWindowSize > 0 ? config.contextWindowSize : 128000;
                 int thresholdTokens = (int) (contextWindowSize * config.compressionThreshold / 100.0);
 
                 if (afterTokens > thresholdTokens && !olderMessages.isEmpty()) {

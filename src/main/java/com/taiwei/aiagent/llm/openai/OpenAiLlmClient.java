@@ -268,10 +268,13 @@ public class OpenAiLlmClient implements LlmClient {
     }
 
     private JsonObject buildRequestBody(List<ChatMessage> messages, List<Tool> tools, boolean stream) {
+        AiAgentSettings.ModelConfig activeConfig = AiAgentSettings.getInstance().getActiveModelConfig();
+
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", stream);
-        body.addProperty("max_tokens", AiAgentSettings.getInstance().getMaxTokens());
+        body.addProperty("max_tokens", activeConfig != null ? activeConfig.maxTokens : AiAgentSettings.getInstance().getMaxTokens());
+        body.addProperty("temperature", activeConfig != null ? activeConfig.temperature : 0.3);
 
         if (stream) {
             JsonObject streamOptions = new JsonObject();

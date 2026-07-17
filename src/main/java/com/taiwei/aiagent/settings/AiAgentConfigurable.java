@@ -7,7 +7,6 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
-import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
@@ -28,8 +27,6 @@ public class AiAgentConfigurable implements Configurable {
     private JPanel mainPanel;
     private ModelTableModel tableModel;
     private JBTable table;
-    private JSpinner maxTokensSpinner;
-    private JSpinner temperatureSpinner;
     private JTextArea dangerousCommandsArea;
 
     private List<AiAgentSettings.ModelConfig> editingConfigs;
@@ -83,20 +80,6 @@ public class AiAgentConfigurable implements Configurable {
         modelSection.add(scrollPane, BorderLayout.CENTER);
         modelSection.add(buttonPanel, BorderLayout.SOUTH);
 
-        // ===== 全局参数区域 =====
-        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(4096, 256, 128000, 256));
-        maxTokensSpinner.setPreferredSize(new Dimension(120, 28));
-
-        temperatureSpinner = new JSpinner(new SpinnerNumberModel(0.7, 0.0, 2.0, 0.1));
-        temperatureSpinner.setPreferredSize(new Dimension(120, 28));
-        JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
-        temperatureSpinner.setEditor(tempEditor);
-
-        JPanel paramsPanel = FormBuilder.createFormBuilder()
-                .addLabeledComponent("最大 Token:", maxTokensSpinner)
-                .addLabeledComponent("温度 (Temperature):", temperatureSpinner)
-                .getPanel();
-
         // ===== 提示信息 =====
         JTextArea hintArea = new JTextArea(
                 "常用模型参考:\n" +
@@ -118,18 +101,6 @@ public class AiAgentConfigurable implements Configurable {
 
         modelSection.setAlignmentX(Component.LEFT_ALIGNMENT);
         mainPanel.add(modelSection);
-        mainPanel.add(Box.createVerticalStrut(16));
-
-        JPanel paramsWrapper = new JPanel(new BorderLayout());
-        paramsWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JLabel paramsLabel = new JLabel("全局参数");
-        paramsLabel.setFont(paramsLabel.getFont().deriveFont(Font.BOLD, 13f));
-        paramsWrapper.add(paramsLabel, BorderLayout.NORTH);
-        mainPanel.add(paramsWrapper);
-        mainPanel.add(Box.createVerticalStrut(8));
-
-        paramsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        mainPanel.add(paramsPanel);
         mainPanel.add(Box.createVerticalStrut(16));
 
         hintArea.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -228,8 +199,6 @@ public class AiAgentConfigurable implements Configurable {
     @Override
     public boolean isModified() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
-        if ((Integer) maxTokensSpinner.getValue() != settings.getMaxTokens()) return true;
-        if ((Double) temperatureSpinner.getValue() != settings.getTemperature()) return true;
 
         if (!getDangerousCommandsText().equals(
                 String.join("\n", settings.getDangerousCommands()))) return true;
@@ -241,7 +210,10 @@ public class AiAgentConfigurable implements Configurable {
             AiAgentSettings.ModelConfig b = current.get(i);
             if (!a.name.equals(b.name) || !a.baseUrl.equals(b.baseUrl)
                     || !a.apiKey.equals(b.apiKey) || !a.modelName.equals(b.modelName)
-                    || a.visionCapable != b.visionCapable) {
+                    || a.visionCapable != b.visionCapable
+                    || a.contextWindowSize != b.contextWindowSize
+                    || a.temperature != b.temperature
+                    || a.maxTokens != b.maxTokens) {
                 return true;
             }
         }
@@ -268,9 +240,7 @@ public class AiAgentConfigurable implements Configurable {
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setModelConfigs(new ArrayList<>(editingConfigs));
-        settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
-        settings.setTemperature((Double) temperatureSpinner.getValue());
-        
+
         // 保存危险命令配置
         String dangerText = getDangerousCommandsText();
         String[] lines = dangerText.split("\n", -1);
@@ -303,9 +273,7 @@ public class AiAgentConfigurable implements Configurable {
         if (!editingConfigs.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
         }
-        maxTokensSpinner.setValue(settings.getMaxTokens());
-        temperatureSpinner.setValue(settings.getTemperature());
-        
+
         // 加载危险命令配置
         dangerousCommandsArea.setText(String.join("\n", settings.getDangerousCommands()));
     }
@@ -371,6 +339,9 @@ public class AiAgentConfigurable implements Configurable {
         private JTextField baseUrlField;
         private JPasswordField apiKeyField;
         private JTextField modelNameField;
+        private JSpinner contextWindowSpinner;
+        private JSpinner temperatureSpinner;
+        private JSpinner maxTokensSpinner;
         private JCheckBox visionCheckbox;
         private final AiAgentSettings.ModelConfig config;
 
@@ -387,11 +358,23 @@ public class AiAgentConfigurable implements Configurable {
             baseUrlField = new JTextField(config.baseUrl, 30);
             apiKeyField = new JPasswordField(config.apiKey, 30);
             modelNameField = new JTextField(config.modelName, 30);
+
+            contextWindowSpinner = new JSpinner(new SpinnerNumberModel(config.contextWindowSize, 4096, 2000000, 1024));
+            contextWindowSpinner.setPreferredSize(new Dimension(120, 28));
+
+            temperatureSpinner = new JSpinner(new SpinnerNumberModel(config.temperature, 0.0, 2.0, 0.1));
+            temperatureSpinner.setPreferredSize(new Dimension(120, 28));
+            JSpinner.NumberEditor tempEditor = new JSpinner.NumberEditor(temperatureSpinner, "0.0");
+            temperatureSpinner.setEditor(tempEditor);
+
+            maxTokensSpinner = new JSpinner(new SpinnerNumberModel(config.maxTokens, 256, 128000, 256));
+            maxTokensSpinner.setPreferredSize(new Dimension(120, 28));
+
             visionCheckbox = new JCheckBox("支持视觉 / 图片输入", config.visionCapable);
 
             JPanel panel = new JPanel();
             panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-            panel.setPreferredSize(new Dimension(450, 230));
+            panel.setPreferredSize(new Dimension(450, 350));
 
             panel.add(createFieldRow("显示名称:", nameField));
             panel.add(Box.createVerticalStrut(8));
@@ -400,6 +383,12 @@ public class AiAgentConfigurable implements Configurable {
             panel.add(createFieldRow("API Key:", apiKeyField));
             panel.add(Box.createVerticalStrut(8));
             panel.add(createFieldRow("模型名称:", modelNameField));
+            panel.add(Box.createVerticalStrut(8));
+            panel.add(createFieldRow("上下文窗口:", contextWindowSpinner));
+            panel.add(Box.createVerticalStrut(8));
+            panel.add(createFieldRow("温度:", temperatureSpinner));
+            panel.add(Box.createVerticalStrut(8));
+            panel.add(createFieldRow("最大输出:", maxTokensSpinner));
             panel.add(Box.createVerticalStrut(8));
             visionCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
             panel.add(visionCheckbox);
@@ -424,6 +413,9 @@ public class AiAgentConfigurable implements Configurable {
             config.baseUrl = baseUrlField.getText().trim();
             config.apiKey = new String(apiKeyField.getPassword()).trim();
             config.modelName = modelNameField.getText().trim();
+            config.contextWindowSize = (Integer) contextWindowSpinner.getValue();
+            config.temperature = (Double) temperatureSpinner.getValue();
+            config.maxTokens = (Integer) maxTokensSpinner.getValue();
             config.visionCapable = visionCheckbox.isSelected();
             return config;
         }
