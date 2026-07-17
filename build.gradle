@@ -28,11 +28,16 @@ tasks {
         // 启动时自动打开当前项目，避免每次都选项目
         args = [project.rootDir.absolutePath]
         
+        // 显式指定 JBR 架构为 aarch64，防止 Gradle Daemon 在 Rosetta 下运行时
+        // 误下载 x64 版本的 JBR 导致 Apple Silicon 机器上启动失败（exit code 6）
+        jbrArch.set("aarch64")
+        
         // 使用固定的沙箱配置目录，避免 clean 后配置丢失
-        // 通过 systemProperty 指定 config 和 system 目录位置
-        systemProperty 'idea.config.path', System.getProperty("user.home") + '/.taiwei-ide-sandbox/config'
-        systemProperty 'idea.system.path', System.getProperty("user.home") + '/.taiwei-ide-sandbox/system'
-        systemProperty 'idea.plugins.path', System.getProperty("user.home") + '/.taiwei-ide-sandbox/plugins'
+        // 必须通过 task 属性设置（而非 systemProperty），因为插件的 LaunchSystemArgumentProvider
+        // 会以 JVM 命令行参数形式追加默认路径，systemProperty 设置的值会被覆盖
+        def sandboxHome = System.getProperty("user.home") + '/.taiwei-ide-sandbox'
+        configDir.set(file("${sandboxHome}/config"))
+        systemDir.set(file("${sandboxHome}/system"))
         
         // 使用系统 JDK 运行沙箱，避免中文乱码和图标显示问题
         jvmArgs += [
@@ -42,6 +47,12 @@ tasks {
             '-Dawt.useSystemAAFontSettings=lcd',
             '-Dswing.aatext=true'
         ]
+    }
+
+    prepareSandbox {
+        // 将插件输出到固定沙箱目录，避免 clean 后配置丢失
+        // runIde 的 pluginsDir 会自动跟随 prepareSandbox 的 destinationDir
+        defaultDestinationDir.set(file("${System.getProperty("user.home")}/.taiwei-ide-sandbox/plugins"))
     }
 
     // 禁用 instrumentCode 任务以避免 JDK 路径问题
