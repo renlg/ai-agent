@@ -6,6 +6,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import org.jetbrains.annotations.NotNull;
@@ -98,12 +99,16 @@ public class DiffReviewService {
      * Add a new diff entry. If the list exceeds MAX_DIFFS, the oldest entry is removed.
      */
     public void addDiff(DiffEntry entry) {
+        DiffEntry removedEntry = null;
         synchronized (diffList) {
             if (diffList.size() >= MAX_DIFFS) {
-                diffList.remove(0);
+                removedEntry = diffList.remove(0);
             }
             diffList.add(entry);
             currentIndex = diffList.size() - 1;
+        }
+        if (removedEntry != null) {
+            highlighter.clearHighlightsForFile(removedEntry.getFilePath());
         }
 
         // Notify listeners
@@ -171,14 +176,14 @@ public class DiffReviewService {
     }
 
     /**
-     * Revert a specific diff entry by restoring the old content.
+     * Revert a specific diff entry by restoring the old content in the changed region only,
+     * so that user edits made outside that region (or after the AI change) are preserved.
      */
     public void revertDiff(@NotNull DiffEntry entry) {
         synchronized (diffList) {
             diffList.remove(entry);
         }
 
-        // Restore old content via WriteCommandAction
         WriteCommandAction.runWriteCommandAction(project, () -> {
             try {
                 Path filePath = Paths.get(entry.getFilePath());
@@ -186,8 +191,11 @@ public class DiffReviewService {
                 if (vf != null) {
                     Document document = FileDocumentManager.getInstance().getDocument(vf);
                     if (document != null) {
-                        document.setText(entry.getOldContent());
-                        FileDocumentManager.getInstance().saveDocument(document);
+                        boolean reverted = applyPartialRevert(document, entry.getFilePath(),
+                                entry.getOldContent(), entry.getNewContent());
+                        if (reverted) {
+                            FileDocumentManager.getInstance().saveDocument(document);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -203,6 +211,57 @@ public class DiffReviewService {
 
         fireOnIndexChanged();
         adjustCurrentIndex();
+    }
+
+    /**
+     * Reverts only the region that differs between {@code oldContent} and {@code newContent}
+     * (found via common prefix/suffix), leaving the rest of the document untouched. If the
+     * changed region no longer matches {@code newContent} — meaning the user edited it after
+     * the AI change — the user is asked to confirm before it is overwritten.
+     *
+     * @return true if the document was modified.
+     */
+    private boolean applyPartialRevert(Document document, String filePath, String oldContent, String newContent) {
+        int minLen = Math.min(oldContent.length(), newContent.length());
+
+        int prefixLen = 0;
+        while (prefixLen < minLen && oldContent.charAt(prefixLen) == newContent.charAt(prefixLen)) {
+            prefixLen++;
+        }
+
+        int suffixLen = 0;
+        while (suffixLen < minLen - prefixLen
+                && oldContent.charAt(oldContent.length() - 1 - suffixLen) == newContent.charAt(newContent.length() - 1 - suffixLen)) {
+            suffixLen++;
+        }
+
+        int startOffset = prefixLen;
+        int endOffset = newContent.length() - suffixLen;
+        String oldFragment = oldContent.substring(prefixLen, oldContent.length() - suffixLen);
+
+        String currentText = document.getText();
+        String expectedRegion = newContent.substring(prefixLen, newContent.length() - suffixLen);
+        int actualStart = Math.min(startOffset, currentText.length());
+        int actualEnd = Math.max(actualStart, Math.min(currentText.length() - suffixLen, currentText.length()));
+        String actualRegion = currentText.substring(actualStart, actualEnd);
+
+        if (!expectedRegion.equals(actualRegion)) {
+            // User has edited inside the AI-changed region — ask for confirmation
+            boolean confirmed = Messages.showYesNoDialog(
+                    project,
+                    "The AI-changed region in " + filePath + " has been modified by you. Revert anyway?",
+                    "Region Modified",
+                    null
+            ) == Messages.YES;
+            if (!confirmed) {
+                return false;
+            }
+        }
+
+        int safeStart = Math.min(startOffset, document.getTextLength());
+        int safeEnd = Math.max(safeStart, Math.min(endOffset, document.getTextLength()));
+        document.replaceString(safeStart, safeEnd, oldFragment);
+        return true;
     }
 
     /**
@@ -230,7 +289,7 @@ public class DiffReviewService {
                 if (vf != null) {
                     Document document = FileDocumentManager.getInstance().getDocument(vf);
                     if (document != null) {
-                        document.setText(firstEntry.getOldContent());
+                        applyPartialRevert(document, filePath, firstEntry.getOldContent(), firstEntry.getNewContent());
                     }
                 }
             });
@@ -242,9 +301,9 @@ public class DiffReviewService {
     }
 
     /**
-     * Revert all diffs across all files.
+     * Clear all diff entries and remove their highlights, without reverting file content.
      */
-    public void revertAll() {
+    public void clearHighlights() {
         List<DiffEntry> allDiffs;
         synchronized (diffList) {
             allDiffs = new ArrayList<>(diffList);
