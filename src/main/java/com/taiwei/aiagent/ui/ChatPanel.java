@@ -63,7 +63,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
     public ChatPanel(Project project) {
         this.project = project;
-        this.agentService = new AgentService(project);
+        this.agentService = project.getService(AgentService.class);
         this.skillManager = SkillManager.getInstance(project);
         this.memoryManager = MemoryManager.getInstance(project);
         this.memoryCommandHandler = new MemoryCommandHandler(memoryManager);

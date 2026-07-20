@@ -47,6 +47,7 @@
         <projectService serviceImplementation="com.taiwei.aiagent.skill.SkillManager"/>
         <projectService serviceImplementation="com.taiwei.aiagent.memory.MemoryManager"/>
         <projectService serviceImplementation="com.taiwei.aiagent.mcp.McpManager"/>
+        <projectService serviceImplementation="com.taiwei.aiagent.agent.AgentService"/>
         <editorNotificationProvider implementation="com.taiwei.aiagent.diff.DiffEditorNotificationProvider"/>
 
         <!-- Tab 自动补全 -->
