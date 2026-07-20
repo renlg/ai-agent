@@ -141,6 +141,56 @@ public class MemoryStore implements AutoCloseable {
         }
     }
 
+    public List<MemoryEntry> findAll(int limit) {
+        synchronized (lock) {
+            List<MemoryEntry> result = new ArrayList<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT * FROM memories ORDER BY importance DESC, last_accessed_at DESC LIMIT ?")) {
+                ps.setInt(1, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) result.add(mapRow(rs));
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException("Failed to query memories", e);
+            }
+            return result;
+        }
+    }
+
+    public List<MemoryEntry> findByCategory(String category) {
+        synchronized (lock) {
+            List<MemoryEntry> result = new ArrayList<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT * FROM memories WHERE category = ? ORDER BY updated_at DESC")) {
+                ps.setString(1, category);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) result.add(mapRow(rs));
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException("Failed to query memories by category: " + category, e);
+            }
+            return result;
+        }
+    }
+
+    public List<MemoryEntry> searchByKeyword(String keyword) {
+        synchronized (lock) {
+            List<MemoryEntry> result = new ArrayList<>();
+            String pattern = "%" + keyword + "%";
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT * FROM memories WHERE content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC")) {
+                ps.setString(1, pattern);
+                ps.setString(2, pattern);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) result.add(mapRow(rs));
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException("Failed to search memories by keyword: " + keyword, e);
+            }
+            return result;
+        }
+    }
+
     public Optional<MemoryEntry> findById(String id) {
         synchronized (lock) {
             try (PreparedStatement ps = connection.prepareStatement("SELECT * FROM memories WHERE id=?")) {

@@ -102,14 +102,11 @@ public class MemoryManager implements Disposable {
     }
 
     public List<MemoryEntry> list(MemoryCategory category, int limit) {
-        List<MemoryEntry> filtered = new ArrayList<>();
-        for (MemoryEntry entry : store.findAll()) {
-            if (category == null || entry.getCategory() == category) {
-                filtered.add(entry);
-            }
-        }
-        filtered.sort(Comparator.comparingLong(MemoryEntry::getLastAccessedAt).reversed());
-        return limit > 0 && filtered.size() > limit ? filtered.subList(0, limit) : filtered;
+        List<MemoryEntry> entries = (category == null)
+                ? store.findAll()
+                : store.findByCategory(category.name());
+        entries.sort(Comparator.comparingLong(MemoryEntry::getLastAccessedAt).reversed());
+        return limit > 0 && entries.size() > limit ? entries.subList(0, limit) : entries;
     }
 
     public List<String> getAllTags() {
@@ -128,7 +125,9 @@ public class MemoryManager implements Disposable {
 
     /** Explicit keyword search across content + tags, sorted by relevance. Bumps access stats on returned entries. */
     public List<MemoryEntry> recall(String query, int limit) {
-        return search(query, limit, true);
+        Set<String> tokens = tokenize(query);
+        if (tokens.isEmpty()) return List.of();
+        return scoreAndRank(tokens, store.searchByKeyword(query), limit, true);
     }
 
     /** Used for automatic prompt injection: finds memories relevant to the current chat message. */
@@ -154,10 +153,16 @@ public class MemoryManager implements Disposable {
     private List<MemoryEntry> search(String text, int limit, boolean touch) {
         Set<String> tokens = tokenize(text);
         if (tokens.isEmpty()) return List.of();
+        // Full table scan kept intentionally: composite importance/recency/relevance scoring
+        // needs the full candidate set to rank correctly. Capped at 50 entries (ordered by
+        // importance and recency) to prevent unbounded memory usage as the DB grows.
+        return scoreAndRank(tokens, store.findAll(50), limit, touch);
+    }
 
+    private List<MemoryEntry> scoreAndRank(Set<String> tokens, List<MemoryEntry> candidates, int limit, boolean touch) {
         long now = System.currentTimeMillis();
         List<ScoredEntry> scored = new ArrayList<>();
-        for (MemoryEntry entry : store.findAll()) {
+        for (MemoryEntry entry : candidates) {
             double relevance = matchScore(tokens, entry);
             if (relevance <= 0) continue;
             double finalScore = relevance * 3.0
