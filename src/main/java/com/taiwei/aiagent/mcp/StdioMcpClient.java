@@ -37,6 +37,8 @@ public class StdioMcpClient implements McpClient {
 
     private Process process;
     private BufferedWriter stdin;
+    private Thread readerThread;
+    private Thread stderrThread;
     private volatile boolean closed = false;
     private volatile boolean connected = false;
 
@@ -66,21 +68,25 @@ public class StdioMcpClient implements McpClient {
             process = pb.start();
             stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
 
-            Thread readerThread = new Thread(this::readLoop, "mcp-stdio-reader-" + config.name);
+            readerThread = new Thread(this::readLoop, "mcp-stdio-reader-" + config.name);
             readerThread.setDaemon(true);
             readerThread.start();
 
-            Thread stderrThread = new Thread(this::stderrLoop, "mcp-stdio-stderr-" + config.name);
+            stderrThread = new Thread(this::stderrLoop, "mcp-stdio-stderr-" + config.name);
             stderrThread.setDaemon(true);
             stderrThread.start();
 
             JsonObject params = McpJsonRpc.buildInitializeParams("taiwei-ai-agent", "1.0");
             JsonObject response = sendRequest("initialize", params);
             if (response == null) {
+                // No response (e.g. timed out): the process and reader/stderr threads spawned
+                // above would otherwise be orphaned since the caller never gets a live client to close().
+                close();
                 return McpInitResult.failure("MCP server '" + config.name + "' did not respond to initialize");
             }
             String err = McpJsonRpc.extractError(response);
             if (err != null) {
+                close();
                 return McpInitResult.failure(err);
             }
 
@@ -90,6 +96,9 @@ public class StdioMcpClient implements McpClient {
             return result;
         } catch (Exception e) {
             LOG.warn("Failed to initialize stdio MCP server '" + config.name + "'", e);
+            // Same reasoning as above: clean up any process/threads that were already started
+            // before the exception was thrown, so a failed initialize() never leaks a subprocess.
+            close();
             return McpInitResult.failure("Failed to start MCP server: " + e.getMessage());
         }
     }
@@ -191,6 +200,14 @@ public class StdioMcpClient implements McpClient {
                 Thread.currentThread().interrupt();
                 process.destroyForcibly();
             }
+        }
+        // Destroying the process closes its stdout/stderr pipes, which unblocks the reader
+        // threads' readLine() calls on their own; interrupt them too as a defensive fallback.
+        if (readerThread != null) {
+            readerThread.interrupt();
+        }
+        if (stderrThread != null) {
+            stderrThread.interrupt();
         }
         failAllPending("MCP client closed");
     }

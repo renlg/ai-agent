@@ -22,6 +22,10 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
 
     private State state = new State();
     private final List<Runnable> changeListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    // Guards all reads/writes of `state`'s mutable collections (modelConfigs, mcpConfigs, etc.).
+    // This is an application-level service: settings-panel edits happen on the EDT while the
+    // Agent loop reads model config from pooled background threads, so plain field access is unsafe.
+    private final Object stateLock = new Object();
 
     public static AiAgentSettings getInstance() {
         return ApplicationManager.getApplication().getService(AiAgentSettings.class);
@@ -36,74 +40,124 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     }
 
     public void fireSettingsChanged() {
-        for (Runnable listener : changeListeners) {
-            listener.run();
-        }
+        // Converge listener invocation onto the EDT so UI-updating listeners (e.g. ChatPanel's)
+        // don't race with the background thread that triggered the settings change.
+        ApplicationManager.getApplication().invokeLater(() -> {
+            for (Runnable listener : changeListeners) {
+                listener.run();
+            }
+        });
     }
 
     @Override
     public @Nullable State getState() {
-        return state;
+        // Return a deep copy so callers (IntelliJ's serialization framework, or anything else)
+        // can't mutate our internal state out from under concurrent readers/writers.
+        synchronized (stateLock) {
+            return deepCopyState(state);
+        }
     }
 
     @Override
     public void loadState(@NotNull State state) {
-        this.state = state;
+        synchronized (stateLock) {
+            this.state = state;
+        }
+    }
+
+    private static State deepCopyState(State src) {
+        State copy = new State();
+        copy.modelConfigs.clear();
+        for (ModelConfig mc : src.modelConfigs) {
+            copy.modelConfigs.add(mc.copy());
+        }
+        copy.activeModelIndex = src.activeModelIndex;
+        copy.maxTokens = src.maxTokens;
+        copy.temperature = src.temperature;
+        copy.dangerousCommands = new ArrayList<>(src.dangerousCommands);
+        copy.searchEngineType = src.searchEngineType;
+        copy.disabledSkills = new java.util.LinkedHashSet<>(src.disabledSkills);
+        copy.disabledTools = new java.util.LinkedHashSet<>(src.disabledTools);
+        copy.mcpConfigs = new ArrayList<>();
+        for (McpConfig mcp : src.mcpConfigs) {
+            copy.mcpConfigs.add(mcp.copy());
+        }
+        copy.completionEnabled = src.completionEnabled;
+        copy.gitCommitReviewEnabled = src.gitCommitReviewEnabled;
+        copy.inlineActionEnabled = src.inlineActionEnabled;
+        copy.customRules = src.customRules;
+        return copy;
     }
 
     // ========== 模型列表操作 ==========
 
     public List<ModelConfig> getModelConfigs() {
-        return state.modelConfigs;
+        synchronized (stateLock) {
+            return new ArrayList<>(state.modelConfigs);
+        }
     }
 
     public void setModelConfigs(List<ModelConfig> configs) {
-        state.modelConfigs = configs;
+        synchronized (stateLock) {
+            state.modelConfigs = new ArrayList<>(configs);
+        }
     }
 
     public void addModelConfig(ModelConfig config) {
-        state.modelConfigs.add(config);
+        synchronized (stateLock) {
+            state.modelConfigs.add(config);
+        }
     }
 
     public void removeModelConfig(int index) {
-        if (index >= 0 && index < state.modelConfigs.size()) {
-            state.modelConfigs.remove(index);
-            // 如果删除的是当前选中的，重置为第一个
-            if (state.activeModelIndex >= state.modelConfigs.size()) {
-                state.activeModelIndex = Math.max(0, state.modelConfigs.size() - 1);
+        synchronized (stateLock) {
+            if (index >= 0 && index < state.modelConfigs.size()) {
+                state.modelConfigs.remove(index);
+                // 如果删除的是当前选中的，重置为第一个
+                if (state.activeModelIndex >= state.modelConfigs.size()) {
+                    state.activeModelIndex = Math.max(0, state.modelConfigs.size() - 1);
+                }
             }
         }
     }
 
     public void updateModelConfig(int index, ModelConfig config) {
-        if (index >= 0 && index < state.modelConfigs.size()) {
-            state.modelConfigs.set(index, config);
+        synchronized (stateLock) {
+            if (index >= 0 && index < state.modelConfigs.size()) {
+                state.modelConfigs.set(index, config);
+            }
         }
     }
 
     public ModelConfig getActiveModelConfig() {
-        if (state.modelConfigs.isEmpty()) {
-            return new ModelConfig(); // 返回默认
+        synchronized (stateLock) {
+            if (state.modelConfigs.isEmpty()) {
+                return new ModelConfig(); // 返回默认
+            }
+            int idx = state.activeModelIndex;
+            if (idx < 0 || idx >= state.modelConfigs.size()) {
+                idx = 0;
+                state.activeModelIndex = 0;
+            }
+            return state.modelConfigs.get(idx).copy();
         }
-        int idx = state.activeModelIndex;
-        if (idx < 0 || idx >= state.modelConfigs.size()) {
-            idx = 0;
-            state.activeModelIndex = 0;
-        }
-        return state.modelConfigs.get(idx);
     }
 
     public int getActiveModelIndex() {
-        return state.activeModelIndex;
+        synchronized (stateLock) {
+            return state.activeModelIndex;
+        }
     }
 
     public void setActiveModelIndex(int index) {
-        if (index >= 0 && index < state.modelConfigs.size()) {
-            state.activeModelIndex = index;
-        } else {
-            // 索引无效时打印警告，方便排查
-            com.intellij.openapi.diagnostic.Logger.getInstance(AiAgentSettings.class)
-                    .warn("setActiveModelIndex 失败: index=" + index + ", 模型数量=" + state.modelConfigs.size());
+        synchronized (stateLock) {
+            if (index >= 0 && index < state.modelConfigs.size()) {
+                state.activeModelIndex = index;
+            } else {
+                // 索引无效时打印警告，方便排查
+                com.intellij.openapi.diagnostic.Logger.getInstance(AiAgentSettings.class)
+                        .warn("setActiveModelIndex 失败: index=" + index + ", 模型数量=" + state.modelConfigs.size());
+            }
         }
     }
 
@@ -236,26 +290,36 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     // ========== MCP 服务器配置 ==========
 
     public List<McpConfig> getMcpConfigs() {
-        return state.mcpConfigs;
+        synchronized (stateLock) {
+            return new ArrayList<>(state.mcpConfigs);
+        }
     }
 
     public void setMcpConfigs(List<McpConfig> configs) {
-        state.mcpConfigs = configs;
+        synchronized (stateLock) {
+            state.mcpConfigs = new ArrayList<>(configs);
+        }
     }
 
     public void addMcpConfig(McpConfig config) {
-        state.mcpConfigs.add(config);
+        synchronized (stateLock) {
+            state.mcpConfigs.add(config);
+        }
     }
 
     public void removeMcpConfig(int index) {
-        if (index >= 0 && index < state.mcpConfigs.size()) {
-            state.mcpConfigs.remove(index);
+        synchronized (stateLock) {
+            if (index >= 0 && index < state.mcpConfigs.size()) {
+                state.mcpConfigs.remove(index);
+            }
         }
     }
 
     public void updateMcpConfig(int index, McpConfig config) {
-        if (index >= 0 && index < state.mcpConfigs.size()) {
-            state.mcpConfigs.set(index, config);
+        synchronized (stateLock) {
+            if (index >= 0 && index < state.mcpConfigs.size()) {
+                state.mcpConfigs.set(index, config);
+            }
         }
     }
 

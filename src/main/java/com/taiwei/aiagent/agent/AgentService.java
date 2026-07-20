@@ -315,7 +315,13 @@ public class AgentService implements Disposable {
             LlmClient llmClient = ctx.getLlmClient();
             activeLlmClient = llmClient;
 
-            LlmResponse response = llmClient.chat(request, null);
+            ctx.beginLlmRequest();
+            LlmResponse response;
+            try {
+                response = llmClient.chat(request, null);
+            } finally {
+                ctx.endLlmRequest();
+            }
             activeLlmClient = null;
 
             if (response == null || !response.isSuccess() || response.getContent() == null || response.getContent().isEmpty()) {
@@ -404,6 +410,18 @@ public class AgentService implements Disposable {
      */
     private void executeAgentLoop(AgentContext context, AgentListener listener) {
         LlmClient llmClient = context.getLlmClient();
+        // Bracket the whole loop: llmClient is reused across iterations (which can span minutes
+        // while waiting on dangerous-command approval), so it must not be closed out from under
+        // us if the user switches models/settings mid-loop.
+        context.beginLlmRequest();
+        try {
+            executeAgentLoopInternal(context, listener, llmClient);
+        } finally {
+            context.endLlmRequest();
+        }
+    }
+
+    private void executeAgentLoopInternal(AgentContext context, AgentListener listener, LlmClient llmClient) {
         LOG.info("Agent 循环使用模型（流式）: " + llmClient.getModelName() + ", 模式: " + context.getMode());
         ToolRegistry registry = context.getToolRegistry();
         List<Tool> tools = context.getToolsForMode();
@@ -1066,13 +1084,18 @@ public class AgentService implements Disposable {
         List<ChatMessage> messages = ctx.getConversation().getMessages();
         int beforeTokens = TokenCounter.countTokens(messages, llmClient.getModelName());
 
-        compressConversation(ctx, llmClient, beforeTokens, new AgentListener() {
-            @Override public void onThinking() {}
-            @Override public void onContent(String content) { LOG.info("压缩通知: " + content); }
-            @Override public void onToolCallStart(String toolCallId, String toolName, String arguments) {}
-            @Override public void onToolCallEnd(String toolCallId, String toolName, String result) {}
-            @Override public void onComplete(String fullResponse) {}
-            @Override public void onError(String error) { LOG.warn("手动压缩: " + error); }
-        });
+        ctx.beginLlmRequest();
+        try {
+            compressConversation(ctx, llmClient, beforeTokens, new AgentListener() {
+                @Override public void onThinking() {}
+                @Override public void onContent(String content) { LOG.info("压缩通知: " + content); }
+                @Override public void onToolCallStart(String toolCallId, String toolName, String arguments) {}
+                @Override public void onToolCallEnd(String toolCallId, String toolName, String result) {}
+                @Override public void onComplete(String fullResponse) {}
+                @Override public void onError(String error) { LOG.warn("手动压缩: " + error); }
+            });
+        } finally {
+            ctx.endLlmRequest();
+        }
     }
 }

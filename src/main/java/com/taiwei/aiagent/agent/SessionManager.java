@@ -6,6 +6,7 @@ import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.model.Conversation;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +22,11 @@ public class SessionManager {
     private static final Logger LOG = Logger.getInstance(SessionManager.class);
 
     private final Project project;
-    private final LinkedHashMap<String, AgentContext> sessions = new LinkedHashMap<>();
+    // Accessed from both the EDT (UI-triggered session switches/deletes) and pooled
+    // background threads (Agent loop persisting state via saveState()); must stay thread-safe.
+    // Wrapped in Collections.synchronizedMap to preserve LinkedHashMap's insertion order,
+    // which listSessions()/deleteSession() rely on to find the "most recent" session.
+    private final Map<String, AgentContext> sessions = Collections.synchronizedMap(new LinkedHashMap<>());
     private final SessionStore sessionStore;
     private String activeSessionId;
 
@@ -61,12 +66,14 @@ public class SessionManager {
         }
 
         // 默认激活最后一个（最新的）会话
-        if (!sessions.isEmpty()) {
-            String lastKey = null;
-            for (String key : sessions.keySet()) {
-                lastKey = key;
+        synchronized (sessions) {
+            if (!sessions.isEmpty()) {
+                String lastKey = null;
+                for (String key : sessions.keySet()) {
+                    lastKey = key;
+                }
+                activeSessionId = lastKey;
             }
-            activeSessionId = lastKey;
         }
 
         LOG.info("从磁盘恢复了 " + sessions.size() + " 个历史会话");
@@ -76,8 +83,14 @@ public class SessionManager {
      * 将当前所有会话状态保存到磁盘
      */
     public void saveState() {
+        // Snapshot both keys and values together (rather than iterating the live map) so a
+        // concurrent put/remove from another thread can't trigger a ConcurrentModificationException.
+        Map<String, AgentContext> snapshot;
+        synchronized (sessions) {
+            snapshot = new LinkedHashMap<>(sessions);
+        }
         List<SessionStore.SessionData> sessionDataList = new ArrayList<>();
-        for (Map.Entry<String, AgentContext> entry : sessions.entrySet()) {
+        for (Map.Entry<String, AgentContext> entry : snapshot.entrySet()) {
             String id = entry.getKey();
             AgentContext ctx = entry.getValue();
             Conversation conv = ctx.getConversation();
@@ -166,14 +179,16 @@ public class SessionManager {
      */
     public List<SessionInfo> listSessions() {
         List<SessionInfo> list = new ArrayList<>();
-        for (Map.Entry<String, AgentContext> entry : sessions.entrySet()) {
-            String id = entry.getKey();
-            AgentContext ctx = entry.getValue();
-            String title = ctx.getConversation().getTitle();
-            long createdAt = ctx.getConversation().getCreatedAt();
-            int messageCount = ctx.getConversation().getMessageCount();
-            boolean active = id.equals(activeSessionId);
-            list.add(new SessionInfo(id, title, createdAt, messageCount, active));
+        synchronized (sessions) {
+            for (Map.Entry<String, AgentContext> entry : sessions.entrySet()) {
+                String id = entry.getKey();
+                AgentContext ctx = entry.getValue();
+                String title = ctx.getConversation().getTitle();
+                long createdAt = ctx.getConversation().getCreatedAt();
+                int messageCount = ctx.getConversation().getMessageCount();
+                boolean active = id.equals(activeSessionId);
+                list.add(new SessionInfo(id, title, createdAt, messageCount, active));
+            }
         }
         return list;
     }
@@ -185,13 +200,19 @@ public class SessionManager {
     public void deleteSession(String sessionId) {
         sessions.remove(sessionId);
         if (sessionId.equals(activeSessionId)) {
-            if (sessions.isEmpty()) {
+            boolean empty;
+            String lastKey = null;
+            synchronized (sessions) {
+                empty = sessions.isEmpty();
+                if (!empty) {
+                    for (String key : sessions.keySet()) {
+                        lastKey = key;
+                    }
+                }
+            }
+            if (empty) {
                 createSession();
             } else {
-                String lastKey = null;
-                for (String key : sessions.keySet()) {
-                    lastKey = key;
-                }
                 activeSessionId = lastKey;
             }
         }

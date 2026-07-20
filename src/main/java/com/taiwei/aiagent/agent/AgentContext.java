@@ -47,6 +47,18 @@ public class AgentContext {
     private String cachedModel;
 
     /**
+     * Number of in-flight LLM requests currently using {@link #cachedClient}.
+     * Bracketed by {@link #beginLlmRequest()}/{@link #endLlmRequest()} around every
+     * chat()/chatStream() call site in AgentService.
+     */
+    private final java.util.concurrent.atomic.AtomicInteger activeRequestCount = new java.util.concurrent.atomic.AtomicInteger(0);
+    /**
+     * Clients that were replaced (model/config switch) while a request was still in flight.
+     * Closed once the in-flight request count drops back to zero, or on dispose().
+     */
+    private final java.util.List<LlmClient> staleClients = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
      * 该会话自创建以来累计消耗的 Token 数（用于按轮次计算增量用量，避免前端重复累加）
      */
     private int cumulativePromptTokens = 0;
@@ -92,9 +104,7 @@ public class AgentContext {
         LOG.info("创建 LLM 客户端 - activeIndex=" + activeIndex
                 + ", baseUrl=" + baseUrl + ", model=" + model);
 
-        if (cachedClient != null) {
-            cachedClient.close();
-        }
+        retireClient(cachedClient);
 
         LlmClient client = new OpenAiLlmClient(baseUrl, apiKey, model);
         cachedClient = client;
@@ -105,12 +115,48 @@ public class AgentContext {
     }
 
     /**
+     * Retire a replaced LLM client. If no request is currently in flight it is closed
+     * immediately; otherwise closing is deferred (see {@link #endLlmRequest()}) so an
+     * in-progress chat()/chatStream() call isn't cut off mid-stream.
+     */
+    private void retireClient(LlmClient client) {
+        if (client == null) return;
+        if (activeRequestCount.get() > 0) {
+            staleClients.add(client);
+        } else {
+            client.close();
+        }
+    }
+
+    /**
+     * Mark the start of a request that will use {@link #getLlmClient()}'s return value.
+     * Must be paired with {@link #endLlmRequest()} in a finally block.
+     */
+    public void beginLlmRequest() {
+        activeRequestCount.incrementAndGet();
+    }
+
+    /**
+     * Mark the end of a request started via {@link #beginLlmRequest()}. Once the last
+     * in-flight request completes, any clients retired in the meantime are closed.
+     */
+    public void endLlmRequest() {
+        if (activeRequestCount.decrementAndGet() <= 0 && !staleClients.isEmpty()) {
+            for (LlmClient stale : staleClients) {
+                stale.close();
+            }
+            staleClients.clear();
+        }
+    }
+
+    /**
      * 切换模型（使缓存失效，下次 getLlmClient() 时重建）
      */
-    public void switchModel(int modelIndex) {
+    public synchronized void switchModel(int modelIndex) {
         this.modelIndex = modelIndex;
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setActiveModelIndex(modelIndex);
+        retireClient(cachedClient);
         cachedClient = null;
         cachedBaseUrl = null;
         cachedApiKey = null;
@@ -254,6 +300,10 @@ public class AgentContext {
             cachedClient.close();
             cachedClient = null;
         }
+        for (LlmClient stale : staleClients) {
+            stale.close();
+        }
+        staleClients.clear();
     }
 
     public PromptManager getPromptManager() {

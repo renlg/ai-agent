@@ -36,11 +36,11 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public class ChatPanel extends JPanel implements Disposable {
@@ -56,8 +56,10 @@ public class ChatPanel extends JPanel implements Disposable {
     private JBCefBrowser browser;
     private JBCefJSQuery jsQuery;
 
-    private final Map<String, SessionState> sessionStates = new HashMap<>();
-    private final Map<String, PendingCommand> pendingCommands = new HashMap<>();
+    // Mutated both from the JCEF JS-bridge callback thread (handleJsMessage) and from
+    // pooled background threads running the AgentListener callbacks in sendMessage(); must be thread-safe.
+    private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
+    private final Map<String, PendingCommand> pendingCommands = new ConcurrentHashMap<>();
     private final Runnable settingsChangeListener = this::onSettingsChanged;
     private volatile boolean isCompressing = false;
 
@@ -921,7 +923,10 @@ public class ChatPanel extends JPanel implements Disposable {
 
                     if (isDangerous) {
                         // 危险命令：显示运行按钮，等待用户点击
-                        pendingCommands.put(toolCallId, new PendingCommand(toolCallId, command, true));
+                        // Converge the write onto the EDT so it's ordered consistently with the
+                        // remove() in onUserApproveCommand(), which also runs off the EDT (JS-bridge thread).
+                        SwingUtilities.invokeLater(() ->
+                                pendingCommands.put(toolCallId, new PendingCommand(toolCallId, command, true)));
                         pushToJs("showRunButton",
                                 escapeJsString(toolCallId) + "," + escapeJsString(command));
                     } else {
@@ -997,8 +1002,8 @@ public class ChatPanel extends JPanel implements Disposable {
                         sessionState.chatEntries.add(ChatEntry.assistant(fullResponse));
                     }
 
-                    // 清理待审批命令
-                    pendingCommands.clear();
+                    // 清理待审批命令（converge onto EDT to avoid racing with onUserApproveCommand's remove()）
+                    SwingUtilities.invokeLater(pendingCommands::clear);
 
                     // 推送 Token 统计和耗时到前端
                     long elapsedMs = System.currentTimeMillis() - sessionState.startTime;
@@ -1019,8 +1024,8 @@ public class ChatPanel extends JPanel implements Disposable {
                     sessionState.chatEntries.removeIf(e -> e.type == ChatEntry.Type.THINKING);
                     sessionState.chatEntries.add(ChatEntry.error(error));
 
-                    // 清理待审批命令
-                    pendingCommands.clear();
+                    // 清理待审批命令（converge onto EDT to avoid racing with onUserApproveCommand's remove()）
+                    SwingUtilities.invokeLater(pendingCommands::clear);
 
                     pushToJs("clearAllProgress", "");
                     pushToJs("clearAllRunButtons", "");

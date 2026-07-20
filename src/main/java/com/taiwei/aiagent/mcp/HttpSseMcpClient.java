@@ -225,19 +225,67 @@ public class HttpSseMcpClient implements McpClient {
 
     private void scheduleReconnect() {
         if (closed) return;
+        connected = false;
+        // The old connection is dead, so any request still waiting on it can never receive a
+        // response; fail it now instead of leaving it to hang until its own timeout (up to 30s).
+        failAllPending("MCP SSE connection lost for '" + config.name + "', reconnecting");
         CompletableFuture.delayedExecutor(RECONNECT_DELAY_SECONDS, TimeUnit.SECONDS).execute(() -> {
             if (closed) return;
             LOG.info("Reconnecting SSE for MCP server '" + config.name + "'");
             endpointFuture = new CompletableFuture<>();
             connectSse();
+            reinitializeAfterReconnect();
         });
+    }
+
+    /**
+     * A reconnected SSE stream is a brand-new server-side session: the previously completed
+     * initialize/initialized handshake no longer applies, so it must be redone before the
+     * client is considered connected again (mirrors the handshake in {@link #initialize()}).
+     */
+    private void reinitializeAfterReconnect() {
+        if (closed) return;
+        try {
+            int timeout = config.timeoutSeconds > 0 ? config.timeoutSeconds : 30;
+            String endpoint;
+            try {
+                endpoint = endpointFuture.get(timeout, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                LOG.warn("Timed out waiting for SSE 'endpoint' event after reconnecting to '" + config.name + "'");
+                return;
+            } catch (ExecutionException e) {
+                LOG.warn("SSE reconnection failed for '" + config.name + "': " + e.getCause());
+                return;
+            }
+            this.messageEndpoint = endpoint;
+
+            JsonObject params = McpJsonRpc.buildInitializeParams("taiwei-ai-agent", "1.0");
+            JsonObject response = sendRequest("initialize", params);
+            if (response == null) {
+                LOG.warn("MCP server '" + config.name + "' did not respond to re-initialize after reconnect");
+                return;
+            }
+            String err = McpJsonRpc.extractError(response);
+            if (err != null) {
+                LOG.warn("Re-initialize failed after reconnect for '" + config.name + "': " + err);
+                return;
+            }
+            sendNotificationAsync("notifications/initialized", new JsonObject());
+            connected = true;
+            LOG.info("MCP server '" + config.name + "' re-initialized after reconnect");
+        } catch (Exception e) {
+            LOG.warn("Failed to re-initialize MCP server '" + config.name + "' after reconnect", e);
+        }
     }
 
     private void handleSseEvent(String type, String data) {
         if ("endpoint".equals(type)) {
             String resolved = resolveEndpoint(data);
             messageEndpoint = resolved;
-            connected = true;
+            // Note: `connected` is intentionally NOT set here. The initialize/initialized
+            // handshake (in initialize() for the first connect, reinitializeAfterReconnect()
+            // afterwards) must complete first — otherwise callers could race ahead and call
+            // tools/list or tools/call before the server has been initialized.
             if (!endpointFuture.isDone()) {
                 endpointFuture.complete(resolved);
             }
