@@ -35,8 +35,13 @@ public class RunCommandTool implements Tool {
     /**
      * 命令执行超时（秒）
      */
-    private static final int DEFAULT_TIMEOUT = 10;
+    private static final int DEFAULT_TIMEOUT = 120;
     private static final int MAX_TIMEOUT = 300;
+
+    /**
+     * 超时后仍在后台运行的进程，等待多久后强制清理临时目录（防止句柄/磁盘泄漏）
+     */
+    private static final long ORPHAN_CLEANUP_TIMEOUT_MS = TimeUnit.MINUTES.toMillis(30);
 
     public RunCommandTool(Project project) {
         this.project = project;
@@ -162,7 +167,8 @@ public class RunCommandTool implements Tool {
                 if (System.currentTimeMillis() - startTime > timeoutMs) {
                     // 超时时不杀进程，让终端继续运行，只返回已捕获的部分输出
                     String partialOutput = readPartialOutput(outputFile);
-                    // 不删除临时文件，让进程可以继续写
+                    // 不立即删除临时文件（进程可能仍在写入），但安排后台清理，避免临时目录永久泄漏
+                    scheduleOrphanCleanup(tempDir, scriptFile, doneFile, outputFile);
                     if (partialOutput.isEmpty() || partialOutput.equals("(无输出)")) {
                         return "命令执行超过 " + timeout + " 秒仍未完成，进程仍在终端中运行。\n\n(暂无输出，请切换到终端查看)";
                     }
@@ -217,6 +223,28 @@ public class RunCommandTool implements Tool {
         } catch (Exception ignored) {
         }
         return "(无输出)";
+    }
+
+    /**
+     * 命令超时后，进程可能仍在终端中运行并持续写入 outputFile，因此不能立即删除临时目录。
+     * 在后台线程中轮询等待 doneFile 出现（进程结束），或达到最大等待时间后强制清理，
+     * 避免每次超时都留下一个永不删除的临时目录（磁盘/句柄泄漏）。
+     */
+    private void scheduleOrphanCleanup(Path tempDir, Path scriptFile, Path doneFile, Path outputFile) {
+        Thread cleanupThread = new Thread(() -> {
+            long deadline = System.currentTimeMillis() + ORPHAN_CLEANUP_TIMEOUT_MS;
+            try {
+                while (!doneFile.toFile().exists() && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(5000);
+                }
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
+        }, "taiwei-cmd-orphan-cleanup");
+        cleanupThread.setDaemon(true);
+        cleanupThread.start();
     }
 
     /**

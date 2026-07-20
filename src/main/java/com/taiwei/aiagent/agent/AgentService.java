@@ -416,7 +416,7 @@ public class AgentService implements Disposable {
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             if (stopped) {
                 LOG.info("Agent 循环被用户停止");
-                LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                 if (usage != null) listener.onUsage(usage);
                 listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                 return;
@@ -492,7 +492,7 @@ public class AgentService implements Disposable {
             // 用户点击停止：cancel 会触发 onFailure，但应视为正常结束
             if (stopped) {
                 LOG.info("Agent 循环被用户停止");
-                LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                 if (usage != null) listener.onUsage(usage);
                 listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                 return;
@@ -593,7 +593,7 @@ public class AgentService implements Disposable {
                 // 全部工具执行完成后，检查停止标志
                 if (stopped) {
                     LOG.info("Agent 循环被用户停止（工具执行后）");
-                    LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+                    LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                     if (usage != null) listener.onUsage(usage);
                     listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
                     return;
@@ -613,7 +613,7 @@ public class AgentService implements Disposable {
                 return;
             }
 
-            LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+            LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
             if (usage != null) listener.onUsage(usage);
             listener.onComplete(fullResponse.toString());
             LOG.info("Agent 循环结束，共迭代 " + (iteration + 1) + " 次");
@@ -624,13 +624,19 @@ public class AgentService implements Disposable {
         String msg = "\n\n[Agent 已达到最大迭代次数 (" + maxIterations + ")，停止执行]";
         listener.onContent(msg);
         fullResponse.append(msg);
-        LlmResponse.Usage usage = buildAccumulatedUsage(totalUsage);
+        LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
         if (usage != null) listener.onUsage(usage);
         listener.onComplete(fullResponse.toString());
     }
 
-    private static LlmResponse.Usage buildAccumulatedUsage(int[] totalUsage) {
+    /**
+     * 构建本轮（增量）Token 用量并计入会话累计值。
+     * totalUsage 是本次 executeAgentLoop 调用内各次 LLM 请求的用量之和（本轮增量），
+     * 这里将其计入会话累计值后原样返回，前端据此进行 += 累加，避免重复计数。
+     */
+    private static LlmResponse.Usage buildAccumulatedUsage(AgentContext context, int[] totalUsage) {
         if (totalUsage[2] == 0) return null;
+        context.addAndGetPreviousCumulativeUsage(totalUsage[0], totalUsage[1], totalUsage[2]);
         LlmResponse.Usage usage = new LlmResponse.Usage();
         usage.setPromptTokens(totalUsage[0]);
         usage.setCompletionTokens(totalUsage[1]);

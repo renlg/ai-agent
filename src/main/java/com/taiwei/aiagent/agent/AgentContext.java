@@ -46,6 +46,13 @@ public class AgentContext {
     private String cachedApiKey;
     private String cachedModel;
 
+    /**
+     * 该会话自创建以来累计消耗的 Token 数（用于按轮次计算增量用量，避免前端重复累加）
+     */
+    private int cumulativePromptTokens = 0;
+    private int cumulativeCompletionTokens = 0;
+    private int cumulativeTotalTokens = 0;
+
     public AgentContext(Project project) {
         this.project = project;
 
@@ -122,6 +129,17 @@ public class AgentContext {
      */
     public void setModelIndex(int modelIndex) {
         this.modelIndex = modelIndex;
+    }
+
+    /**
+     * 累加本轮 Token 用量到会话累计值，返回累加前的累计值（用于计算本轮增量）
+     */
+    public synchronized int[] addAndGetPreviousCumulativeUsage(int promptTokens, int completionTokens, int totalTokens) {
+        int[] previous = {cumulativePromptTokens, cumulativeCompletionTokens, cumulativeTotalTokens};
+        cumulativePromptTokens += promptTokens;
+        cumulativeCompletionTokens += completionTokens;
+        cumulativeTotalTokens += totalTokens;
+        return previous;
     }
 
     /**

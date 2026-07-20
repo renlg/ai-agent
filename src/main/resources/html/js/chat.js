@@ -533,6 +533,7 @@
             statsEl.innerHTML =
                 '<span>\u8f93\u5165: ' + (usage.promptTokens || 0).toLocaleString() + '</span>' +
                 '<span>\u8f93\u51fa: ' + (usage.completionTokens || 0).toLocaleString() + '</span>' +
+                '<span>\u672c\u8f6e\u6d88\u8017: ' + (usage.totalTokens || 0).toLocaleString() + '</span>' +
                 '<span>\u8017\u65f6: ' + elapsed + 's</span>';
             messagesArea.appendChild(statsEl);
 

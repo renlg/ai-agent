@@ -744,6 +744,8 @@ public class ChatPanel extends JPanel implements Disposable {
                 case '<':  sb.append("\\u003c"); break;
                 case '>':  sb.append("\\u003e"); break;
                 case '&':  sb.append("\\u0026"); break;
+                case '\u2028': sb.append("\\u2028"); break;
+                case '\u2029': sb.append("\\u2029"); break;
                 default:
                     if (c < 0x20) {
                         sb.append(String.format("\\u%04x", (int) c));
