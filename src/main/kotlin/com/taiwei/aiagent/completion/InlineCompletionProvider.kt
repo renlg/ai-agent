@@ -19,10 +19,13 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration
@@ -75,6 +78,10 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
             .build()
     }
 
+    private val activeJob = AtomicReference<Job?>(null)
+
+    private val completionPromptTemplate: String by lazy { loadTemplate("templates/completion_prompt.vm") }
+
     override val id: InlineCompletionProviderID
         get() = InlineCompletionProviderID("taiwei-inline-completion")
 
@@ -87,6 +94,12 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
     }
 
     override suspend fun getSuggestionDebounced(request: InlineCompletionRequest): InlineCompletionSuggestion {
+        val job = kotlin.coroutines.coroutineContext[Job]
+        val previous = activeJob.getAndSet(job)
+        if (previous != null && previous != job) {
+            previous.cancel()
+        }
+
         val editor = request.editor
         val document = editor.document
         val offset = editor.caretModel.offset
@@ -205,7 +218,7 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
 
     // ==================== 5. FIM 模式 LLM 调用 ====================
 
-    private fun callLlmFim(prefix: String, suffix: String): String? {
+    private suspend fun callLlmFim(prefix: String, suffix: String): String? {
         val settings = AiAgentSettings.getInstance()
         val baseUrl = settings.baseUrl
         val apiKey = settings.apiKey
@@ -235,7 +248,7 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
 
     // ==================== 6. Chat 模式 LLM 调用 ====================
 
-    private fun callLlmStreaming(prefix: String, suffix: String, languageContext: String): String? {
+    private suspend fun callLlmStreaming(prefix: String, suffix: String, languageContext: String): String? {
         val settings = AiAgentSettings.getInstance()
         val baseUrl = settings.baseUrl
         val apiKey = settings.apiKey
@@ -274,77 +287,75 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
         return executeStreamingRequest(request)
     }
 
-    private fun executeStreamingRequest(request: Request): String? {
-        return try {
-            val accumulated = StringBuilder()
-            val latch = CountDownLatch(1)
-            val errorRef = AtomicReference<String?>(null)
+    private suspend fun executeStreamingRequest(request: Request): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val accumulated = StringBuilder()
 
-            val call = httpClient.newCall(request)
-            val response = call.execute()
+                val call = httpClient.newCall(request)
+                val response = call.execute()
 
-            if (!response.isSuccessful) {
-                response.close()
-                return null
-            }
-
-            val reader = BufferedReader(InputStreamReader(response.body!!.byteStream(), StandardCharsets.UTF_8))
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val dataLine = line ?: continue
-                if (!dataLine.startsWith("data:")) continue
-                val data = dataLine.removePrefix("data:").trim()
-                if (data == "[DONE]") {
-                    latch.countDown()
-                    break
+                if (!response.isSuccessful) {
+                    response.close()
+                    return@withContext null
                 }
 
-                try {
-                    val json = JsonParser.parseString(data).asJsonObject
-                    if (json.has("error") && !json.get("error").isJsonNull) {
-                        errorRef.set("API error in stream")
-                        latch.countDown()
-                        break
-                    }
+                val reader = BufferedReader(InputStreamReader(response.body!!.byteStream(), StandardCharsets.UTF_8))
+                var line: String?
+                var hasError = false
+                while (reader.readLine().also { line = it } != null) {
+                    val dataLine = line ?: continue
+                    if (!dataLine.startsWith("data:")) continue
+                    val data = dataLine.removePrefix("data:").trim()
+                    if (data == "[DONE]") break
 
-                    val choices = json.getAsJsonArray("choices") ?: continue
-                    if (choices.size() == 0) continue
-                    val choice = choices[0].asJsonObject
-
-                    if (choice.has("text")) {
-                        accumulated.append(choice.get("text").asString)
-                    } else {
-                        val delta = choice.getAsJsonObject("delta") ?: continue
-                        if (delta.has("content") && !delta.get("content").isJsonNull) {
-                            accumulated.append(delta.get("content").asString)
+                    try {
+                        val json = JsonParser.parseString(data).asJsonObject
+                        if (json.has("error") && !json.get("error").isJsonNull) {
+                            hasError = true
+                            break
                         }
+
+                        val choices = json.getAsJsonArray("choices") ?: continue
+                        if (choices.size() == 0) continue
+                        val choice = choices[0].asJsonObject
+
+                        if (choice.has("text")) {
+                            accumulated.append(choice.get("text").asString)
+                        } else {
+                            val delta = choice.getAsJsonObject("delta") ?: continue
+                            if (delta.has("content") && !delta.get("content").isJsonNull) {
+                                accumulated.append(delta.get("content").asString)
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // skip unparseable lines
                     }
-                } catch (_: Exception) {
-                    // skip unparseable lines
                 }
-            }
-            reader.close()
-            response.close()
+                reader.close()
+                response.close()
 
-            if (errorRef.get() != null) {
-                LOG.warn("Streaming completion error: ${errorRef.get()}")
-                return null
-            }
+                if (hasError) {
+                    LOG.warn("Streaming completion error: API error in stream")
+                    return@withContext null
+                }
 
-            val result = accumulated.toString().trim()
-            if (result.isEmpty()) null else result
-        } catch (e: Exception) {
-            LOG.warn("LLM streaming completion call failed", e)
-            null
+                val result = accumulated.toString().trim()
+                if (result.isEmpty()) null else result
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                LOG.warn("LLM streaming completion call failed", e)
+                null
+            }
         }
     }
 
     // ==================== 7. 提示词构建 ====================
 
     private fun buildPrompt(prefix: String, suffix: String, languageContext: String): String {
-        val template = loadTemplate("templates/completion_prompt.vm")
         val suffixPart = if (suffix.isNotEmpty()) suffix else ""
-        return template
+        return completionPromptTemplate
             .replace("\${languageContext}", languageContext)
             .replace("\${prefix}", prefix)
             .replace("\${suffix}", suffixPart)
