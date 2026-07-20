@@ -801,29 +801,46 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Send Message ==========
 
     private void sendMessage(String text, List<ChatMessage.ImageContent> images) {
-        if (text == null || text.trim().isEmpty()) return;
+        boolean hasText = text != null && !text.trim().isEmpty();
+        boolean hasImages = images != null && !images.isEmpty();
+        if (!hasText && !hasImages) {
+            // Nothing to send. If the frontend already switched to the "thinking" state
+            // before invoking us, resolve it now so the UI doesn't get stuck spinning.
+            pushComplete();
+            return;
+        }
+        String messageText = hasText ? text : "";
 
         String sessionId = agentService.getActiveSessionId();
-        if (sessionId == null) return;
-
-        // 记忆相关的指令（记住/忘了/我上次说的...）在本地直接处理，不进入 LLM 对话流程
-        Optional<String> memoryReply = memoryCommandHandler.tryHandle(text);
-        if (memoryReply.isPresent()) {
-            respondWithMemoryCommand(sessionId, text, memoryReply.get());
+        if (sessionId == null) {
+            pushComplete();
             return;
         }
 
+        // 记忆相关的指令（记住/忘了/我上次说的...）在本地直接处理，不进入 LLM 对话流程
+        // 纯图片消息没有文本，不可能匹配记忆指令，故仅在有文本时尝试
+        if (hasText) {
+            Optional<String> memoryReply = memoryCommandHandler.tryHandle(text);
+            if (memoryReply.isPresent()) {
+                respondWithMemoryCommand(sessionId, text, memoryReply.get());
+                return;
+            }
+        }
+
         SessionState sessionState = sessionStates.computeIfAbsent(sessionId, k -> new SessionState());
-        if (sessionState.isProcessing) return;
+        if (sessionState.isProcessing) {
+            pushComplete();
+            return;
+        }
 
         sessionState.isProcessing = true;
         sessionState.accumulatedContent = new StringBuilder();
         sessionState.startTime = System.currentTimeMillis();
         sessionState.lastUsage = null;
-        sessionState.chatEntries.add(ChatEntry.user(text));
+        sessionState.chatEntries.add(ChatEntry.user(messageText));
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            agentService.sendMessage(sessionId, text, images, new AgentService.AgentListener() {
+            agentService.sendMessage(sessionId, messageText, images, new AgentService.AgentListener() {
 
                 @Override
                 public void onThinking() {
