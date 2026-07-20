@@ -2,9 +2,11 @@ package com.taiwei.aiagent.tool.impl;
 
 import com.google.gson.Gson;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.diff.DiffEntry;
@@ -224,6 +226,9 @@ public class FileReplaceTool implements Tool {
 
     private ExecuteContext prepareExecute(String filePath) throws Exception {
         Path resolved = resolvePath(filePath);
+        if (!isPathAllowed(resolved)) {
+            throw new Exception("用户拒绝了项目目录之外的写入操作 - " + resolved);
+        }
         if (!Files.exists(resolved)) {
             throw new Exception("文件不存在 - " + resolved);
         }
@@ -235,20 +240,30 @@ public class FileReplaceTool implements Tool {
     }
 
     private void writeAndRecordDiff(Path resolved, String oldContent, String newContent) throws Exception {
-        Files.writeString(resolved, newContent, StandardCharsets.UTF_8);
-
         DiffEntry diffEntry = new DiffEntry(resolved.toString(), oldContent, newContent);
         DiffReviewService.getInstance(project).addDiff(diffEntry);
 
+        // 通过 Document + WriteCommandAction 写入，保留 Undo 栈，且不丢弃编辑器中未保存的修改
+        // 必须在 EDT 线程执行，因为 VFS/Document API 要求 EDT 访问
+        final String[] error = new String[1];
         ApplicationManager.getApplication().invokeAndWait(() -> {
             VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
-            if (vFile != null) {
-                Document document = FileDocumentManager.getInstance().getDocument(vFile);
-                if (document != null) {
-                    FileDocumentManager.getInstance().reloadFromDisk(document);
-                }
+            if (vFile == null) {
+                error[0] = "无法定位虚拟文件 - " + resolved;
+                return;
             }
+            Document document = FileDocumentManager.getInstance().getDocument(vFile);
+            if (document == null) {
+                error[0] = "无法获取文档 - " + resolved;
+                return;
+            }
+            WriteCommandAction.runWriteCommandAction(project, () -> document.setText(newContent));
+            vFile.refresh(false, false);
         });
+
+        if (error[0] != null) {
+            throw new Exception(error[0]);
+        }
     }
 
     private int countOccurrences(String content, String target) {
@@ -284,6 +299,33 @@ public class FileReplaceTool implements Tool {
             return Paths.get(basePath, filePath);
         }
         return path;
+    }
+
+    /**
+     * 校验路径是否在项目目录内；若在外部，则弹窗询问用户是否允许写入
+     */
+    private boolean isPathAllowed(Path resolved) {
+        String basePath = project.getBasePath();
+        if (basePath == null) {
+            return true;
+        }
+        Path projectBasePath = Paths.get(basePath).normalize();
+        Path normalizedResolved = resolved.normalize();
+        if (normalizedResolved.startsWith(projectBasePath)) {
+            return true;
+        }
+
+        final boolean[] allowed = new boolean[1];
+        ApplicationManager.getApplication().invokeAndWait(() -> {
+            int result = Messages.showYesNoDialog(
+                    project,
+                    "文件 " + normalizedResolved + " 位于项目目录之外，是否允许写入？",
+                    "路径超出项目范围",
+                    Messages.getWarningIcon()
+            );
+            allowed[0] = result == Messages.YES;
+        });
+        return allowed[0];
     }
 
     private static class ExecuteContext {
