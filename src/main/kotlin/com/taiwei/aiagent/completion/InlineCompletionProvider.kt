@@ -37,11 +37,13 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
         private const val DEBOUNCE_MS = 300L
 
         private val STOP_PATTERNS = listOf(
+            // LLM wrapped the completion in a markdown code block; the fence marks the end
             "\n```",
-            "\n// ",
-            "\n# ",
+            // LLM appended a prose explanation after the code — not part of the completion
             "\nExplanation",
+            // LLM appended an inline note after the code — not part of the completion
             "\nNote:",
+            // Chinese equivalents of "Note" / "Explanation" from LLM prose output
             "\n注意",
             "\n说明",
         )
