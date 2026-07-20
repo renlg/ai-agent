@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * OpenAI 兼容的 LLM 客户端实现
@@ -97,6 +98,7 @@ public class OpenAiLlmClient implements LlmClient {
             private final Map<Integer, StringBuilder> toolCallIdMap = new ConcurrentHashMap<>();
             private final Map<Integer, StringBuilder> toolCallNameMap = new ConcurrentHashMap<>();
             private final Map<Integer, StringBuilder> toolCallArgsMap = new ConcurrentHashMap<>();
+            private final AtomicInteger chunkCount = new AtomicInteger(0);
 
             @Override
             public void onOpen(EventSource eventSource, Response response) {
@@ -106,9 +108,11 @@ public class OpenAiLlmClient implements LlmClient {
 
             @Override
             public void onEvent(EventSource eventSource, String id, String type, String data) {
-                LOG.info("SSE onEvent 收到数据: " + (data.length() > 500 ? data.substring(0, 500) + "..." : data));
+                LOG.debug("SSE onEvent 收到数据: " + (data.length() > 500 ? data.substring(0, 500) + "..." : data));
+                chunkCount.incrementAndGet();
 
                 if ("[DONE]".equals(data)) {
+                    LOG.info("chatStream 结束 - model=" + model + ", chunks=" + chunkCount.get());
                     // 如果有累积的工具调用，回调
                     flushToolCalls(listener);
                     listener.onComplete();

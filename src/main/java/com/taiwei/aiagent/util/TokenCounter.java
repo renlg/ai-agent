@@ -89,33 +89,42 @@ public class TokenCounter {
         if (messages == null || messages.isEmpty()) {
             return 0;
         }
-        Encoding encoding = getEncoding(modelName);
         int total = 0;
         for (ChatMessage msg : messages) {
-            total += 4; // 每条消息的固定 overhead（role、分隔符等）
-            String content = msg.getContent();
-            if (content != null && !content.isEmpty()) {
-                total += encoding.countTokens(content);
-            }
-            // 工具调用参数也占 token
-            if (msg.getToolCalls() != null) {
-                for (ChatMessage.ToolCall tc : msg.getToolCalls()) {
-                    if (tc.getFunction() != null) {
-                        if (tc.getFunction().getName() != null) {
-                            total += encoding.countTokens(tc.getFunction().getName());
-                        }
-                        if (tc.getFunction().getArguments() != null) {
-                            total += encoding.countTokens(tc.getFunction().getArguments());
-                        }
+            total += countMessageTokens(msg, modelName);
+        }
+        total += 3; // 每次请求的 priming tokens
+        return total;
+    }
+
+    /**
+     * 计算单条消息的 Token 数（含该消息自身的 overhead），不含请求级别的 priming tokens。
+     * 供 Conversation 做增量/缓存计数时按消息复用。
+     */
+    public static int countMessageTokens(ChatMessage msg, String modelName) {
+        Encoding encoding = getEncoding(modelName);
+        int total = 4; // 每条消息的固定 overhead（role、分隔符等）
+        String content = msg.getContent();
+        if (content != null && !content.isEmpty()) {
+            total += encoding.countTokens(content);
+        }
+        // 工具调用参数也占 token
+        if (msg.getToolCalls() != null) {
+            for (ChatMessage.ToolCall tc : msg.getToolCalls()) {
+                if (tc.getFunction() != null) {
+                    if (tc.getFunction().getName() != null) {
+                        total += encoding.countTokens(tc.getFunction().getName());
+                    }
+                    if (tc.getFunction().getArguments() != null) {
+                        total += encoding.countTokens(tc.getFunction().getArguments());
                     }
                 }
             }
-            // 工具返回结果
-            if (msg.getToolCallId() != null) {
-                total += 2; // tool_call_id overhead
-            }
         }
-        total += 3; // 每次请求的 priming tokens
+        // 工具返回结果
+        if (msg.getToolCallId() != null) {
+            total += 2; // tool_call_id overhead
+        }
         return total;
     }
 

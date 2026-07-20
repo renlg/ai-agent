@@ -1,5 +1,6 @@
 package com.taiwei.aiagent.diff;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
@@ -26,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class DiffHighlighter {
 
-    private static final int LARGE_FILE_THRESHOLD = 5000;
+    private static final int LARGE_FILE_THRESHOLD = 2000;
 
     private final Project project;
     private final Map<String, List<RangeHighlighter>> highlightersByFile = new ConcurrentHashMap<>();
@@ -78,12 +79,28 @@ public class DiffHighlighter {
      */
     public void applyHighlight(@NotNull Document document,
                                @NotNull String oldContent, @NotNull String newContent) {
-        // Clear existing highlights for this document
+        // Clear existing highlights immediately: cheap, and callers expect stale highlights
+        // gone right away (they're already on the EDT when calling this method).
         clearHighlight(document);
 
         String fileKey = getFileKey(document);
-        List<DiffLine> diffLines = computeDiff(oldContent, newContent);
 
+        // computeDiff() (LCS) is O(m*n) and can noticeably freeze the UI for large files.
+        // Run it off the EDT, then post the (fast) markup-model updates back to the EDT.
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            List<DiffLine> diffLines = computeDiff(oldContent, newContent);
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (project.isDisposed()) return;
+                renderDiffLines(document, fileKey, diffLines);
+            });
+        });
+    }
+
+    /**
+     * Applies pre-computed diff lines as range highlighters / inlays on the document.
+     * Must run on the EDT (MarkupModel and Inlay APIs are not thread-safe).
+     */
+    private void renderDiffLines(Document document, String fileKey, List<DiffLine> diffLines) {
         MarkupModel markupModel = DocumentMarkupModel.forDocument(document, project, true);
 
         List<RangeHighlighter> highlighters = new ArrayList<>();
@@ -193,18 +210,54 @@ public class DiffHighlighter {
 
     /**
      * Compute line-level diff using LCS algorithm.
-     * For files with >5000 lines, falls back to O(n) line-by-line comparison.
+     * For files with >2000 lines (after prefix/suffix trimming), falls back to O(n)
+     * line-by-line comparison instead of the O(m*n) LCS table.
      */
     public static List<DiffLine> computeDiff(@NotNull String oldContent, @NotNull String newContent) {
         String[] oldLines = oldContent.isEmpty() ? new String[0] : oldContent.split("\n", -1);
         String[] newLines = newContent.isEmpty() ? new String[0] : newContent.split("\n", -1);
 
-        // Large file optimization: use simple line-by-line comparison
-        if (oldLines.length > LARGE_FILE_THRESHOLD || newLines.length > LARGE_FILE_THRESHOLD) {
-            return computeSimpleDiff(oldLines, newLines);
+        int m = oldLines.length;
+        int n = newLines.length;
+        int maxCommon = Math.min(m, n);
+
+        // Trim common prefix/suffix first: unchanged head/tail lines never need to enter the
+        // LCS table (or the simple diff), shrinking the diff region to just what actually changed.
+        int prefixLen = 0;
+        while (prefixLen < maxCommon && oldLines[prefixLen].equals(newLines[prefixLen])) {
+            prefixLen++;
         }
 
-        return computeLcsDiff(oldLines, newLines);
+        int suffixLen = 0;
+        while (suffixLen < maxCommon - prefixLen
+                && oldLines[m - 1 - suffixLen].equals(newLines[n - 1 - suffixLen])) {
+            suffixLen++;
+        }
+
+        List<DiffLine> result = new ArrayList<>();
+        for (int i = 0; i < prefixLen; i++) {
+            result.add(new DiffLine(DiffLine.Type.EQUAL, oldLines[i], newLines[i], i, i));
+        }
+
+        String[] oldMiddle = Arrays.copyOfRange(oldLines, prefixLen, m - suffixLen);
+        String[] newMiddle = Arrays.copyOfRange(newLines, prefixLen, n - suffixLen);
+
+        // Large file optimization: use simple line-by-line comparison
+        List<DiffLine> middleDiff = (oldMiddle.length > LARGE_FILE_THRESHOLD || newMiddle.length > LARGE_FILE_THRESHOLD)
+                ? computeSimpleDiff(oldMiddle, newMiddle)
+                : computeLcsDiff(oldMiddle, newMiddle);
+
+        for (DiffLine dl : middleDiff) {
+            result.add(new DiffLine(dl.type, dl.oldLine, dl.newLine, dl.oldLineNum + prefixLen, dl.newLineNum + prefixLen));
+        }
+
+        for (int i = 0; i < suffixLen; i++) {
+            int oldIdx = m - suffixLen + i;
+            int newIdx = n - suffixLen + i;
+            result.add(new DiffLine(DiffLine.Type.EQUAL, oldLines[oldIdx], newLines[newIdx], oldIdx, newIdx));
+        }
+
+        return result;
     }
 
     /**

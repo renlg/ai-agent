@@ -41,6 +41,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 public class ChatPanel extends JPanel implements Disposable {
@@ -62,6 +66,17 @@ public class ChatPanel extends JPanel implements Disposable {
     private final Map<String, PendingCommand> pendingCommands = new ConcurrentHashMap<>();
     private final Runnable settingsChangeListener = this::onSettingsChanged;
     private volatile boolean isCompressing = false;
+
+    // P2: aggregate streamed content chunks and flush to JS at most once per window,
+    // instead of one executeJavaScript() call per LLM token/delta.
+    private static final long CONTENT_FLUSH_WINDOW_MS = 75;
+    private final ScheduledExecutorService contentFlushExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "ai-agent-content-flush");
+        t.setDaemon(true);
+        return t;
+    });
+    private final StringBuilder pendingContentBuffer = new StringBuilder();
+    private final AtomicBoolean flushScheduled = new AtomicBoolean(false);
 
     public ChatPanel(Project project) {
         this.project = project;
@@ -610,7 +625,38 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void pushContent(String content) {
-        pushToJs("appendContent", escapeJsString(content));
+        synchronized (pendingContentBuffer) {
+            pendingContentBuffer.append(content);
+        }
+        if (flushScheduled.compareAndSet(false, true)) {
+            contentFlushExecutor.schedule(this::flushContentBuffer, CONTENT_FLUSH_WINDOW_MS, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    /** Scheduled flush: sends the accumulated batch (if any) as a single appendContent call. */
+    private void flushContentBuffer() {
+        String batch;
+        synchronized (pendingContentBuffer) {
+            if (pendingContentBuffer.length() == 0) {
+                flushScheduled.set(false);
+                return;
+            }
+            batch = pendingContentBuffer.toString();
+            pendingContentBuffer.setLength(0);
+        }
+        flushScheduled.set(false);
+        pushToJs("appendContent", escapeJsString(batch));
+    }
+
+    /** Immediately flushes any pending content so onComplete/onError never race a delayed batch. */
+    private void flushContentBufferNow() {
+        String batch;
+        synchronized (pendingContentBuffer) {
+            if (pendingContentBuffer.length() == 0) return;
+            batch = pendingContentBuffer.toString();
+            pendingContentBuffer.setLength(0);
+        }
+        pushToJs("appendContent", escapeJsString(batch));
     }
 
     private void pushToolCallStart(String name, String args) {
@@ -622,10 +668,12 @@ public class ChatPanel extends JPanel implements Disposable {
     }
 
     private void pushComplete() {
+        flushContentBufferNow();
         pushToJs("onComplete", "");
     }
 
     private void pushError(String error) {
+        flushContentBufferNow();
         pushToJs("onError", escapeJsString(error));
     }
 
@@ -1116,6 +1164,7 @@ public class ChatPanel extends JPanel implements Disposable {
     @Override
     public void dispose() {
         AiAgentSettings.getInstance().removeChangeListener(settingsChangeListener);
+        contentFlushExecutor.shutdownNow();
         if (jsQuery != null) {
             Disposer.dispose(jsQuery);
         }

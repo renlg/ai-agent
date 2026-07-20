@@ -1,9 +1,14 @@
 package com.taiwei.aiagent.model;
 
+import com.taiwei.aiagent.util.TokenCounter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.WeakHashMap;
 
 /**
  * 会话模型
@@ -35,6 +40,13 @@ public class Conversation {
      * 会话创建时间戳
      */
     private long createdAt;
+
+    /**
+     * 每条消息 Token 数缓存（按对象身份，弱引用避免旧消息对象被缓存钉住无法回收）。
+     * 配合 getTotalTokenCount() 实现增量计数：已缓存的消息不重新计数。
+     */
+    private final Map<ChatMessage, Integer> tokenCountCache = new WeakHashMap<>();
+    private String tokenCacheModel;
 
     public Conversation() {
         this.id = UUID.randomUUID().toString();

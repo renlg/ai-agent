@@ -17,6 +17,8 @@
     var pendingImages = [];
     var visionCapable = false;
     var safetyTimeoutId = null; // 安全超时定时器，防止 UI 永久卡住
+    var pendingChunks = []; // 待写入 DOM 的流式文本片段，按 rAF 节流批量刷新
+    var flushRafId = null;
 
     /* ===== DOM refs ===== */
     var messagesArea, welcomeScreen, messageInput, sendBtn, inputWrapper;
@@ -279,26 +281,39 @@
 
     /* ===== Java -> JS API ===== */
 
+    // 将 DOM 写入从「每个 chunk 一次」降为「每帧一次」，避免高频流式文本导致频繁重排/重绘
+    function flushPendingChunks() {
+        flushRafId = null;
+        if (pendingChunks.length === 0) return;
+        var content = pendingChunks.join('');
+        pendingChunks = [];
+
+        accumulatedContent += content;
+
+        if (currentAssistantEl && currentContentEl) {
+            // 纯文本增量追加，不触发 Markdown 渲染
+            currentContentEl.textContent += content;
+            scrollToBottom();
+            return;
+        }
+
+        // 首次：创建 assistant 消息框（不关闭 thinking 动画，等 onComplete/onError 时再关闭）
+        removeWelcome();
+
+        var msg = createMessageEl('assistant', 'AI');
+        currentAssistantEl = msg;
+        currentContentEl = msg.querySelector('.message-content');
+        // 初始内容用 textContent 设置
+        currentContentEl.textContent = accumulatedContent;
+        scrollToBottom();
+    }
+
     window.appendContent = function (content) {
         whenReady(function () {
-            accumulatedContent += content;
-
-            if (currentAssistantEl && currentContentEl) {
-                // 纯文本增量追加，不触发 Markdown 渲染
-                currentContentEl.textContent += content;
-                scrollToBottom();
-                return;
+            pendingChunks.push(content);
+            if (flushRafId === null) {
+                flushRafId = requestAnimationFrame(flushPendingChunks);
             }
-
-            // 首次：创建 assistant 消息框（不关闭 thinking 动画，等 onComplete/onError 时再关闭）
-            removeWelcome();
-
-            var msg = createMessageEl('assistant', 'AI');
-            currentAssistantEl = msg;
-            currentContentEl = msg.querySelector('.message-content');
-            // 初始内容用 textContent 设置
-            currentContentEl.textContent = accumulatedContent;
-            scrollToBottom();
         });
     };
 
@@ -484,7 +499,14 @@
             isProcessing = false;
             setButtonToSend();
             sendBtn.disabled = false;
-            
+
+            // 确保所有排队的 chunk 都已写入 accumulatedContent，再做最终渲染
+            if (flushRafId !== null) {
+                cancelAnimationFrame(flushRafId);
+                flushRafId = null;
+            }
+            flushPendingChunks();
+
             // 流式完成后做一次完整 Markdown 渲染
             if (currentContentEl && accumulatedContent.length > 0) {
                 currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
@@ -506,6 +528,14 @@
             }
             removeThinking();
             removeRoundLoading();
+
+            // 确保所有排队的 chunk 都已写入 accumulatedContent，再做最终渲染
+            if (flushRafId !== null) {
+                cancelAnimationFrame(flushRafId);
+                flushRafId = null;
+            }
+            flushPendingChunks();
+
             // 先做最终 Markdown 渲染
             if (currentContentEl && accumulatedContent.length > 0) {
                 currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
@@ -870,6 +900,11 @@
         currentAssistantEl = null;
         currentContentEl = null;
         accumulatedContent = '';
+        if (flushRafId !== null) {
+            cancelAnimationFrame(flushRafId);
+            flushRafId = null;
+        }
+        pendingChunks = [];
         isProcessing = false;
         totalUsedTokens = 0;
         setButtonToSend();
