@@ -110,9 +110,11 @@ public class RunCommandTool implements Tool {
 
             // 创建包装脚本：在终端中可见执行，同时捕获输出到文件
             Path scriptFile = tempDir.resolve("run-" + uniqueId + ".sh");
+            // Single quotes prevent ALL shell expansion ($, backticks, globbing) in the display line — prevents command injection
+            String escapedCmd = command.replace("'", "'\\''");
             String scriptContent = "#!/bin/sh\n"
                     + "cd " + shellEscape(basePath) + " || exit 1\n"
-                    + "echo \"[$(pwd)] $ " + command.replace("\"", "\\\"") + "\"\n"
+                    + "printf '[%s] $ %s\\n' \"$(pwd)\" '" + escapedCmd + "'\n"
                     + "(" + command + ") 2>&1 | tee " + shellEscape(outputFile.toString()) + "\n"
                     + "echo $? > " + shellEscape(doneFile.toString()) + "\n";
             Files.writeString(scriptFile, scriptContent, StandardCharsets.UTF_8);
