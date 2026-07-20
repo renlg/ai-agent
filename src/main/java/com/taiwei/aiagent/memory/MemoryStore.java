@@ -82,6 +82,8 @@ public class MemoryStore implements AutoCloseable {
                 st.execute("CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance)");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_memories_last_accessed ON memories(last_accessed_at)");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories(tags)");
+                st.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(" +
+                        "id UNINDEXED, content, tags)");
             }
         }
     }
@@ -98,6 +100,7 @@ public class MemoryStore implements AutoCloseable {
             } catch (SQLException e) {
                 throw new IllegalStateException("Failed to insert memory: " + entry.getId(), e);
             }
+            insertFts(entry.getId(), entry.getContent(), GSON.toJson(entry.getTags()));
         }
     }
 
@@ -112,6 +115,8 @@ public class MemoryStore implements AutoCloseable {
             } catch (SQLException e) {
                 throw new IllegalStateException("Failed to update memory: " + entry.getId(), e);
             }
+            deleteFtsById(entry.getId());
+            insertFts(entry.getId(), entry.getContent(), GSON.toJson(entry.getTags()));
         }
     }
 
@@ -119,7 +124,11 @@ public class MemoryStore implements AutoCloseable {
         synchronized (lock) {
             try (PreparedStatement ps = connection.prepareStatement("DELETE FROM memories WHERE id=?")) {
                 ps.setString(1, id);
-                return ps.executeUpdate() > 0;
+                boolean deleted = ps.executeUpdate() > 0;
+                if (deleted) {
+                    deleteFtsById(id);
+                }
+                return deleted;
             } catch (SQLException e) {
                 throw new IllegalStateException("Failed to delete memory: " + id, e);
             }
@@ -175,19 +184,67 @@ public class MemoryStore implements AutoCloseable {
 
     public List<MemoryEntry> searchByKeyword(String keyword) {
         synchronized (lock) {
+            List<String> tokens = new ArrayList<>();
+            for (String token : keyword.split("[^\\p{IsHan}\\p{L}\\p{N}]+")) {
+                if (token.length() >= 2) {
+                    tokens.add("\"" + token.replace("\"", "") + "\"");
+                }
+            }
+            if (tokens.isEmpty()) return List.of();
+            String ftsQuery = String.join(" OR ", tokens);
+
+            String sql = "SELECT m.* FROM memories m " +
+                    "JOIN memories_fts fts ON m.id = fts.id " +
+                    "WHERE memories_fts MATCH ? ORDER BY m.updated_at DESC";
             List<MemoryEntry> result = new ArrayList<>();
-            String pattern = "%" + keyword + "%";
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "SELECT * FROM memories WHERE content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC")) {
-                ps.setString(1, pattern);
-                ps.setString(2, pattern);
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setString(1, ftsQuery);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) result.add(mapRow(rs));
                 }
             } catch (SQLException e) {
-                throw new IllegalStateException("Failed to search memories by keyword: " + keyword, e);
+                LOG.warn("FTS5 search failed, falling back to LIKE: " + e.getMessage());
+                return searchByKeywordFallback(keyword);
             }
             return result;
+        }
+    }
+
+    private List<MemoryEntry> searchByKeywordFallback(String keyword) {
+        List<MemoryEntry> result = new ArrayList<>();
+        String pattern = "%" + keyword + "%";
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT * FROM memories WHERE content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC")) {
+            ps.setString(1, pattern);
+            ps.setString(2, pattern);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) result.add(mapRow(rs));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to search memories by keyword: " + keyword, e);
+        }
+        return result;
+    }
+
+    private void insertFts(String id, String content, String tags) {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "INSERT INTO memories_fts(id, content, tags) VALUES (?, ?, ?)")) {
+            ps.setString(1, id);
+            ps.setString(2, content);
+            ps.setString(3, tags);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            LOG.warn("Failed to insert FTS entry for: " + id, e);
+        }
+    }
+
+    private void deleteFtsById(String id) {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "DELETE FROM memories_fts WHERE id = ?")) {
+            ps.setString(1, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            LOG.warn("Failed to delete FTS entry for: " + id, e);
         }
     }
 

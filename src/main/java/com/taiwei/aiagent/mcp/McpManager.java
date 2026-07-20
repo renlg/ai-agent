@@ -11,14 +11,16 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Project-level MCP 连接管理器：按配置建立/维护 {@link McpClient} 连接，
  * 并将各服务器暴露的工具适配为 {@link McpToolAdapter} 供 Agent 使用。
- * 首次调用 {@link #getActiveTools()} 时才会惰性启动所有已启用的连接，
- * 而不是在项目打开时立即连接。
+ * 所有连接启动操作异步执行，不阻塞调用线程。
  */
 public class McpManager implements Disposable {
 
@@ -27,10 +29,18 @@ public class McpManager implements Disposable {
     private final Project project;
     private final ConcurrentHashMap<String, Connection> connections = new ConcurrentHashMap<>();
     private final ReentrantLock lifecycleLock = new ReentrantLock();
-    private volatile boolean startedOnce = false;
+    private final ExecutorService initExecutor;
+    private volatile CompletableFuture<Void> initFuture;
 
     public McpManager(@NotNull Project project) {
         this.project = project;
+        this.initExecutor = Executors.newFixedThreadPool(
+                Math.max(1, Runtime.getRuntime().availableProcessors() / 2),
+                r -> {
+                    Thread t = new Thread(r, "taiwei-mcp-init");
+                    t.setDaemon(true);
+                    return t;
+                });
     }
 
     public static McpManager getInstance(@NotNull Project project) {
@@ -38,17 +48,21 @@ public class McpManager implements Disposable {
     }
 
     /**
-     * 启动所有已启用且尚未连接的 MCP 服务器。幂等：已连接的服务器不会被重复启动。
+     * 异步启动所有已启用且尚未连接的 MCP 服务器。立即返回，不阻塞调用线程。
      */
     public void startAll() {
         lifecycleLock.lock();
         try {
-            startedOnce = true;
-            for (AiAgentSettings.McpConfig config : AiAgentSettings.getInstance().getMcpConfigs()) {
-                if (config.enabled && !connections.containsKey(config.name)) {
-                    doStart(config);
-                }
+            if (initFuture != null && !initFuture.isDone()) {
+                return;
             }
+            initFuture = CompletableFuture.runAsync(() -> {
+                for (AiAgentSettings.McpConfig config : AiAgentSettings.getInstance().getMcpConfigs()) {
+                    if (config.enabled && !connections.containsKey(config.name)) {
+                        doStart(config);
+                    }
+                }
+            }, initExecutor);
         } finally {
             lifecycleLock.unlock();
         }
@@ -69,9 +83,24 @@ public class McpManager implements Disposable {
     }
 
     /**
-     * 启动（或重启）单个 MCP 服务器连接，并持久化到 {@link #connections}。
+     * 异步启动（或重启）单个 MCP 服务器连接。立即返回，不阻塞调用线程。
      */
-    public McpInitResult startConnection(AiAgentSettings.McpConfig config) {
+    public void startConnection(AiAgentSettings.McpConfig config) {
+        CompletableFuture.runAsync(() -> {
+            lifecycleLock.lock();
+            try {
+                doStop(config.name);
+                doStart(config);
+            } finally {
+                lifecycleLock.unlock();
+            }
+        }, initExecutor);
+    }
+
+    /**
+     * 同步启动（或重启）单个 MCP 服务器连接并等待结果。用于测试连接等需要立即获取结果的场景。
+     */
+    public McpInitResult startConnectionSync(AiAgentSettings.McpConfig config) {
         lifecycleLock.lock();
         try {
             doStop(config.name);
@@ -113,10 +142,10 @@ public class McpManager implements Disposable {
 
     /**
      * 获取所有已连接服务器暴露的工具（已按 disabledTools 过滤）。
-     * 首次调用时惰性启动所有已启用的服务器。
+     * 首次调用时异步启动所有未连接的服务器，立即返回当前已连接的工具列表。
      */
     public List<McpToolAdapter> getActiveTools() {
-        if (!startedOnce) {
+        if (connections.isEmpty()) {
             startAll();
         }
         List<McpToolAdapter> result = new ArrayList<>();
@@ -124,6 +153,13 @@ public class McpManager implements Disposable {
             result.addAll(conn.tools);
         }
         return result;
+    }
+
+    /**
+     * 等待所有初始化完成。主要用于测试。
+     */
+    public CompletableFuture<Void> getInitFuture() {
+        return initFuture;
     }
 
     private McpInitResult doStart(AiAgentSettings.McpConfig config) {
@@ -191,6 +227,7 @@ public class McpManager implements Disposable {
     @Override
     public void dispose() {
         stopAll();
+        initExecutor.shutdownNow();
     }
 
     private static final class Connection {

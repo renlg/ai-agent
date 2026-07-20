@@ -20,6 +20,7 @@ import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -34,6 +35,12 @@ public class PromptManager {
     private final VelocityEngine velocityEngine;
     private final SkillManager skillManager;
     private final MemoryManager memoryManager;
+    private final ConcurrentHashMap<String, String> templateCache = new ConcurrentHashMap<>();
+
+    private volatile String cachedPlatform;
+    private volatile String cachedWorkingDir;
+    private volatile String cachedIsGitRepo;
+    private volatile String cachedModel;
 
     public PromptManager(Project project) {
         this.project = project;
@@ -75,23 +82,11 @@ public class PromptManager {
     public String buildSystemPrompt(AgentMode mode, String userMessage) {
         VelocityContext context = new VelocityContext();
 
-        String basePath = project.getBasePath();
-        String workingDir = basePath != null ? basePath : "未知";
-        context.put("workingDir", workingDir);
-
-        boolean isGitRepo = basePath != null && new File(basePath, ".git").exists();
-        context.put("isGitRepo", isGitRepo ? "Yes" : "No");
-
-        context.put("platform", detectPlatform());
+        context.put("workingDir", getWorkingDir());
+        context.put("isGitRepo", getIsGitRepo());
+        context.put("platform", getPlatform());
         context.put("today", LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE));
-
-        String model;
-        try {
-            model = AiAgentSettings.getInstance().getModel();
-        } catch (Exception e) {
-            model = "未知";
-        }
-        context.put("model", model != null ? model : "未知");
+        context.put("model", getModel());
 
         String skillsContext = buildSkillsContext();
         if (skillsContext != null && !skillsContext.isEmpty()) {
@@ -211,16 +206,62 @@ public class PromptManager {
     }
 
     private String loadTemplateContent(String resourcePath) {
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
-            if (is == null) {
-                throw new RuntimeException("Template not found: " + resourcePath);
+        return templateCache.computeIfAbsent(resourcePath, path -> {
+            try (InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+                if (is == null) {
+                    throw new RuntimeException("Template not found: " + path);
+                }
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    return reader.lines().collect(Collectors.joining("\n"));
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to load template: " + path, e);
             }
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                return reader.lines().collect(Collectors.joining("\n"));
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load template: " + resourcePath, e);
+        });
+    }
+
+    private String getPlatform() {
+        String v = cachedPlatform;
+        if (v == null) {
+            v = detectPlatform();
+            cachedPlatform = v;
         }
+        return v;
+    }
+
+    private String getWorkingDir() {
+        String v = cachedWorkingDir;
+        if (v == null) {
+            String basePath = project.getBasePath();
+            v = basePath != null ? basePath : "未知";
+            cachedWorkingDir = v;
+        }
+        return v;
+    }
+
+    private String getIsGitRepo() {
+        String v = cachedIsGitRepo;
+        if (v == null) {
+            String basePath = project.getBasePath();
+            boolean isGit = basePath != null && new File(basePath, ".git").exists();
+            v = isGit ? "Yes" : "No";
+            cachedIsGitRepo = v;
+        }
+        return v;
+    }
+
+    private String getModel() {
+        String v = cachedModel;
+        if (v == null) {
+            try {
+                v = AiAgentSettings.getInstance().getModel();
+            } catch (Exception e) {
+                v = "未知";
+            }
+            if (v == null) v = "未知";
+            cachedModel = v;
+        }
+        return v;
     }
 
     private String detectPlatform() {

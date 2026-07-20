@@ -15,121 +15,216 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 会话磁盘持久化存储
- * 将最多 5 个最新会话以 JSON 格式保存到项目目录/.taiwei
+ * 每个会话单独存储为 {sessionId}.json，索引文件记录会话元数据
+ * 写入操作经过 debounce 合并，避免频繁磁盘 IO
  */
 public class SessionStore {
 
     private static final Logger LOG = Logger.getInstance(SessionStore.class);
     private static final int MAX_SESSIONS = 5;
     private static final String STORE_DIR = ".taiwei";
-    private static final String STORE_FILE = "sessions.json";
-    private static final String OLD_STORE_FILE = ".ai-agent-sessions.json";
+    private static final String SESSIONS_DIR = "sessions";
+    private static final String INDEX_FILE = "sessions_index.json";
+    private static final String OLD_STORE_FILE = "sessions.json";
+    private static final String LEGACY_STORE_FILE = ".ai-agent-sessions.json";
+    private static final long DEBOUNCE_DELAY_MS = 2000;
 
     private final Path storeDir;
-    private final Path filePath;
+    private final Path sessionsDir;
+    private final Path indexPath;
     private final Gson gson;
+    private final ScheduledExecutorService scheduler;
+    private volatile ScheduledFuture<?> pendingSave;
+    private volatile List<SessionData> pendingData;
 
     public SessionStore(String basePath) {
         this.storeDir = Paths.get(basePath, STORE_DIR);
-        this.filePath = storeDir.resolve(STORE_FILE);
+        this.sessionsDir = storeDir.resolve(SESSIONS_DIR);
+        this.indexPath = storeDir.resolve(INDEX_FILE);
         this.gson = new GsonBuilder().setPrettyPrinting().create();
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "taiwei-session-save");
+            t.setDaemon(true);
+            return t;
+        });
         migrateIfNeeded(basePath);
     }
 
-    /**
-     * 迁移旧存储文件到新路径
-     */
     private void migrateIfNeeded(String basePath) {
         try {
-            // 新路径已存在，无需迁移
-            if (Files.exists(filePath)) return;
+            if (Files.exists(indexPath)) return;
 
-            Path oldFile = Paths.get(basePath, OLD_STORE_FILE);
+            Path oldFile = Paths.get(basePath, STORE_DIR, OLD_STORE_FILE);
+            Path legacyFile = Paths.get(basePath, LEGACY_STORE_FILE);
             Path oldDotTaiwei = Paths.get(basePath, ".taiwei");
 
             Path source = null;
             if (Files.exists(oldFile)) {
                 source = oldFile;
+            } else if (Files.exists(legacyFile)) {
+                source = legacyFile;
             } else if (Files.exists(oldDotTaiwei) && Files.isRegularFile(oldDotTaiwei)) {
                 source = oldDotTaiwei;
             }
 
             if (source != null) {
-                Files.createDirectories(storeDir);
-                Files.copy(source, filePath);
+                String json = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+                Type type = new TypeToken<List<SessionData>>() {}.getType();
+                List<SessionData> sessions = gson.fromJson(json, type);
+                if (sessions != null && !sessions.isEmpty()) {
+                    Files.createDirectories(sessionsDir);
+                    List<IndexEntry> indexEntries = new ArrayList<>();
+                    for (SessionData sd : sessions) {
+                        writeSessionFile(sd);
+                        indexEntries.add(new IndexEntry(sd.id, sd.title, sd.createdAt,
+                                sd.mode, sd.modelIndex));
+                    }
+                    writeIndex(indexEntries);
+                }
                 Files.delete(source);
-                LOG.info("已迁移旧存储文件 " + source.getFileName() + " 到 " + filePath);
+                LOG.info("已迁移旧存储文件 " + source.getFileName() + " 到分文件存储");
             }
         } catch (IOException e) {
             LOG.warn("迁移旧存储文件失败: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * 保存会话列表到磁盘（最多保留 MAX_SESSIONS 个，超出时丢弃最旧的）
-     */
     public void save(List<SessionData> sessions) {
+        List<SessionData> toSave;
+        if (sessions.size() > MAX_SESSIONS) {
+            toSave = new ArrayList<>(sessions.subList(sessions.size() - MAX_SESSIONS, sessions.size()));
+        } else {
+            toSave = new ArrayList<>(sessions);
+        }
+
+        pendingData = toSave;
+        ScheduledFuture<?> prev = pendingSave;
+        if (prev != null && !prev.isDone()) {
+            prev.cancel(false);
+        }
+        pendingSave = scheduler.schedule(this::flushToDisk, DEBOUNCE_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void flushToDisk() {
+        List<SessionData> data = pendingData;
+        if (data == null) return;
         try {
-            List<SessionData> toSave;
-            if (sessions.size() > MAX_SESSIONS) {
-                toSave = new ArrayList<>(sessions.subList(sessions.size() - MAX_SESSIONS, sessions.size()));
-            } else {
-                toSave = new ArrayList<>(sessions);
+            Files.createDirectories(sessionsDir);
+
+            List<String> existingIds = new ArrayList<>();
+            if (Files.exists(sessionsDir)) {
+                File[] files = sessionsDir.toFile().listFiles((dir, name) -> name.endsWith(".json"));
+                if (files != null) {
+                    for (File f : files) {
+                        existingIds.add(f.getName().replace(".json", ""));
+                    }
+                }
             }
 
-            File parentDir = filePath.toFile().getParentFile();
-            if (parentDir != null && !parentDir.exists()) {
-                parentDir.mkdirs();
+            List<String> newIds = new ArrayList<>();
+            List<IndexEntry> indexEntries = new ArrayList<>();
+            for (SessionData sd : data) {
+                writeSessionFile(sd);
+                newIds.add(sd.id);
+                indexEntries.add(new IndexEntry(sd.id, sd.title, sd.createdAt,
+                        sd.mode, sd.modelIndex));
             }
 
-            String json = gson.toJson(toSave);
-            Files.write(filePath, json.getBytes(StandardCharsets.UTF_8));
-            LOG.info("已保存 " + toSave.size() + " 个会话到 " + filePath);
+            for (String oldId : existingIds) {
+                if (!newIds.contains(oldId)) {
+                    Files.deleteIfExists(sessionsDir.resolve(oldId + ".json"));
+                }
+            }
+
+            writeIndex(indexEntries);
+            LOG.info("已保存 " + data.size() + " 个会话到分文件存储");
         } catch (IOException e) {
             LOG.warn("保存会话失败失败: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * 从磁盘加载会话列表
-     */
+    private void writeSessionFile(SessionData sd) throws IOException {
+        String json = gson.toJson(sd);
+        Files.write(sessionsDir.resolve(sd.id + ".json"), json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void writeIndex(List<IndexEntry> entries) throws IOException {
+        String json = gson.toJson(entries);
+        Files.write(indexPath, json.getBytes(StandardCharsets.UTF_8));
+    }
+
     public List<SessionData> load() {
-        if (!Files.exists(filePath)) {
-            LOG.info("会话存储文件不存在，返回空列表");
+        if (!Files.exists(indexPath)) {
+            LOG.info("会话索引文件不存在，返回空列表");
             return Collections.emptyList();
         }
 
         try {
-            String json = new String(Files.readAllBytes(filePath), StandardCharsets.UTF_8);
-            Type type = new TypeToken<List<SessionData>>() {}.getType();
-            List<SessionData> sessions = gson.fromJson(json, type);
-            LOG.info("从 " + filePath + " 加载了 " + (sessions != null ? sessions.size() : 0) + " 个会话");
-            return sessions != null ? sessions : Collections.emptyList();
+            String indexJson = new String(Files.readAllBytes(indexPath), StandardCharsets.UTF_8);
+            Type indexType = new TypeToken<List<IndexEntry>>() {}.getType();
+            List<IndexEntry> indexEntries = gson.fromJson(indexJson, indexType);
+            if (indexEntries == null || indexEntries.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            List<SessionData> sessions = new ArrayList<>();
+            for (IndexEntry entry : indexEntries) {
+                Path sessionFile = sessionsDir.resolve(entry.id + ".json");
+                if (!Files.exists(sessionFile)) continue;
+
+                String sessionJson = new String(Files.readAllBytes(sessionFile), StandardCharsets.UTF_8);
+                SessionData sd = gson.fromJson(sessionJson, SessionData.class);
+                if (sd != null) {
+                    sessions.add(sd);
+                }
+            }
+            LOG.info("从分文件存储加载了 " + sessions.size() + " 个会话");
+            return sessions;
         } catch (IOException e) {
             LOG.warn("加载会话失败: " + e.getMessage(), e);
             return Collections.emptyList();
         }
     }
 
-    /**
-     * 删除指定会话并持久化（若存储文件存在）
-     */
     public void delete(String sessionId) {
-        List<SessionData> sessions = load();
-        sessions.removeIf(s -> sessionId.equals(s.id));
-        save(sessions);
+        try {
+            Path sessionFile = sessionsDir.resolve(sessionId + ".json");
+            Files.deleteIfExists(sessionFile);
+
+            if (Files.exists(indexPath)) {
+                String indexJson = new String(Files.readAllBytes(indexPath), StandardCharsets.UTF_8);
+                Type indexType = new TypeToken<List<IndexEntry>>() {}.getType();
+                List<IndexEntry> entries = gson.fromJson(indexJson, indexType);
+                if (entries != null) {
+                    entries.removeIf(e -> sessionId.equals(e.id));
+                    writeIndex(entries);
+                }
+            }
+        } catch (IOException e) {
+            LOG.warn("删除会话失败: " + e.getMessage(), e);
+        }
     }
 
-    /**
-     * 删除存储文件
-     */
     public void deleteStoreFile() {
         try {
-            Files.deleteIfExists(filePath);
-            LOG.info("已删除会话存储文件: " + filePath);
+            Files.deleteIfExists(indexPath);
+            if (Files.exists(sessionsDir)) {
+                File[] files = sessionsDir.toFile().listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        Files.deleteIfExists(f.toPath());
+                    }
+                }
+                Files.deleteIfExists(sessionsDir);
+            }
+            LOG.info("已删除会话存储: " + storeDir);
         } catch (IOException e) {
             LOG.warn("删除存储文件失败: " + e.getMessage(), e);
         }
@@ -137,14 +232,30 @@ public class SessionStore {
 
     // ========== 数据模型 ==========
 
+    private static class IndexEntry {
+        String id;
+        String title;
+        long createdAt;
+        String mode;
+        int modelIndex;
+
+        IndexEntry() {}
+
+        IndexEntry(String id, String title, long createdAt, String mode, int modelIndex) {
+            this.id = id;
+            this.title = title;
+            this.createdAt = createdAt;
+            this.mode = mode;
+            this.modelIndex = modelIndex;
+        }
+    }
+
     public static class SessionData {
         public String id;
         public String title;
         public long createdAt;
         public List<MessageData> messages;
-        /** Agent 模式（"plan" / "build"），null 表示未记录 */
         public String mode;
-        /** 模型索引，-1 表示使用全局默认 */
         public int modelIndex = -1;
 
         public SessionData() {}
@@ -175,7 +286,6 @@ public class SessionStore {
         public String toolResult;
         public String toolCallId;
         public List<ToolCallData> toolCalls;
-        /** 图片内容列表（视觉输入，仅 user 消息可能存在），null 表示无图片 */
         public List<ImageData> images;
 
         public MessageData() {}
@@ -192,9 +302,6 @@ public class SessionStore {
         }
     }
 
-    /**
-     * 图片内容（视觉输入）持久化数据
-     */
     public static class ImageData {
         public String base64Data;
         public String mimeType;

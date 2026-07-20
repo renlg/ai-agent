@@ -31,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class InlineActionToolbar {
 
@@ -59,6 +60,7 @@ public class InlineActionToolbar {
     private JWindow toolbarWindow;
     private Balloon resultBalloon;
     private volatile boolean processing = false;
+    private final AtomicReference<Call> currentCall = new AtomicReference<>();
 
     public InlineActionToolbar(Editor editor, Project project, String selectedText,
                                String filePath, String language) {
@@ -205,6 +207,11 @@ public class InlineActionToolbar {
     }
 
     private void executeAction(String action) {
+        Call previous = currentCall.getAndSet(null);
+        if (previous != null) {
+            previous.cancel();
+        }
+
         processing = true;
         String code = selectedText;
         if (code != null && code.length() > MAX_CODE_CHARS) {
@@ -301,9 +308,11 @@ public class InlineActionToolbar {
                 .post(RequestBody.create(requestBody.toString(), MediaType.parse("application/json")))
                 .build();
 
+        Call call = httpClient.newCall(request);
+        currentCall.set(call);
         try {
             StringBuilder accumulated = new StringBuilder();
-            Response response = httpClient.newCall(request).execute();
+            Response response = call.execute();
 
             if (!response.isSuccessful()) {
                 response.close();
@@ -314,6 +323,7 @@ public class InlineActionToolbar {
                     new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8));
             String line;
             while ((line = reader.readLine()) != null) {
+                if (call.isCanceled()) break;
                 if (!line.startsWith("data:")) continue;
                 String data = line.substring(5).trim();
                 if ("[DONE]".equals(data)) break;
@@ -336,6 +346,8 @@ public class InlineActionToolbar {
             return accumulated.toString().trim();
         } catch (Exception e) {
             return null;
+        } finally {
+            currentCall.compareAndSet(call, null);
         }
     }
 

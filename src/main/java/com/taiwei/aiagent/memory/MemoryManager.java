@@ -153,9 +153,10 @@ public class MemoryManager implements Disposable {
     private List<MemoryEntry> search(String text, int limit, boolean touch) {
         Set<String> tokens = tokenize(text);
         if (tokens.isEmpty()) return List.of();
-        // Full table scan kept intentionally: composite importance/recency/relevance scoring
-        // needs the full candidate set to rank correctly. Capped at 50 entries (ordered by
-        // importance and recency) to prevent unbounded memory usage as the DB grows.
+        List<MemoryEntry> ftsResults = store.searchByKeyword(text);
+        if (!ftsResults.isEmpty()) {
+            return scoreAndRank(tokens, ftsResults, limit, touch);
+        }
         return scoreAndRank(tokens, store.findAll(50), limit, touch);
     }
 
