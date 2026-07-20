@@ -17,6 +17,7 @@ import com.taiwei.aiagent.tool.impl.FindSymbolTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
+import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
 
 /**
@@ -75,7 +76,7 @@ public class AgentContext {
     /**
      * 根据当前设置创建 LLM 客户端，并关闭旧的缓存客户端
      */
-    private LlmClient createLlmClient() {
+    private synchronized LlmClient createLlmClient() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         String baseUrl = settings.getBaseUrl();
         String apiKey = settings.getApiKey();
@@ -207,8 +208,10 @@ public class AgentContext {
     /**
      * 动态获取 LLM 客户端
      * 配置未变时返回缓存实例，配置变更时重建并关闭旧客户端
+     * Synchronized to prevent a race where two threads simultaneously find no cached client
+     * and both call createLlmClient(), leaving one holding a closed connection pool.
      */
-    public LlmClient getLlmClient() {
+    public synchronized LlmClient getLlmClient() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         String baseUrl = settings.getBaseUrl();
         String apiKey = settings.getApiKey();
@@ -222,6 +225,17 @@ public class AgentContext {
         }
 
         return createLlmClient();
+    }
+
+    /**
+     * Close the cached LLM client and release its resources.
+     * Called when the owning AgentService is disposed on project close.
+     */
+    public synchronized void dispose() {
+        if (cachedClient != null) {
+            cachedClient.close();
+            cachedClient = null;
+        }
     }
 
     public PromptManager getPromptManager() {

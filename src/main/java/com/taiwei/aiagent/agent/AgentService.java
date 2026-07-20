@@ -2,6 +2,7 @@ package com.taiwei.aiagent.agent;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.agent.context.ContextMentionResolver;
@@ -31,7 +32,7 @@ import java.util.concurrent.TimeUnit;
  * 支持多会话管理
  * 支持危险命令审批流程和 IntelliJ Terminal API 执行
  */
-public class AgentService {
+public class AgentService implements Disposable {
 
     private static final Logger LOG = Logger.getInstance(AgentService.class);
 
@@ -377,6 +378,22 @@ public class AgentService {
      */
     public boolean isStopped() {
         return stopped;
+    }
+
+    /**
+     * Called by IntelliJ when the project closes.
+     * Shuts down the tool-executor thread pool and closes all cached LLM clients
+     * so their underlying HTTP connection pools are not leaked.
+     */
+    @Override
+    public void dispose() {
+        toolExecutor.shutdownNow();
+        for (SessionManager.SessionInfo info : sessionManager.listSessions()) {
+            AgentContext ctx = sessionManager.getContext(info.getId());
+            if (ctx != null) {
+                ctx.dispose();
+            }
+        }
     }
 
     /**
