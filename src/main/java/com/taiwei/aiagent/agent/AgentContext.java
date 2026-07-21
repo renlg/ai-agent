@@ -65,6 +65,14 @@ public class AgentContext {
     private int cumulativeCompletionTokens = 0;
     private int cumulativeTotalTokens = 0;
 
+    /** Session-scoped stop flag */
+    private volatile boolean stopped = false;
+    /** The LLM client being used by this session's current generation */
+    private volatile LlmClient activeLlmClient = null;
+    /** RunCommandTool instances currently active in this session */
+    private final java.util.concurrent.ConcurrentHashMap<String, RunCommandTool> activeRunCommandTools =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     public AgentContext(Project project) {
         this.project = project;
 
@@ -231,6 +239,45 @@ public class AgentContext {
      */
     public void resetConversation() {
         conversation.clear();
+    }
+
+    public void setStopped(boolean stopped) {
+        this.stopped = stopped;
+    }
+
+    public boolean isStopped() {
+        return stopped;
+    }
+
+    public LlmClient getActiveLlmClient() {
+        return activeLlmClient;
+    }
+
+    public void setActiveLlmClient(LlmClient client) {
+        this.activeLlmClient = client;
+    }
+
+    /**
+     * Stop this session's generation: set flag, cancel LLM client, stop all running command tools.
+     */
+    public void stop() {
+        this.stopped = true;
+        LlmClient client = this.activeLlmClient;
+        if (client != null) {
+            client.cancel();
+        }
+        for (RunCommandTool tool : activeRunCommandTools.values()) {
+            tool.stop();
+        }
+        activeRunCommandTools.clear();
+    }
+
+    public void registerRunCommandTool(String toolCallId, RunCommandTool tool) {
+        activeRunCommandTools.put(toolCallId, tool);
+    }
+
+    public void removeRunCommandTool(String toolCallId) {
+        activeRunCommandTools.remove(toolCallId);
     }
 
     // ========== Getters ==========

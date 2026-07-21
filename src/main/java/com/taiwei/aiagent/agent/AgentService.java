@@ -39,14 +39,11 @@ public class AgentService implements Disposable {
     private final SessionManager sessionManager;
     private final ApprovalManager approvalManager = new ApprovalManager();
     private final Project project;
-    private volatile boolean stopped = false;
-    private volatile LlmClient activeLlmClient = null;
     private final ExecutorService toolExecutor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "ai-agent-tool-" + r.hashCode());
         t.setDaemon(true);
         return t;
     });
-    private final ConcurrentHashMap<String, RunCommandTool> activeRunCommandTools = new ConcurrentHashMap<>();
 
     /**
      * 命令审批管理器
@@ -253,8 +250,8 @@ public class AgentService implements Disposable {
         // 基于当前用户消息检索相关长期记忆，重建系统提示词（就地替换，不影响已有对话历史）
         ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode(), augmentedMessage));
 
-        stopped = false;
-        activeLlmClient = ctx.getLlmClient();
+        ctx.setStopped(false);
+        ctx.setActiveLlmClient(ctx.getLlmClient());
 
         listener.onThinking();
 
@@ -262,7 +259,7 @@ public class AgentService implements Disposable {
         executeAgentLoop(ctx, listener);
 
         // 消息处理完成后持久化
-        activeLlmClient = null;
+        ctx.setActiveLlmClient(null);
         sessionManager.saveState();
     }
 
@@ -311,9 +308,9 @@ public class AgentService implements Disposable {
             request.add(ChatMessage.system("你是一名资深软件工程师，严格按照用户指示输出 AGENTS.md 正文内容，不要添加任何多余的解释或前后缀。"));
             request.add(ChatMessage.user(initPrompt));
 
-            stopped = false;
+            ctx.setStopped(false);
             LlmClient llmClient = ctx.getLlmClient();
-            activeLlmClient = llmClient;
+            ctx.setActiveLlmClient(llmClient);
 
             ctx.beginLlmRequest();
             LlmResponse response;
@@ -322,7 +319,7 @@ public class AgentService implements Disposable {
             } finally {
                 ctx.endLlmRequest();
             }
-            activeLlmClient = null;
+            ctx.setActiveLlmClient(null);
 
             if (response == null || !response.isSuccess() || response.getContent() == null || response.getContent().isEmpty()) {
                 String err = response != null ? response.getErrorMessage() : "LLM 未返回内容";
@@ -366,24 +363,19 @@ public class AgentService implements Disposable {
      * 停止当前正在进行的生成
      * 同时停止 LLM 调用和正在执行的工具调用
      */
-    public void stopGeneration() {
-        stopped = true;
-        LlmClient client = activeLlmClient;
-        if (client != null) {
-            client.cancel();
+    public void stopGeneration(String sessionId) {
+        AgentContext ctx = sessionManager.getContext(sessionId);
+        if (ctx != null) {
+            ctx.stop();
         }
-        // 停止所有正在执行的命令工具
-        for (RunCommandTool tool : activeRunCommandTools.values()) {
-            tool.stop();
-        }
-        activeRunCommandTools.clear();
     }
 
     /**
      * 检查是否已停止
      */
     public boolean isStopped() {
-        return stopped;
+        AgentContext ctx = sessionManager.getActiveContext();
+        return ctx != null && ctx.isStopped();
     }
 
     /**
@@ -432,7 +424,7 @@ public class AgentService implements Disposable {
         int[] lastPromptTokens = {0}; // 最近一次 LLM 返回的实际 promptTokens，用于压缩决策
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
-            if (stopped) {
+            if (context.isStopped()) {
                 LOG.info("Agent 循环被用户停止");
                 LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                 if (usage != null) listener.onUsage(usage);
@@ -508,7 +500,7 @@ public class AgentService implements Disposable {
             }
 
             // 用户点击停止：cancel 会触发 onFailure，但应视为正常结束
-            if (stopped) {
+            if (context.isStopped()) {
                 LOG.info("Agent 循环被用户停止");
                 LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                 if (usage != null) listener.onUsage(usage);
@@ -563,7 +555,7 @@ public class AgentService implements Disposable {
                                 handleRunCommand(context, toolCall, listener, toolResults), toolExecutor));
                     } else {
                         futures.add(CompletableFuture.runAsync(() -> {
-                            if (stopped) return; // Fix 6: 停止检查
+                            if (context.isStopped()) return; // Fix 6: 停止检查
                             try {
                                 Tool tool = registry.getTool(toolName);
                                 String result;
@@ -609,7 +601,7 @@ public class AgentService implements Disposable {
                 }
 
                 // 全部工具执行完成后，检查停止标志
-                if (stopped) {
+                if (context.isStopped()) {
                     LOG.info("Agent 循环被用户停止（工具执行后）");
                     LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                     if (usage != null) listener.onUsage(usage);
@@ -691,7 +683,7 @@ public class AgentService implements Disposable {
                     long approvalTimeout = 300;
                     long elapsed = 0;
                     while (elapsed < approvalTimeout) {
-                        if (stopped) {
+                        if (context.isStopped()) {
                             approvalManager.reject(toolCallId);
                             String err = "命令执行已被用户停止";
                             listener.onToolCallEnd(toolCallId, toolName, err);
@@ -730,7 +722,7 @@ public class AgentService implements Disposable {
             }
 
             // 执行前再次检查停止标志
-            if (stopped) {
+            if (context.isStopped()) {
                 String err = "命令执行已被用户停止";
                 listener.onToolCallEnd(toolCallId, toolName, err);
                 listener.onCommandResult(toolCallId, err);
@@ -741,7 +733,7 @@ public class AgentService implements Disposable {
             // e. 通过 RunCommandTool 在 IDEA 终端中执行命令（安全命令直接执行，危险命令审批后执行）
             listener.onCommandProgress(toolCallId, "开始在终端执行...");
             RunCommandTool runCommandTool = new RunCommandTool(project);
-            activeRunCommandTools.put(toolCallId, runCommandTool);
+            context.registerRunCommandTool(toolCallId, runCommandTool);
             try {
                 String result = runCommandTool.execute(args);
                 listener.onCommandProgress(toolCallId, "终端执行完成");
@@ -749,7 +741,7 @@ public class AgentService implements Disposable {
                 listener.onToolCallEnd(toolCallId, toolName, result);
                 toolResults.put(toolCallId, result);
             } finally {
-                activeRunCommandTools.remove(toolCallId);
+                context.removeRunCommandTool(toolCallId);
             }
 
         } catch (Exception e) {
@@ -864,8 +856,8 @@ public class AgentService implements Disposable {
             }
         }
 
-        boolean wasStopped = stopped;
-        stopped = false;
+        boolean wasStopped = context.isStopped();
+        context.setStopped(false);
 
         try {
             List<ChatMessage> summaryRequest = new ArrayList<>();
@@ -927,7 +919,7 @@ public class AgentService implements Disposable {
             notifyCompressionFailed(errMsg);
             fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens);
         } finally {
-            stopped = wasStopped;
+            context.setStopped(wasStopped);
         }
     }
 

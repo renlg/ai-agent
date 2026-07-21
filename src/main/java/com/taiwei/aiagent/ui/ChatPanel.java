@@ -847,7 +847,8 @@ public class ChatPanel extends JPanel implements Disposable {
     // ========== Stop Generation ==========
 
     private void stopGeneration() {
-        agentService.stopGeneration();
+        String sessionId = agentService.getActiveSessionId();
+        agentService.stopGeneration(sessionId);
     }
 
     // ========== Send Message ==========
