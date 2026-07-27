@@ -28,9 +28,10 @@ tasks {
         // 启动时自动打开当前项目，避免每次都选项目
         args = [project.rootDir.absolutePath]
         
-        // 显式指定 JBR 架构为 aarch64，防止 Gradle Daemon 在 Rosetta 下运行时
-        // 误下载 x64 版本的 JBR 导致 Apple Silicon 机器上启动失败（exit code 6）
-        jbrArch.set("aarch64")
+        // 动态检测架构，Apple Silicon → aarch64，Intel → x64
+        // 防止 Gradle Daemon 在 Rosetta 下误下载 x64 版本
+        def osArch = System.getProperty("os.arch").toLowerCase()
+        jbrArch.set(osArch.contains("aarch64") || osArch.contains("arm64") ? "aarch64" : "x64")
         
         // 使用固定的沙箱配置目录，避免 clean 后配置丢失
         // 必须通过 task 属性设置（而非 systemProperty），因为插件的 LaunchSystemArgumentProvider
