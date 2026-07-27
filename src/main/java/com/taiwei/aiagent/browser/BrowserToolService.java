@@ -11,10 +11,12 @@ import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 
 import org.cef.browser.CefBrowser;
+import org.cef.browser.CefFrame;
 import org.cef.handler.CefLoadHandlerAdapter;
 
 import javax.swing.*;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Callable;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -73,8 +75,8 @@ public final class BrowserToolService implements Disposable {
     private void setupLoadHandler() {
         browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
             @Override
-            public void onLoadEnd(CefBrowser cefBrowser, long frameId) {
-                if (frameId == 0) {
+            public void onLoadEnd(CefBrowser cefBrowser, CefFrame frame, int httpStatusCode) {
+                if (frame != null && frame.isMain()) {
                     injectBridgeFunction();
                     if (networkCaptureEnabled) {
                         cefBrowser.executeJavaScript(getNetworkCaptureScript(), "taiwei-netcap", 0);
@@ -162,8 +164,8 @@ public final class BrowserToolService implements Disposable {
 
         try {
             // Blocking wait must run off EDT so the JS callback can be delivered.
-            return ApplicationManager.getApplication().<String>executeOnPooledThread(
-                    () -> future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            return ApplicationManager.getApplication().executeOnPooledThread(
+                    (Callable<String>) () -> future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             ).get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             pendingEvaluations.remove(id);
@@ -189,8 +191,8 @@ public final class BrowserToolService implements Disposable {
         getOrCreateBrowser().getCefBrowser().executeJavaScript(wrappedJs, "taiwei-eval", 0);
 
         try {
-            return ApplicationManager.getApplication().<String>executeOnPooledThread(
-                    () -> future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            return ApplicationManager.getApplication().executeOnPooledThread(
+                    (Callable<String>) () -> future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             ).get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             pendingEvaluations.remove(id);
