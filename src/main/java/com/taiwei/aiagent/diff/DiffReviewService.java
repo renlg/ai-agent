@@ -184,24 +184,23 @@ public class DiffReviewService {
             diffList.remove(entry);
         }
 
-        WriteCommandAction.runWriteCommandAction(project, () -> {
-            try {
-                Path filePath = Paths.get(entry.getFilePath());
-                VirtualFile vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(filePath.toFile());
-                if (vf != null) {
-                    Document document = FileDocumentManager.getInstance().getDocument(vf);
-                    if (document != null) {
-                        boolean reverted = applyPartialRevert(document, entry.getFilePath(),
-                                entry.getOldContent(), entry.getNewContent());
-                        if (reverted) {
-                            FileDocumentManager.getInstance().saveDocument(document);
-                        }
-                    }
+        try {
+            Path filePath = Paths.get(entry.getFilePath());
+            VirtualFile vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(filePath.toFile());
+            if (vf != null) {
+                Document document = FileDocumentManager.getInstance().getDocument(vf);
+                if (document != null
+                        && confirmRevertIfRegionEdited(document, entry.getFilePath(),
+                                entry.getOldContent(), entry.getNewContent())) {
+                    WriteCommandAction.runWriteCommandAction(project, () -> {
+                        applyPartialRevert(document, entry.getOldContent(), entry.getNewContent());
+                        FileDocumentManager.getInstance().saveDocument(document);
+                    });
                 }
-            } catch (Exception e) {
-                LOG.error("Revert diff 失败: " + entry.getFilePath(), e);
             }
-        });
+        } catch (Exception e) {
+            LOG.error("Revert diff 失败: " + entry.getFilePath(), e);
+        }
 
         // Clear highlights for this file
         Document document = getDocumentForFile(entry.getFilePath());
@@ -214,54 +213,67 @@ public class DiffReviewService {
     }
 
     /**
-     * Reverts only the region that differs between {@code oldContent} and {@code newContent}
-     * (found via common prefix/suffix), leaving the rest of the document untouched. If the
-     * changed region no longer matches {@code newContent} — meaning the user edited it after
-     * the AI change — the user is asked to confirm before it is overwritten.
+     * If the AI-changed region no longer matches {@code newContent} — meaning the user edited it
+     * after the AI change — asks the user to confirm the revert. Must be called OUTSIDE any write
+     * action: showing a modal dialog while holding the write lock is forbidden by the platform.
      *
-     * @return true if the document was modified.
+     * @return true if the revert should proceed.
      */
-    private boolean applyPartialRevert(Document document, String filePath, String oldContent, String newContent) {
-        int minLen = Math.min(oldContent.length(), newContent.length());
+    private boolean confirmRevertIfRegionEdited(Document document, String filePath, String oldContent, String newContent) {
+        int prefixLen = commonPrefixLength(oldContent, newContent);
+        int suffixLen = commonSuffixLength(oldContent, newContent, prefixLen);
 
+        String currentText = document.getText();
+        String expectedRegion = newContent.substring(prefixLen, newContent.length() - suffixLen);
+        int actualStart = Math.min(prefixLen, currentText.length());
+        int actualEnd = Math.max(actualStart, Math.min(currentText.length() - suffixLen, currentText.length()));
+        String actualRegion = currentText.substring(actualStart, actualEnd);
+
+        if (expectedRegion.equals(actualRegion)) {
+            return true;
+        }
+        return Messages.showYesNoDialog(
+                project,
+                "The AI-changed region in " + filePath + " has been modified by you. Revert anyway?",
+                "Region Modified",
+                null
+        ) == Messages.YES;
+    }
+
+    /**
+     * Reverts only the region that differs between {@code oldContent} and {@code newContent}
+     * (found via common prefix/suffix), leaving the rest of the document untouched.
+     * Must run inside a write command action.
+     */
+    private void applyPartialRevert(Document document, String oldContent, String newContent) {
+        int prefixLen = commonPrefixLength(oldContent, newContent);
+        int suffixLen = commonSuffixLength(oldContent, newContent, prefixLen);
+
+        int endOffset = newContent.length() - suffixLen;
+        String oldFragment = oldContent.substring(prefixLen, oldContent.length() - suffixLen);
+
+        int safeStart = Math.min(prefixLen, document.getTextLength());
+        int safeEnd = Math.max(safeStart, Math.min(endOffset, document.getTextLength()));
+        document.replaceString(safeStart, safeEnd, oldFragment);
+    }
+
+    private static int commonPrefixLength(String oldContent, String newContent) {
+        int minLen = Math.min(oldContent.length(), newContent.length());
         int prefixLen = 0;
         while (prefixLen < minLen && oldContent.charAt(prefixLen) == newContent.charAt(prefixLen)) {
             prefixLen++;
         }
+        return prefixLen;
+    }
 
+    private static int commonSuffixLength(String oldContent, String newContent, int prefixLen) {
+        int minLen = Math.min(oldContent.length(), newContent.length());
         int suffixLen = 0;
         while (suffixLen < minLen - prefixLen
                 && oldContent.charAt(oldContent.length() - 1 - suffixLen) == newContent.charAt(newContent.length() - 1 - suffixLen)) {
             suffixLen++;
         }
-
-        int startOffset = prefixLen;
-        int endOffset = newContent.length() - suffixLen;
-        String oldFragment = oldContent.substring(prefixLen, oldContent.length() - suffixLen);
-
-        String currentText = document.getText();
-        String expectedRegion = newContent.substring(prefixLen, newContent.length() - suffixLen);
-        int actualStart = Math.min(startOffset, currentText.length());
-        int actualEnd = Math.max(actualStart, Math.min(currentText.length() - suffixLen, currentText.length()));
-        String actualRegion = currentText.substring(actualStart, actualEnd);
-
-        if (!expectedRegion.equals(actualRegion)) {
-            // User has edited inside the AI-changed region — ask for confirmation
-            boolean confirmed = Messages.showYesNoDialog(
-                    project,
-                    "The AI-changed region in " + filePath + " has been modified by you. Revert anyway?",
-                    "Region Modified",
-                    null
-            ) == Messages.YES;
-            if (!confirmed) {
-                return false;
-            }
-        }
-
-        int safeStart = Math.min(startOffset, document.getTextLength());
-        int safeEnd = Math.max(safeStart, Math.min(endOffset, document.getTextLength()));
-        document.replaceString(safeStart, safeEnd, oldFragment);
-        return true;
+        return suffixLen;
     }
 
     /**
@@ -284,15 +296,16 @@ public class DiffReviewService {
         }
 
         if (firstEntry != null) {
-            WriteCommandAction.runWriteCommandAction(project, "Revert AI Change", null, () -> {
-                VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(filePath);
-                if (vf != null) {
-                    Document document = FileDocumentManager.getInstance().getDocument(vf);
-                    if (document != null) {
-                        applyPartialRevert(document, filePath, firstEntry.getOldContent(), firstEntry.getNewContent());
-                    }
+            VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(filePath);
+            if (vf != null) {
+                Document document = FileDocumentManager.getInstance().getDocument(vf);
+                if (document != null
+                        && confirmRevertIfRegionEdited(document, filePath,
+                                firstEntry.getOldContent(), firstEntry.getNewContent())) {
+                    WriteCommandAction.runWriteCommandAction(project, "Revert AI Change", null, () ->
+                            applyPartialRevert(document, firstEntry.getOldContent(), firstEntry.getNewContent()));
                 }
-            });
+            }
         }
 
         hiddenFiles.remove(filePath);

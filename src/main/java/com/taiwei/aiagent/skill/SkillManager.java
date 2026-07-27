@@ -53,6 +53,11 @@ public class SkillManager implements Disposable {
 
     private static Path defaultSkillsDir(@NotNull Project project) {
         String basePath = project.getBasePath();
+        if (basePath == null) {
+            // Default-project / light-edit contexts have no base path; Paths.get(null, ...) would NPE
+            // and fail the whole service instantiation.
+            basePath = System.getProperty("user.home");
+        }
         return Paths.get(basePath, ".taiwei", "skills");
     }
 

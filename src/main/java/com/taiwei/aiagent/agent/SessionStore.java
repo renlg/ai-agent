@@ -79,6 +79,11 @@ public class SessionStore {
                 Type type = new TypeToken<List<SessionData>>() {}.getType();
                 List<SessionData> sessions = gson.fromJson(json, type);
                 if (sessions != null && !sessions.isEmpty()) {
+                    // If the legacy store IS the `.taiwei` regular file, it must be removed first —
+                    // otherwise createDirectories(".taiwei/sessions") fails because the parent is a file.
+                    if (source.equals(storeDir)) {
+                        Files.delete(source);
+                    }
                     Files.createDirectories(sessionsDir);
                     List<IndexEntry> indexEntries = new ArrayList<>();
                     for (SessionData sd : sessions) {
@@ -88,7 +93,7 @@ public class SessionStore {
                     }
                     writeIndex(indexEntries);
                 }
-                Files.delete(source);
+                Files.deleteIfExists(source);
                 LOG.info("已迁移旧存储文件 " + source.getFileName() + " 到分文件存储");
             }
         } catch (IOException e) {
@@ -210,6 +215,20 @@ public class SessionStore {
         } catch (IOException e) {
             LOG.warn("删除会话失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Flushes any pending debounced save synchronously and stops the scheduler thread.
+     * Called on project close; without it the last (debounced) save is silently dropped
+     * and the scheduler thread outlives the project.
+     */
+    public void close() {
+        ScheduledFuture<?> prev = pendingSave;
+        if (prev != null) {
+            prev.cancel(false);
+        }
+        scheduler.shutdown();
+        flushToDisk();
     }
 
     public void deleteStoreFile() {

@@ -17,7 +17,6 @@ import com.taiwei.aiagent.tool.impl.FindSymbolTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
-import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
 import com.taiwei.aiagent.tool.impl.BrowserTool;
 
@@ -132,8 +131,22 @@ public class AgentContext {
         if (client == null) return;
         if (activeRequestCount.get() > 0) {
             staleClients.add(client);
+            // The last in-flight request may have finished between the check above and the add:
+            // its endLlmRequest() saw an empty staleClients list, so nobody else would ever close
+            // this client. Re-check and drain if so.
+            if (activeRequestCount.get() <= 0) {
+                drainStaleClients();
+            }
         } else {
             client.close();
+        }
+    }
+
+    private void drainStaleClients() {
+        for (LlmClient stale : staleClients) {
+            if (staleClients.remove(stale)) {
+                stale.close();
+            }
         }
     }
 
@@ -151,10 +164,7 @@ public class AgentContext {
      */
     public void endLlmRequest() {
         if (activeRequestCount.decrementAndGet() <= 0 && !staleClients.isEmpty()) {
-            for (LlmClient stale : staleClients) {
-                stale.close();
-            }
-            staleClients.clear();
+            drainStaleClients();
         }
     }
 
@@ -349,10 +359,7 @@ public class AgentContext {
             cachedClient.close();
             cachedClient = null;
         }
-        for (LlmClient stale : staleClients) {
-            stale.close();
-        }
-        staleClients.clear();
+        drainStaleClients();
     }
 
     public PromptManager getPromptManager() {

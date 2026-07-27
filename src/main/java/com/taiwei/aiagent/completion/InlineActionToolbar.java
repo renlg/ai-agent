@@ -220,6 +220,17 @@ public class InlineActionToolbar {
         final String finalCode = code;
 
         String prompt = buildPrompt(action, finalCode);
+
+        // If the chat panel is available, deliver the prompt there directly \u2014 calling the LLM
+        // here first and then re-sending the prompt to chat would run the same request twice.
+        ToolWindow tw = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID);
+        if (tw != null && tw.isAvailable()
+                && EditorChatBridge.getInstance(project).sendPrompt(prompt)) {
+            processing = false;
+            hideBalloon();
+            return;
+        }
+
         showThinkingBalloon();
 
         executor.submit(() -> {
@@ -229,30 +240,12 @@ public class InlineActionToolbar {
                 if (editor.isDisposed()) return;
 
                 if (result != null && !result.isEmpty()) {
-                    deliverResult(action, result, finalCode);
+                    updateBalloonContent(action + " \u7ed3\u679c\uff1a\n\n" + result);
                 } else {
                     updateBalloonContent("\u8bf7\u6c42\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u6216 API \u914d\u7f6e");
                 }
             });
         });
-    }
-
-    private void deliverResult(String action, String result, String code) {
-        ToolWindow tw = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID);
-        boolean chatAvailable = tw != null && tw.isAvailable();
-
-        if (chatAvailable) {
-            EditorChatBridge bridge = EditorChatBridge.getInstance(project);
-            String prompt = buildPrompt(action, code);
-            boolean sent = bridge.sendPrompt(prompt);
-            if (sent) {
-                hideBalloon();
-                return;
-            }
-        }
-
-        String formatted = action + " \u7ed3\u679c\uff1a\n\n" + result;
-        updateBalloonContent(formatted);
     }
 
     private String buildPrompt(String action, String code) {

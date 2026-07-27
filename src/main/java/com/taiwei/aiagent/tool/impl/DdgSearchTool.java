@@ -20,15 +20,15 @@ public class DdgSearchTool implements Tool {
     private static final String LITE_URL = "https://lite.duckduckgo.com/lite/";
     private static final int TIMEOUT_SECONDS = 15;
 
-    private final OkHttpClient httpClient;
+    // Shared across instances: one DdgSearchTool is created per AgentContext (per session) and
+    // never closed, so a per-instance client would pile up idle connection-pool threads.
+    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build();
 
-    public DdgSearchTool() {
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .followRedirects(true)
-                .build();
-    }
+    private final OkHttpClient httpClient = HTTP_CLIENT;
 
     @Override
     public String getName() {

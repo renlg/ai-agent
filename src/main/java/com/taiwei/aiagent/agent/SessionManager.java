@@ -28,7 +28,8 @@ public class SessionManager {
     // which listSessions()/deleteSession() rely on to find the "most recent" session.
     private final Map<String, AgentContext> sessions = Collections.synchronizedMap(new LinkedHashMap<>());
     private final SessionStore sessionStore;
-    private String activeSessionId;
+    // Read/written from both the EDT and pooled agent threads.
+    private volatile String activeSessionId;
 
     public SessionManager(Project project) {
         this.project = project;
@@ -217,6 +218,14 @@ public class SessionManager {
             }
         }
         saveState();
+    }
+
+    /**
+     * Flushes any pending session save and stops the store's scheduler thread.
+     * Called from AgentService.dispose() on project close.
+     */
+    public void dispose() {
+        sessionStore.close();
     }
 
     // ========== 消息格式转换 ==========

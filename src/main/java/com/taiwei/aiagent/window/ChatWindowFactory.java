@@ -29,6 +29,11 @@ public class ChatWindowFactory implements ToolWindowFactory {
 
         ContentFactory contentFactory = ContentFactory.getInstance();
         Content content = contentFactory.createContent(component, "Chat", false);
+        if (component instanceof ChatPanel) {
+            // Without this, ChatPanel.dispose() is never called: the JCEF browser, JS query,
+            // settings-change listener and flush executor would all leak on tool-window close.
+            content.setDisposer((ChatPanel) component);
+        }
         toolWindow.getContentManager().addContent(content);
     }
 

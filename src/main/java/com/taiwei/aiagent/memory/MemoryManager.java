@@ -52,6 +52,11 @@ public class MemoryManager implements Disposable {
 
     private static Path defaultMemoryDbPath(@NotNull Project project) {
         String basePath = project.getBasePath();
+        if (basePath == null) {
+            // Default-project / light-edit contexts have no base path; Paths.get(null, ...) would NPE
+            // and fail the whole service instantiation.
+            basePath = System.getProperty("user.home");
+        }
         return Paths.get(basePath, ".taiwei", "memories", "memory.db");
     }
 
@@ -61,7 +66,7 @@ public class MemoryManager implements Disposable {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("Memory content must not be blank");
         }
-        if (getStorageUsageBytes() >= maxStorageBytes) {
+        if (maxStorageBytes > 0 && getStorageUsageBytes() >= maxStorageBytes) {
             autoConsolidate();
             if (getStorageUsageBytes() >= maxStorageBytes) {
                 LOG.warn("Rejecting new memory: storage usage " + getStorageUsageBytes()

@@ -76,7 +76,7 @@ public class RunCommandTool implements Tool {
                     },
                     "timeout": {
                       "type": "integer",
-                      "description": "超时时间（秒，默认10，最大300）"
+                      "description": "超时时间（秒，默认120，最大300）"
                     }
                   },
                   "required": ["command"]
@@ -91,6 +91,7 @@ public class RunCommandTool implements Tool {
 
     @Override
     public String execute(String arguments) {
+        Path tempDir = null;
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String command = args.get("command").getAsString();
@@ -109,7 +110,7 @@ public class RunCommandTool implements Tool {
 
             // 创建临时文件用于捕获输出和完成信号
             String uniqueId = UUID.randomUUID().toString().substring(0, 8);
-            Path tempDir = Files.createTempDirectory("taiwei-cmd-");
+            tempDir = Files.createTempDirectory("taiwei-cmd-");
             Path outputFile = tempDir.resolve("output-" + uniqueId + ".txt");
             Path doneFile = tempDir.resolve("done-" + uniqueId);
 
@@ -203,8 +204,32 @@ public class RunCommandTool implements Tool {
 
             return String.format("退出码: %d\n\n输出:\n%s", exitCode, output);
 
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            if (tempDir != null) {
+                cleanupTempDirBestEffort(tempDir);
+            }
+            return "执行命令失败: 等待命令完成时被中断";
         } catch (Exception e) {
+            if (tempDir != null) {
+                cleanupTempDirBestEffort(tempDir);
+            }
             return "执行命令失败: " + e.getMessage();
+        }
+    }
+
+    /** Deletes every file in the temp dir and then the dir itself; used on abnormal exits. */
+    private void cleanupTempDirBestEffort(Path tempDir) {
+        try {
+            java.io.File[] files = tempDir.toFile().listFiles();
+            if (files != null) {
+                for (java.io.File f : files) {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
+            Files.deleteIfExists(tempDir);
+        } catch (Exception ignored) {
         }
     }
 

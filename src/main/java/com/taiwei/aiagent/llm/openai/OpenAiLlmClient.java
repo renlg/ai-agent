@@ -129,6 +129,9 @@ public class OpenAiLlmClient implements LlmClient {
                         String errorMsg = errorObj.has("message") ? errorObj.get("message").getAsString() : "未知 API 错误";
                         LOG.warn("SSE 流中收到 API 错误: " + errorMsg);
                         listener.onError("API 错误: " + errorMsg, null);
+                        // Stop consuming the stream: without this, later chunks / [DONE] would keep
+                        // arriving and could fire onComplete after onError on the same listener.
+                        eventSource.cancel();
                         return;
                     }
 
@@ -190,7 +193,9 @@ public class OpenAiLlmClient implements LlmClient {
                         }
                     }
                 } catch (Exception e) {
-                    listener.onError("解析流式数据失败: " + e.getMessage(), e);
+                    // A single malformed chunk shouldn't abort the whole stream; skip it.
+                    // If nothing useful ever arrives, the caller reports "no content" at [DONE].
+                    LOG.warn("跳过无法解析的流式数据块: " + e.getMessage(), e);
                 }
             }
 

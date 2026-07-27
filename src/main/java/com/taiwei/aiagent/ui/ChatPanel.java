@@ -115,6 +115,7 @@ public class ChatPanel extends JPanel implements Disposable {
         });
         AiAgentSettings.getInstance().addChangeListener(settingsChangeListener);
         initUI();
+        EditorChatBridge.getInstance(project).register(this);
     }
 
     private void initUI() {
@@ -628,8 +629,13 @@ public class ChatPanel extends JPanel implements Disposable {
         synchronized (pendingContentBuffer) {
             pendingContentBuffer.append(content);
         }
-        if (flushScheduled.compareAndSet(false, true)) {
-            contentFlushExecutor.schedule(this::flushContentBuffer, CONTENT_FLUSH_WINDOW_MS, TimeUnit.MILLISECONDS);
+        if (!contentFlushExecutor.isShutdown() && flushScheduled.compareAndSet(false, true)) {
+            try {
+                contentFlushExecutor.schedule(this::flushContentBuffer, CONTENT_FLUSH_WINDOW_MS, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // Panel disposed while an agent loop was still streaming; nothing left to render into.
+                flushScheduled.set(false);
+            }
         }
     }
 
@@ -637,15 +643,26 @@ public class ChatPanel extends JPanel implements Disposable {
     private void flushContentBuffer() {
         String batch;
         synchronized (pendingContentBuffer) {
-            if (pendingContentBuffer.length() == 0) {
-                flushScheduled.set(false);
-                return;
-            }
             batch = pendingContentBuffer.toString();
             pendingContentBuffer.setLength(0);
         }
         flushScheduled.set(false);
-        pushToJs("appendContent", escapeJsString(batch));
+        // A pushContent() between the drain above and set(false) saw flushScheduled==true and
+        // didn't schedule; without this re-check its content would sit until the next event.
+        boolean leftover;
+        synchronized (pendingContentBuffer) {
+            leftover = pendingContentBuffer.length() > 0;
+        }
+        if (leftover && !contentFlushExecutor.isShutdown() && flushScheduled.compareAndSet(false, true)) {
+            try {
+                contentFlushExecutor.schedule(this::flushContentBuffer, CONTENT_FLUSH_WINDOW_MS, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                flushScheduled.set(false);
+            }
+        }
+        if (!batch.isEmpty()) {
+            pushToJs("appendContent", escapeJsString(batch));
+        }
     }
 
     /** Immediately flushes any pending content so onComplete/onError never race a delayed batch. */
@@ -1164,6 +1181,7 @@ public class ChatPanel extends JPanel implements Disposable {
 
     @Override
     public void dispose() {
+        EditorChatBridge.getInstance(project).unregister(this);
         AiAgentSettings.getInstance().removeChangeListener(settingsChangeListener);
         contentFlushExecutor.shutdownNow();
         if (jsQuery != null) {

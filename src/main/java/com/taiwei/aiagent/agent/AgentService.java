@@ -63,12 +63,9 @@ public class AgentService implements Disposable {
             return ca;
         }
 
-        public void approve(String toolCallId) {
-            CommandApproval ca = pendingApprovals.get(toolCallId);
-            if (ca != null) {
-                ca.approved = true;
-            }
-        }
+        // NOTE: approval is granted via setResult() (which releases the latch). A separate
+        // approve() that only set the flag without counting down the latch used to exist here;
+        // any caller using it would have left the agent loop blocked until the 300s timeout.
 
         public void setResult(String toolCallId, String result) {
             CommandApproval ca = pendingApprovals.remove(toolCallId);
@@ -329,6 +326,11 @@ public class AgentService implements Disposable {
 
             String agentsMdContent = response.getContent().trim();
             java.nio.file.Files.writeString(agentsMdPath, agentsMdContent, java.nio.charset.StandardCharsets.UTF_8);
+            // The file was written behind the VFS's back; refresh so it shows up (and is current)
+            // in the project tree / open editors without a manual sync.
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() ->
+                    com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                            .refreshAndFindFileByIoFile(agentsMdPath.toFile()));
 
             ctx.getConversation().addUserMessage("/init");
             String summary = (existing != null ? "已更新" : "已生成") + " AGENTS.md（" + agentsMdPath + "）\n\n---\n\n" + agentsMdContent;
@@ -392,6 +394,7 @@ public class AgentService implements Disposable {
                 ctx.dispose();
             }
         }
+        sessionManager.dispose();
     }
 
     /**
@@ -544,7 +547,16 @@ public class AgentService implements Disposable {
                     String toolCallId = toolCall.getId();
 
                     if (!registry.isToolAllowed(toolName, context.getMode())) {
-                        String err = "错误: 当前处于 Plan 模式（只读分析），工具 '" + toolName + "' 已被禁用。请先切换到 Build 模式（/build）再执行修改操作。";
+                        // Distinguish the three reject reasons: a blanket "Plan mode" message for an
+                        // unknown or user-disabled tool sends the LLM into a useless /build retry loop.
+                        String err;
+                        if (registry.getTool(toolName) == null) {
+                            err = "错误: 未找到工具 '" + toolName + "'，请仅使用工具列表中提供的工具。";
+                        } else if (!AiAgentSettings.getInstance().isToolEnabled(toolName)) {
+                            err = "错误: 工具 '" + toolName + "' 已被用户在设置中禁用，请改用其他工具完成任务。";
+                        } else {
+                            err = "错误: 当前处于 Plan 模式（只读分析），工具 '" + toolName + "' 已被禁用。请先切换到 Build 模式（/build）再执行修改操作。";
+                        }
                         listener.onToolCallEnd(toolCallId, toolName, err);
                         toolResults.put(toolCallId, err);
                         continue;

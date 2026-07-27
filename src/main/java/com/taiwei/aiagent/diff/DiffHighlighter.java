@@ -101,6 +101,11 @@ public class DiffHighlighter {
      * Must run on the EDT (MarkupModel and Inlay APIs are not thread-safe).
      */
     private void renderDiffLines(Document document, String fileKey, List<DiffLine> diffLines) {
+        // Two applyHighlight() calls can overlap (each clears, then computes off-EDT, then renders):
+        // the later put() would orphan the earlier render's highlighters, leaving them in the
+        // editor forever. Dispose whatever is currently tracked for this file before rendering.
+        clearHighlightsForFile(fileKey);
+
         MarkupModel markupModel = DocumentMarkupModel.forDocument(document, project, true);
 
         List<RangeHighlighter> highlighters = new ArrayList<>();

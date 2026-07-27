@@ -30,6 +30,7 @@ public final class BrowserToolService implements Disposable {
     private static final Logger LOG = Logger.getInstance(BrowserToolService.class);
     private static final long JS_EVAL_TIMEOUT_SECONDS = 10;
     private static final int MAX_CONTENT_LENGTH = 50000;
+    private static final int MAX_CAPTURED_REQUESTS = 500;
 
     private final Project project;
     private volatile JBCefBrowser browser;
@@ -114,6 +115,10 @@ public final class BrowserToolService implements Disposable {
         } else if (msg.startsWith("netcap:")) {
             String json = msg.substring(7);
             capturedRequests.add(json);
+            // Keep the capture buffer bounded: a long-lived page can otherwise grow it without limit.
+            while (capturedRequests.size() > MAX_CAPTURED_REQUESTS) {
+                capturedRequests.remove(0);
+            }
         }
     }
 
@@ -266,9 +271,18 @@ public final class BrowserToolService implements Disposable {
 
     @Override
     public synchronized void dispose() {
+        if (jsQuery != null) {
+            Disposer.dispose(jsQuery);
+            jsQuery = null;
+        }
         if (browser != null) {
             Disposer.dispose(browser);
             browser = null;
         }
+        // Any evaluation still waiting on the (now gone) browser can never complete.
+        for (CompletableFuture<String> future : pendingEvaluations.values()) {
+            future.completeExceptionally(new IllegalStateException("Browser disposed"));
+        }
+        pendingEvaluations.clear();
     }
 }

@@ -235,7 +235,17 @@ public class FileReplaceTool implements Tool {
         if (Files.isDirectory(resolved)) {
             throw new Exception("路径是目录而非文件 - " + resolved);
         }
-        String oldContent = Files.readString(resolved, StandardCharsets.UTF_8);
+        // Prefer the in-editor Document text: the replacement result is written back via
+        // document.setText(), so basing it on stale on-disk content would silently discard
+        // any unsaved edits the user has in the editor.
+        String docText = com.intellij.openapi.application.ReadAction.compute(() -> {
+            VirtualFile vFile = LocalFileSystem.getInstance()
+                    .findFileByPath(resolved.toString().replace('\\', '/'));
+            if (vFile == null) return null;
+            Document document = FileDocumentManager.getInstance().getCachedDocument(vFile);
+            return document != null ? document.getText() : null;
+        });
+        String oldContent = docText != null ? docText : Files.readString(resolved, StandardCharsets.UTF_8);
         return new ExecuteContext(resolved, oldContent);
     }
 

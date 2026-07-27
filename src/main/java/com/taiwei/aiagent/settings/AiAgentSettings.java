@@ -164,19 +164,27 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     // ========== 全局参数 ==========
 
     public int getMaxTokens() {
-        return state.maxTokens;
+        synchronized (stateLock) {
+            return state.maxTokens;
+        }
     }
 
     public void setMaxTokens(int maxTokens) {
-        state.maxTokens = maxTokens;
+        synchronized (stateLock) {
+            state.maxTokens = maxTokens;
+        }
     }
 
     public double getTemperature() {
-        return state.temperature;
+        synchronized (stateLock) {
+            return state.temperature;
+        }
     }
 
     public void setTemperature(double temperature) {
-        state.temperature = temperature;
+        synchronized (stateLock) {
+            state.temperature = temperature;
+        }
     }
 
     // ========== 便捷方法（兼容旧代码） ==========
@@ -196,38 +204,54 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     // ========== 危险命令配置 ==========
 
     public List<String> getDangerousCommands() {
-        return state.dangerousCommands;
+        synchronized (stateLock) {
+            // Defensive copy: callers iterate this (e.g. isDangerousCommand on agent threads)
+            // while the settings panel may replace/mutate the backing list on the EDT.
+            return new ArrayList<>(state.dangerousCommands);
+        }
     }
 
     public void setDangerousCommands(List<String> commands) {
-        state.dangerousCommands = commands;
+        synchronized (stateLock) {
+            state.dangerousCommands = new ArrayList<>(commands);
+        }
     }
 
     // ========== 搜索引擎配置 ==========
 
     public String getSearchEngineType() {
-        return state.searchEngineType;
+        synchronized (stateLock) {
+            return state.searchEngineType;
+        }
     }
 
     public void setSearchEngineType(String searchEngineType) {
-        state.searchEngineType = searchEngineType;
+        synchronized (stateLock) {
+            state.searchEngineType = searchEngineType;
+        }
     }
 
     // ========== 禁用的 Skill 列表 ==========
 
     public java.util.Set<String> getDisabledSkills() {
-        return state.disabledSkills;
+        synchronized (stateLock) {
+            return new java.util.LinkedHashSet<>(state.disabledSkills);
+        }
     }
 
     public boolean isSkillEnabled(String skillName) {
-        return !state.disabledSkills.contains(skillName);
+        synchronized (stateLock) {
+            return !state.disabledSkills.contains(skillName);
+        }
     }
 
     public void setSkillEnabled(String skillName, boolean enabled) {
-        if (enabled) {
-            state.disabledSkills.remove(skillName);
-        } else {
-            state.disabledSkills.add(skillName);
+        synchronized (stateLock) {
+            if (enabled) {
+                state.disabledSkills.remove(skillName);
+            } else {
+                state.disabledSkills.add(skillName);
+            }
         }
         fireSettingsChanged();
     }
@@ -235,18 +259,24 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     // ========== 禁用的工具列表 ==========
 
     public java.util.Set<String> getDisabledTools() {
-        return state.disabledTools;
+        synchronized (stateLock) {
+            return new java.util.LinkedHashSet<>(state.disabledTools);
+        }
     }
 
     public boolean isToolEnabled(String toolName) {
-        return !state.disabledTools.contains(toolName);
+        synchronized (stateLock) {
+            return !state.disabledTools.contains(toolName);
+        }
     }
 
     public void setToolEnabled(String toolName, boolean enabled) {
-        if (enabled) {
-            state.disabledTools.remove(toolName);
-        } else {
-            state.disabledTools.add(toolName);
+        synchronized (stateLock) {
+            if (enabled) {
+                state.disabledTools.remove(toolName);
+            } else {
+                state.disabledTools.add(toolName);
+            }
         }
         fireSettingsChanged();
     }
@@ -254,37 +284,53 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     // ========== 功能开关 ==========
 
     public boolean isCompletionEnabled() {
-        return state.completionEnabled;
+        synchronized (stateLock) {
+            return state.completionEnabled;
+        }
     }
 
     public void setCompletionEnabled(boolean enabled) {
-        state.completionEnabled = enabled;
+        synchronized (stateLock) {
+            state.completionEnabled = enabled;
+        }
     }
 
     public boolean isGitCommitReviewEnabled() {
-        return state.gitCommitReviewEnabled;
+        synchronized (stateLock) {
+            return state.gitCommitReviewEnabled;
+        }
     }
 
     public void setGitCommitReviewEnabled(boolean enabled) {
-        state.gitCommitReviewEnabled = enabled;
+        synchronized (stateLock) {
+            state.gitCommitReviewEnabled = enabled;
+        }
     }
 
     public boolean isInlineActionEnabled() {
-        return state.inlineActionEnabled;
+        synchronized (stateLock) {
+            return state.inlineActionEnabled;
+        }
     }
 
     public void setInlineActionEnabled(boolean enabled) {
-        state.inlineActionEnabled = enabled;
+        synchronized (stateLock) {
+            state.inlineActionEnabled = enabled;
+        }
     }
 
     // ========== 自定义规则 ==========
 
     public String getCustomRules() {
-        return state.customRules;
+        synchronized (stateLock) {
+            return state.customRules;
+        }
     }
 
     public void setCustomRules(String rules) {
-        state.customRules = rules != null ? rules : "";
+        synchronized (stateLock) {
+            state.customRules = rules != null ? rules : "";
+        }
     }
 
     // ========== MCP 服务器配置 ==========
