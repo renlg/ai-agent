@@ -1,6 +1,7 @@
 package com.taiwei.aiagent.browser;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -155,7 +156,10 @@ public final class BrowserToolService implements Disposable {
         getOrCreateBrowser().getCefBrowser().executeJavaScript(wrappedJs, "taiwei-eval", 0);
 
         try {
-            return future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            // Blocking wait must run off EDT so the JS callback can be delivered.
+            return ApplicationManager.getApplication().<String>executeOnPooledThread(
+                    () -> future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            ).get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             pendingEvaluations.remove(id);
             return "执行失败: " + e.getMessage();
@@ -180,7 +184,9 @@ public final class BrowserToolService implements Disposable {
         getOrCreateBrowser().getCefBrowser().executeJavaScript(wrappedJs, "taiwei-eval", 0);
 
         try {
-            return future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return ApplicationManager.getApplication().<String>executeOnPooledThread(
+                    () -> future.get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            ).get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             pendingEvaluations.remove(id);
             return "执行失败: " + e.getMessage();
@@ -259,9 +265,10 @@ public final class BrowserToolService implements Disposable {
     }
 
     @Override
-    public void dispose() {
+    public synchronized void dispose() {
         if (browser != null) {
             Disposer.dispose(browser);
+            browser = null;
         }
     }
 }
