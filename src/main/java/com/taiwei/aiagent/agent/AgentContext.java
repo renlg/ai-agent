@@ -19,6 +19,7 @@ import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
 import com.taiwei.aiagent.tool.impl.LoadSkillTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
+import com.taiwei.aiagent.tool.impl.BrowserTool;
 
 /**
  * Agent 会话上下文
@@ -219,6 +220,7 @@ public class AgentContext {
         result.add(new FindReferencesTool(project));
         result.add(new RunCommandTool(project));
         result.add(new LoadSkillTool(project));
+        result.add(new BrowserTool(project));
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ("ALIYUN_IQS".equals(settings.getSearchEngineType())) {

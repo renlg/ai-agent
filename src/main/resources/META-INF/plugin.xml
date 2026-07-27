@@ -18,6 +18,12 @@
                     factoryClass="com.taiwei.aiagent.window.ChatWindowFactory"
                     icon="/icons/taiwei.svg"/>
 
+        <!-- 注册浏览器工具窗口 -->
+        <toolWindow id="浏览器"
+                    anchor="bottom"
+                    factoryClass="com.taiwei.aiagent.browser.BrowserToolWindowFactory"
+                    icon="/icons/browser.svg"/>
+
         <!-- 注册配置服务 -->
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.AiAgentSettings"/>
         <applicationService serviceImplementation="com.taiwei.aiagent.settings.IqsSettings"/>
@@ -48,6 +54,7 @@
         <projectService serviceImplementation="com.taiwei.aiagent.memory.MemoryManager"/>
         <projectService serviceImplementation="com.taiwei.aiagent.mcp.McpManager"/>
         <projectService serviceImplementation="com.taiwei.aiagent.agent.AgentService"/>
+        <projectService serviceImplementation="com.taiwei.aiagent.browser.BrowserToolService"/>
         <editorNotificationProvider implementation="com.taiwei.aiagent.diff.DiffEditorNotificationProvider"/>
 
         <!-- Tab 自动补全 -->
