@@ -151,7 +151,7 @@ public final class BrowserToolService implements Disposable {
         String base64Code = Base64.getEncoder().encodeToString(jsCode.getBytes(StandardCharsets.UTF_8));
         String wrappedJs = "(function(){" +
                 "try{" +
-                "var __code=atob('" + base64Code + "');" +
+                "var __code=decodeURIComponent(atob('" + base64Code + "').split('').map(function(c){return'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)}).join(''));" +
                 "var __r=eval(__code);" +
                 "var __s=(__r===undefined||__r===null)?'null':JSON.stringify(__r);" +
                 "window.taiweiBrowserQuery('jsresult:" + id + ":' + __s);" +
