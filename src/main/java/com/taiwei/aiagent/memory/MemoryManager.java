@@ -57,8 +57,20 @@ public class MemoryManager implements Disposable {
     /** Default cap on the on-disk size of the memory database. */
     public static final long MAX_STORAGE_BYTES = 50 * 1024 * 1024;
 
+    /** Count fraction of maxMemoryCount at which auto-consolidation (semantic merge) kicks in. */
+    private static final double CONSOLIDATE_THRESHOLD = 0.80;
+
+    /** Count fraction of maxMemoryCount at which forgetting (batch deletion) kicks in. */
+    private static final double FORGET_THRESHOLD = 0.95;
+
+    /** Minimum interval between two count-triggered auto-consolidations. */
+    private static final long CONSOLIDATE_DEBOUNCE_MS = 600_000L;
+
     private final MemoryStore store;
+    private final MemoryConfig memoryConfig;
     private volatile long maxStorageBytes = MAX_STORAGE_BYTES;
+    /** When the last count-triggered semantic merge ran; guards the debounce window. */
+    private volatile long lastConsolidateAtMillis = 0L;
 
     /** Query text -> embedding, so repeated searches for the same query skip the API call. */
     private final Map<String, float[]> embeddingCache = new ConcurrentHashMap<>();
@@ -81,11 +93,16 @@ public class MemoryManager implements Disposable {
 
     /** Constructor used by the IntelliJ project-service container. */
     public MemoryManager(@NotNull Project project) {
-        this(new MemoryStore(defaultMemoryDbPath(project)));
+        this(new MemoryStore(defaultMemoryDbPath(project)), MemoryConfig.getInstance(project));
     }
 
     public MemoryManager(MemoryStore store) {
+        this(store, MemoryConfig.defaults());
+    }
+
+    public MemoryManager(MemoryStore store, MemoryConfig memoryConfig) {
         this.store = store;
+        this.memoryConfig = memoryConfig;
         this.storedEmbeddings = new ConcurrentHashMap<>(store.loadAllEmbeddings());
     }
 
@@ -109,6 +126,8 @@ public class MemoryManager implements Disposable {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("Memory content must not be blank");
         }
+        enforceMemoryCountLimit();
+        // Secondary limit: on-disk size of the database file.
         if (maxStorageBytes > 0 && getStorageUsageBytes() >= maxStorageBytes) {
             autoConsolidate();
             if (getStorageUsageBytes() >= maxStorageBytes) {
@@ -499,6 +518,58 @@ public class MemoryManager implements Disposable {
     }
 
     // ========== Consolidation ==========
+
+    /**
+     * Primary (count-based) limit, checked on every {@link #remember}. At
+     * {@link #FORGET_THRESHOLD} of the configured maxMemoryCount the least valuable memories
+     * are deleted until the count drops below {@link #CONSOLIDATE_THRESHOLD} — forgetting
+     * already frees enough room, so no merge follows. Between the two thresholds a semantic
+     * merge ({@link #autoConsolidate}) runs instead, debounced to once per
+     * {@link #CONSOLIDATE_DEBOUNCE_MS}.
+     */
+    private void enforceMemoryCountLimit() {
+        int maxCount = memoryConfig.getMaxMemoryCount();
+        if (maxCount <= 0) return;
+        int count = getMemoryCount();
+        if (count >= maxCount * FORGET_THRESHOLD) {
+            forgetLeastValuable(maxCount);
+        } else if (count >= maxCount * CONSOLIDATE_THRESHOLD) {
+            consolidateWithDebounce();
+        }
+    }
+
+    private void consolidateWithDebounce() {
+        long now = System.currentTimeMillis();
+        if (now - lastConsolidateAtMillis < CONSOLIDATE_DEBOUNCE_MS) {
+            return;
+        }
+        lastConsolidateAtMillis = now;
+        autoConsolidate();
+    }
+
+    /**
+     * Batch-deletes the least valuable memories — lowest importance first, ties broken by
+     * oldest last access — until the count drops below {@link #CONSOLIDATE_THRESHOLD} of
+     * {@code maxCount}.
+     */
+    private void forgetLeastValuable(int maxCount) {
+        int target = (int) (maxCount * CONSOLIDATE_THRESHOLD);
+        List<MemoryEntry> all = store.findAll();
+        all.sort(Comparator.comparingInt(MemoryEntry::getImportance)
+                .thenComparingLong(MemoryEntry::getLastAccessedAt));
+        int remaining = all.size();
+        for (MemoryEntry entry : all) {
+            if (remaining < target) break;
+            if (store.deleteById(entry.getId())) {
+                storedEmbeddings.remove(entry.getId());
+                remaining--;
+                LOG.info("Forgot memory " + entry.getId()
+                        + " (importance=" + entry.getImportance()
+                        + ", lastAccessedAt=" + entry.getLastAccessedAt()
+                        + "): " + entry.getContent());
+            }
+        }
+    }
 
     /** Merges duplicate memories (same normalized content) and decays importance of stale, unaccessed entries. */
     public void autoConsolidate() {
