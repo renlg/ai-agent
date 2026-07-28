@@ -3,50 +3,70 @@ package com.taiwei.aiagent.memory;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
-import com.taiwei.aiagent.llm.LlmClient;
-import com.taiwei.aiagent.llm.LlmResponse;
-import com.taiwei.aiagent.llm.openai.OpenAiLlmClient;
-import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Lightweight embedding provider used for hybrid memory retrieval. Instead of pulling in an
- * ONNX / local-model dependency, it asks the already-configured OpenAI-compatible chat API to
- * emit a compact numeric vector for a text and parses it out of the response. Results are
- * unit-normalized and cached in memory (LRU) so repeated lookups don't burn API calls.
+ * Embedding provider used for hybrid memory retrieval, backed by the OpenAI-compatible
+ * {@code POST /embeddings} endpoint of the configured gateway (OpenAI, DeepSeek, Tongyi and most
+ * gateways expose it). The embedding model is auto-detected on first use from a short candidate
+ * list; the working model is remembered per configuration. Results are unit-normalized and cached
+ * in memory (LRU) so repeated lookups don't burn API calls.
  *
  * <p>Application-level singleton; all public methods are safe for concurrent use. Every method
- * is best-effort: on any failure (no API config, network error, unparseable reply) it returns
- * {@code null} for the affected text so callers can degrade to keyword-only search.
+ * is best-effort: on any failure (no API config, network error, endpoint not supported) it logs
+ * a warning and returns {@code null} for the affected text so callers can degrade to
+ * keyword-only search. When no candidate model works, the endpoint is considered unsupported
+ * and further attempts are skipped for a cooldown period.
  *
- * <p>Embedding calls block on the LLM API for seconds; invoke them only from background
- * threads (see MemoryManager's embedding executor), never from a chat/tool-execution thread.
+ * <p>Embedding calls block on the API; invoke them only from background threads (see
+ * MemoryManager's embedding executor) or with an explicit timeout, never unboundedly from a
+ * chat/tool-execution thread.
  */
 public final class EmbeddingService {
 
     private static final Logger LOG = Logger.getInstance(EmbeddingService.class);
     private static final Gson GSON = new Gson();
 
-    /** Fixed dimensionality of generated vectors; replies are truncated/padded to fit. */
-    public static final int DIMENSION = 64;
+    /**
+     * Embedding models probed in order until one is accepted by the gateway. Covers OpenAI
+     * (current + legacy) and Tongyi/DashScope compatible-mode names.
+     */
+    private static final String[] CANDIDATE_MODELS = {
+            "text-embedding-3-small",
+            "text-embedding-ada-002",
+            "text-embedding-v4",
+            "text-embedding-v3"
+    };
+
+    /** After every candidate model is rejected, skip /embeddings calls for this long. */
+    private static final long UNSUPPORTED_COOLDOWN_MS = 5 * 60_000L;
 
     private static final int MAX_CACHE_ENTRIES = 2000;
-    /** Long memories are truncated before embedding to keep the prompt cheap. */
+    /** Long memories are truncated before embedding to keep the request cheap. */
     private static final int MAX_TEXT_CHARS = 2000;
-    private static final Pattern NUMBER_ARRAY = Pattern.compile("\\[[^\\[\\]]+\\]");
+    private static final int MAX_LOG_BODY_CHARS = 300;
 
     private static volatile EmbeddingService instance;
+
+    private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build();
 
     /** text -> unit vector, LRU-evicted. */
     private final Map<String, float[]> cache = Collections.synchronizedMap(
@@ -57,10 +77,12 @@ public final class EmbeddingService {
                 }
             });
 
-    private LlmClient client;
-    private String clientBaseUrl;
-    private String clientApiKey;
-    private String clientModel;
+    /** baseUrl + apiKey of the config the fields below were resolved against. */
+    private volatile String configKey;
+    /** Embedding model accepted by the gateway, or null until successfully probed. */
+    private volatile String workingModel;
+    /** Epoch millis until which /embeddings calls are skipped after a failed probe. */
+    private volatile long disabledUntil;
 
     private EmbeddingService() {
     }
@@ -82,7 +104,8 @@ public final class EmbeddingService {
         String key = truncate(text.trim());
         float[] cached = cache.get(key);
         if (cached != null) return cached;
-        float[] vector = requestSingle(key);
+        List<float[]> vectors = requestEmbeddings(List.of(key));
+        float[] vector = (vectors != null && !vectors.isEmpty()) ? vectors.get(0) : null;
         if (vector != null) {
             cache.put(key, vector);
         }
@@ -114,13 +137,10 @@ public final class EmbeddingService {
         }
         if (missTexts.isEmpty()) return result;
 
-        List<float[]> batch = requestBatch(missTexts);
+        List<float[]> batch = requestEmbeddings(missTexts);
+        if (batch == null) return result;
         for (int i = 0; i < missIndices.size(); i++) {
-            float[] vector = (batch != null && i < batch.size()) ? batch.get(i) : null;
-            if (vector == null) {
-                // Batch call failed or came back malformed for this item; retry individually.
-                vector = requestSingle(missTexts.get(i));
-            }
+            float[] vector = i < batch.size() ? batch.get(i) : null;
             if (vector != null) {
                 cache.put(missTexts.get(i), vector);
                 result.set(missIndices.get(i), vector);
@@ -129,12 +149,15 @@ public final class EmbeddingService {
         return result;
     }
 
-    /** Cosine similarity of two vectors; 0 when either is null/empty or has zero norm. */
+    /**
+     * Cosine similarity of two vectors; 0 when either is null/empty or the dimensions differ.
+     * The dimension check keeps stale vectors from an older embedding scheme (or a different
+     * model) from producing meaningless similarities against fresh query vectors.
+     */
     public static double cosineSimilarity(float[] a, float[] b) {
-        if (a == null || b == null || a.length == 0 || b.length == 0) return 0;
-        int n = Math.min(a.length, b.length);
+        if (a == null || b == null || a.length == 0 || a.length != b.length) return 0;
         double dot = 0, normA = 0, normB = 0;
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < a.length; i++) {
             dot += a[i] * b[i];
             normA += a[i] * a[i];
             normB += b[i] * b[i];
@@ -143,114 +166,141 @@ public final class EmbeddingService {
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    // ========== LLM plumbing ==========
+    // ========== /embeddings plumbing ==========
 
-    private float[] requestSingle(String text) {
-        try {
-            LlmClient llm = getClient();
-            if (llm == null) return null;
-            String prompt = "Generate a compact embedding vector for this text. Respond with ONLY a JSON array of exactly "
-                    + DIMENSION + " numbers between -1 and 1 that captures the semantic meaning of the text. "
-                    + "No explanation, no code fences.\n\nText: " + text;
-            LlmResponse response = llm.chat(List.of(ChatMessage.user(prompt)), null);
-            if (response == null || !response.isSuccess() || response.getContent() == null) return null;
-            Matcher m = NUMBER_ARRAY.matcher(response.getContent());
-            return m.find() ? fitAndNormalize(GSON.fromJson(m.group(), float[].class)) : null;
-        } catch (Exception e) {
-            LOG.warn("Embedding generation failed: " + e.getMessage());
-            return null;
+    /**
+     * Embeds {@code texts} via {@code POST /embeddings}, resolving the embedding model on first
+     * use. Returns an input-aligned list, or {@code null} when the endpoint is unavailable.
+     */
+    private List<float[]> requestEmbeddings(List<String> texts) {
+        AiAgentSettings settings = AiAgentSettings.getInstance();
+        String baseUrl = settings.getBaseUrl();
+        String apiKey = settings.getApiKey();
+        if (baseUrl == null || baseUrl.isBlank()) return null;
+
+        String key = baseUrl + "\0" + (apiKey == null ? "" : apiKey);
+        if (!key.equals(configKey)) {
+            // Config changed: forget the resolved model and any unsupported-endpoint cooldown.
+            configKey = key;
+            workingModel = null;
+            disabledUntil = 0;
         }
+        if (System.currentTimeMillis() < disabledUntil) return null;
+
+        String url = (baseUrl.endsWith("/") ? baseUrl : baseUrl + "/") + "embeddings";
+        String model = workingModel;
+        if (model != null) {
+            return callEmbeddings(url, apiKey, model, texts);
+        }
+        for (String candidate : CANDIDATE_MODELS) {
+            List<float[]> vectors = callEmbeddings(url, apiKey, candidate, texts);
+            if (vectors != null) {
+                LOG.info("Resolved embedding model '" + candidate + "' at " + url);
+                workingModel = candidate;
+                return vectors;
+            }
+        }
+        LOG.warn("/embeddings not supported at " + url + " (no candidate model accepted); "
+                + "memory retrieval degrades to keyword-only for the next "
+                + UNSUPPORTED_COOLDOWN_MS / 60_000 + " minutes");
+        disabledUntil = System.currentTimeMillis() + UNSUPPORTED_COOLDOWN_MS;
+        return null;
     }
 
-    /** One API call for several texts; returns an input-aligned list, or {@code null} on failure. */
-    private List<float[]> requestBatch(List<String> texts) {
-        if (texts.size() == 1) {
-            List<float[]> single = new ArrayList<>();
-            single.add(requestSingle(texts.get(0)));
-            return single;
-        }
+    /** One {@code POST /embeddings} call; returns an input-aligned list, or {@code null} on failure. */
+    private List<float[]> callEmbeddings(String url, String apiKey, String model, List<String> texts) {
         try {
-            LlmClient llm = getClient();
-            if (llm == null) return null;
-            StringBuilder prompt = new StringBuilder();
-            prompt.append("Generate a compact embedding vector for each of the ").append(texts.size())
-                    .append(" texts below. Respond with ONLY a JSON array containing ").append(texts.size())
-                    .append(" arrays, one per text in order, each with exactly ").append(DIMENSION)
-                    .append(" numbers between -1 and 1 capturing the semantic meaning. No explanation, no code fences.\n");
-            for (int i = 0; i < texts.size(); i++) {
-                prompt.append("\nText ").append(i + 1).append(": ").append(texts.get(i));
+            JsonObject body = new JsonObject();
+            body.addProperty("model", model);
+            JsonArray input = new JsonArray();
+            for (String text : texts) {
+                input.add(text);
             }
-            LlmResponse response = llm.chat(List.of(ChatMessage.user(prompt.toString())), null);
-            if (response == null || !response.isSuccess() || response.getContent() == null) return null;
+            body.add("input", input);
 
-            String content = response.getContent();
-            int start = content.indexOf('[');
-            int end = content.lastIndexOf(']');
-            if (start < 0 || end <= start) return null;
-            JsonElement parsed = JsonParser.parseString(content.substring(start, end + 1));
-            if (!parsed.isJsonArray()) return null;
-            JsonArray outer = parsed.getAsJsonArray();
-            if (outer.size() != texts.size()) return null;
-
-            List<float[]> result = new ArrayList<>();
-            for (JsonElement element : outer) {
-                result.add(element.isJsonArray()
-                        ? fitAndNormalize(GSON.fromJson(element, float[].class))
-                        : null);
+            Request.Builder builder = new Request.Builder()
+                    .url(url)
+                    .addHeader("Content-Type", "application/json")
+                    .post(RequestBody.create(body.toString(), MediaType.parse("application/json")));
+            if (apiKey != null && !apiKey.isBlank()) {
+                builder.addHeader("Authorization", "Bearer " + apiKey);
             }
-            return result;
+
+            try (Response response = httpClient.newCall(builder.build()).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    LOG.warn("/embeddings HTTP " + response.code() + " (model=" + model + "): "
+                            + truncateForLog(responseBody));
+                    return null;
+                }
+                return parseEmbeddings(responseBody, texts.size(), model);
+            }
         } catch (Exception e) {
-            LOG.warn("Batch embedding generation failed: " + e.getMessage());
+            LOG.warn("/embeddings request failed (model=" + model + "): " + e.getMessage());
             return null;
         }
     }
 
     /**
-     * Lazily builds a chat client from the current settings, rebuilding when the
-     * configuration changes (same pattern as AgentContext's cached client).
+     * Extracts {@code data[*].embedding} from an OpenAI-style response, ordered by the
+     * {@code index} field. Returns {@code null} when the payload isn't a usable embedding
+     * response; individual malformed items are {@code null} in the returned list.
      */
-    private synchronized LlmClient getClient() {
-        AiAgentSettings settings = AiAgentSettings.getInstance();
-        String baseUrl = settings.getBaseUrl();
-        String apiKey = settings.getApiKey();
-        String model = settings.getModel();
-        if (baseUrl == null || baseUrl.isBlank()) return null;
+    private static List<float[]> parseEmbeddings(String responseBody, int expectedCount, String model) {
+        try {
+            JsonObject json = JsonParser.parseString(responseBody).getAsJsonObject();
+            if (json.has("error") && !json.get("error").isJsonNull()) {
+                JsonObject error = json.getAsJsonObject("error");
+                String message = error.has("message") ? error.get("message").getAsString() : "unknown error";
+                LOG.warn("/embeddings error (model=" + model + "): " + message);
+                return null;
+            }
+            if (!json.has("data") || !json.get("data").isJsonArray()) return null;
+            JsonArray data = json.getAsJsonArray("data");
 
-        if (client != null
-                && Objects.equals(baseUrl, clientBaseUrl)
-                && Objects.equals(apiKey, clientApiKey)
-                && Objects.equals(model, clientModel)) {
-            return client;
+            float[][] vectors = new float[expectedCount][];
+            int position = 0;
+            for (JsonElement element : data) {
+                if (!element.isJsonObject()) continue;
+                JsonObject item = element.getAsJsonObject();
+                int index = item.has("index") && !item.get("index").isJsonNull()
+                        ? item.get("index").getAsInt() : position;
+                position++;
+                if (index < 0 || index >= expectedCount || !item.has("embedding")) continue;
+                vectors[index] = normalize(GSON.fromJson(item.get("embedding"), float[].class));
+            }
+            List<float[]> result = new ArrayList<>(expectedCount);
+            Collections.addAll(result, vectors);
+            return result;
+        } catch (Exception e) {
+            LOG.warn("Failed to parse /embeddings response (model=" + model + "): " + e.getMessage());
+            return null;
         }
-        if (client != null) {
-            client.close();
-        }
-        client = new OpenAiLlmClient(baseUrl, apiKey, model);
-        clientBaseUrl = baseUrl;
-        clientApiKey = apiKey;
-        clientModel = model;
-        return client;
     }
 
-    /** Truncates/zero-pads to {@link #DIMENSION} and scales to unit length. Null if unusable. */
-    private static float[] fitAndNormalize(float[] raw) {
+    /** Scales the vector to unit length. Null if empty, non-finite or zero-norm. */
+    private static float[] normalize(float[] raw) {
         if (raw == null || raw.length == 0) return null;
-        float[] vector = new float[DIMENSION];
-        System.arraycopy(raw, 0, vector, 0, Math.min(raw.length, DIMENSION));
         double norm = 0;
-        for (float v : vector) {
+        for (float v : raw) {
             if (!Float.isFinite(v)) return null;
             norm += v * v;
         }
         if (norm == 0) return null;
         double scale = 1.0 / Math.sqrt(norm);
-        for (int i = 0; i < vector.length; i++) {
-            vector[i] = (float) (vector[i] * scale);
+        float[] vector = new float[raw.length];
+        for (int i = 0; i < raw.length; i++) {
+            vector[i] = (float) (raw[i] * scale);
         }
         return vector;
     }
 
     private static String truncate(String text) {
         return text.length() <= MAX_TEXT_CHARS ? text : text.substring(0, MAX_TEXT_CHARS);
+    }
+
+    private static String truncateForLog(String text) {
+        if (text == null) return "";
+        return text.length() <= MAX_LOG_BODY_CHARS ? text : text.substring(0, MAX_LOG_BODY_CHARS) + "...";
     }
 }

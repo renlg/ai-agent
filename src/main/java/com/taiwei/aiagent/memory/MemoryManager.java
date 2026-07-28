@@ -17,14 +17,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
 /**
  * Local long-term memory service with hybrid retrieval: SQLite FTS keyword search fused (RRF)
- * with cosine similarity over LLM-generated embeddings (see {@link EmbeddingService} — no vector
+ * with cosine similarity over API-generated embeddings (see {@link EmbeddingService} — no vector
  * DB dependency). Project-level service backed by a per-project SQLite file under
  * {@code .taiwei/memories/memory.db}.
  */
@@ -48,6 +51,9 @@ public class MemoryManager implements Disposable {
     /** Floor on cosine similarity for a vector match to count as relevant. */
     private static final double MIN_VECTOR_SIMILARITY = 0.3;
 
+    /** How long a search may block waiting for its query embedding before going keyword-only. */
+    private static final long QUERY_EMBED_TIMEOUT_MS = 5_000L;
+
     /** Default cap on the on-disk size of the memory database. */
     public static final long MAX_STORAGE_BYTES = 50 * 1024 * 1024;
 
@@ -58,13 +64,14 @@ public class MemoryManager implements Disposable {
     private final Map<String, float[]> embeddingCache = new ConcurrentHashMap<>();
     /** Memory id -> stored embedding, loaded from SQLite on init and kept in sync with the DB. */
     private final Map<String, float[]> storedEmbeddings;
-    /** Queries whose embedding is being generated in the background, to avoid duplicate submissions. */
-    private final Set<String> pendingQueryEmbeddings = ConcurrentHashMap.newKeySet();
+    /** Query -> in-flight embedding generation, so concurrent searches share one API call. */
+    private final Map<String, CompletableFuture<float[]>> pendingQueryEmbeddings = new ConcurrentHashMap<>();
 
     /**
-     * Runs embedding generation off the caller's thread: LLM-backed embedding takes 1-3s, so
-     * {@link #remember} and {@link #hybridSearch} never wait on it. Single daemon thread —
-     * embeddings are best-effort and keyword search covers the gap until they land.
+     * Runs embedding generation off the caller's thread: API-backed embedding can take seconds,
+     * so {@link #remember} never waits on it and {@link #hybridSearch} waits at most
+     * {@link #QUERY_EMBED_TIMEOUT_MS}. Single daemon thread — embeddings are best-effort and
+     * keyword search covers the gap until they land.
      */
     private final ScheduledExecutorService embeddingExecutor = Executors.newScheduledThreadPool(1, r -> {
         Thread t = new Thread(r, "memory-embedder");
@@ -197,9 +204,11 @@ public class MemoryManager implements Disposable {
     /**
      * Hybrid retrieval: keyword search and embedding cosine similarity are ranked separately,
      * fused with Reciprocal Rank Fusion (score = Σ 1/(60 + rank)), then re-ranked with an
-     * importance/recency/access-count boost. When no embedding is available yet (first search
-     * for a query, API down, no config) this degrades gracefully to keyword-only ranking
-     * without blocking; the query embedding is prepared in the background for later searches.
+     * importance/recency/access-count boost. An uncached query embedding is generated
+     * synchronously with a bounded wait ({@link #QUERY_EMBED_TIMEOUT_MS}) so even the first
+     * search gets semantic matches; on timeout or error this degrades gracefully to
+     * keyword-only ranking while the embedding finishes in the background and is cached for
+     * later identical searches.
      *
      * <p>A relevance floor is applied at fusion time: an entry is dropped only when it clears
      * neither the keyword threshold ({@code minRelevance}, on the normalized 0..1 matchScore
@@ -304,17 +313,16 @@ public class MemoryManager implements Disposable {
     /**
      * Memory ids ordered by cosine similarity to the query embedding; empty when unavailable.
      * {@code passingIds} holds the subset at or above {@link #MIN_VECTOR_SIMILARITY}.
-     * Never blocks: an uncached query embedding is generated in the background for later
-     * searches while this one degrades to keyword-only.
+     * Blocks at most {@link #QUERY_EMBED_TIMEOUT_MS} for an uncached query embedding; on
+     * timeout the generation keeps running in the background (cached for later searches)
+     * while this search degrades to keyword-only.
      */
     private Ranking vectorRanking(String query, Set<String> candidateIds) {
         if (storedEmbeddings.isEmpty()) return Ranking.EMPTY;
         float[] queryVector = embeddingCache.get(query);
         if (queryVector == null) {
-            if (pendingQueryEmbeddings.add(query)) {
-                embeddingExecutor.execute(() -> cacheQueryEmbedding(query));
-            }
-            return Ranking.EMPTY;
+            queryVector = awaitQueryEmbedding(query);
+            if (queryVector == null) return Ranking.EMPTY;
         }
 
         List<Map.Entry<String, Double>> similarities = new ArrayList<>();
@@ -337,17 +345,41 @@ public class MemoryManager implements Disposable {
         return new Ranking(ids, passing);
     }
 
-    /** Background task: embeds a search query and caches it so the next identical search runs full hybrid. */
-    private void cacheQueryEmbedding(String query) {
+    /**
+     * Embeds a search query on the embedding executor and waits up to
+     * {@link #QUERY_EMBED_TIMEOUT_MS} for the result. Concurrent searches for the same query
+     * share one in-flight generation. Returns {@code null} on timeout or failure — the
+     * generation itself is not cancelled, so a late result still lands in
+     * {@link #embeddingCache} for the next identical search.
+     */
+    private float[] awaitQueryEmbedding(String query) {
+        CompletableFuture<float[]> future = pendingQueryEmbeddings.computeIfAbsent(query, q -> {
+            CompletableFuture<float[]> pending = new CompletableFuture<>();
+            embeddingExecutor.execute(() -> {
+                try {
+                    float[] vector = EmbeddingService.getInstance().embed(q);
+                    if (vector != null) {
+                        embeddingCache.put(q, vector);
+                    }
+                    pending.complete(vector);
+                } catch (Exception e) {
+                    LOG.warn("Query embedding failed, keyword-only search will be used: " + e.getMessage());
+                    pending.complete(null);
+                } finally {
+                    pendingQueryEmbeddings.remove(q);
+                }
+            });
+            return pending;
+        });
         try {
-            float[] vector = EmbeddingService.getInstance().embed(query);
-            if (vector != null) {
-                embeddingCache.put(query, vector);
-            }
+            return future.get(QUERY_EMBED_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            LOG.info("Query embedding not ready within " + QUERY_EMBED_TIMEOUT_MS
+                    + "ms, falling back to keyword-only search");
+            return null;
         } catch (Exception e) {
-            LOG.warn("Query embedding failed, keyword-only search will be used: " + e.getMessage());
-        } finally {
-            pendingQueryEmbeddings.remove(query);
+            LOG.warn("Query embedding wait failed, keyword-only search will be used: " + e.getMessage());
+            return null;
         }
     }
 
