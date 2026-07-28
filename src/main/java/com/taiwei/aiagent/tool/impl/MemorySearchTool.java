@@ -28,7 +28,7 @@ public class MemorySearchTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "搜索已保存的记忆，当用户提及之前的偏好/事实/决策时调用";
+        return "搜索已保存的记忆（地址/位置/偏好/事实等），用户询问个人信息时立即调用";
     }
 
     @Override
