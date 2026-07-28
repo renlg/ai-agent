@@ -233,6 +233,7 @@
         safetyTimeoutId = setTimeout(function() {
             if (isProcessing) {
                 console.warn('Safety timeout triggered, resetting UI state');
+                stopGeneration();
                 window.onError('请求超时（200秒无响应），请检查网络连接或模型配置');
             }
         }, 200000);
