@@ -812,8 +812,7 @@
         el.className = 'thinking-indicator';
         el.id = 'thinkingIndicator';
         el.innerHTML =
-            '<div class="thinking-dots"><span></span><span></span><span></span></div>' +
-            '<span>thinking...</span>';
+            '<div class="thinking-dots"><span></span><span></span><span></span></div>';
         messagesArea.appendChild(el);
         scrollToBottom();
     }
