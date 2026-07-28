@@ -5,6 +5,7 @@ import com.google.gson.reflect.TypeToken;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -14,7 +15,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -84,6 +87,26 @@ public class MemoryStore implements AutoCloseable {
                 st.execute("CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories(tags)");
                 st.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(" +
                         "id UNINDEXED, content, tags)");
+            }
+            ensureEmbeddingColumn();
+        }
+    }
+
+    /** Migration for pre-embedding databases: adds the {@code embedding BLOB} column if missing. */
+    private void ensureEmbeddingColumn() throws SQLException {
+        boolean hasColumn = false;
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery("PRAGMA table_info(memories)")) {
+            while (rs.next()) {
+                if ("embedding".equalsIgnoreCase(rs.getString("name"))) {
+                    hasColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!hasColumn) {
+            try (Statement st = connection.createStatement()) {
+                st.execute("ALTER TABLE memories ADD COLUMN embedding BLOB");
             }
         }
     }
@@ -246,6 +269,59 @@ public class MemoryStore implements AutoCloseable {
         } catch (SQLException e) {
             LOG.warn("Failed to delete FTS entry for: " + id, e);
         }
+    }
+
+    /** Stores (or replaces) the embedding vector for an existing memory row. */
+    public void saveEmbedding(String id, float[] vector) {
+        if (vector == null || vector.length == 0) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "UPDATE memories SET embedding=? WHERE id=?")) {
+                ps.setBytes(1, vectorToBytes(vector));
+                ps.setString(2, id);
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                throw new IllegalStateException("Failed to save embedding for memory: " + id, e);
+            }
+        }
+    }
+
+    /** Loads every stored embedding as {@code memory id -> vector}. Undecodable blobs are skipped. */
+    public Map<String, float[]> loadAllEmbeddings() {
+        synchronized (lock) {
+            Map<String, float[]> result = new HashMap<>();
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery(
+                         "SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")) {
+                while (rs.next()) {
+                    float[] vector = bytesToVector(rs.getBytes(2));
+                    if (vector != null) {
+                        result.put(rs.getString(1), vector);
+                    }
+                }
+            } catch (SQLException e) {
+                LOG.warn("Failed to load stored embeddings", e);
+            }
+            return result;
+        }
+    }
+
+    private static byte[] vectorToBytes(float[] vector) {
+        ByteBuffer buffer = ByteBuffer.allocate(vector.length * Float.BYTES);
+        for (float v : vector) {
+            buffer.putFloat(v);
+        }
+        return buffer.array();
+    }
+
+    private static float[] bytesToVector(byte[] bytes) {
+        if (bytes == null || bytes.length == 0 || bytes.length % Float.BYTES != 0) return null;
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        float[] vector = new float[bytes.length / Float.BYTES];
+        for (int i = 0; i < vector.length; i++) {
+            vector[i] = buffer.getFloat();
+        }
+        return vector;
     }
 
     public Optional<MemoryEntry> findById(String id) {

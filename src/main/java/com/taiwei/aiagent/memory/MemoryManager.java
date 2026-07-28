@@ -17,11 +17,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * Local, keyword-based long-term memory service (no vector DB / embeddings — see project notes).
- * Project-level service backed by a per-project SQLite file under {@code .taiwei/memories/memory.db}.
+ * Local long-term memory service with hybrid retrieval: SQLite FTS keyword search fused (RRF)
+ * with cosine similarity over LLM-generated embeddings (see {@link EmbeddingService} — no vector
+ * DB dependency). Project-level service backed by a per-project SQLite file under
+ * {@code .taiwei/memories/memory.db}.
  */
 public class MemoryManager implements Disposable {
 
@@ -31,11 +34,19 @@ public class MemoryManager implements Disposable {
     private static final long DAY_MILLIS = 24L * 60 * 60 * 1000;
     private static final long DECAY_PERIOD_MILLIS = 30 * DAY_MILLIS;
 
+    /** RRF constant: fused score = Σ 1/(K + rank) over each ranking a memory appears in. */
+    private static final int RRF_K = 60;
+
     /** Default cap on the on-disk size of the memory database. */
     public static final long MAX_STORAGE_BYTES = 50 * 1024 * 1024;
 
     private final MemoryStore store;
     private volatile long maxStorageBytes = MAX_STORAGE_BYTES;
+
+    /** Query text -> embedding, so repeated searches for the same query skip the API call. */
+    private final Map<String, float[]> embeddingCache = new ConcurrentHashMap<>();
+    /** Memory id -> stored embedding, loaded from SQLite on init and kept in sync with the DB. */
+    private final Map<String, float[]> storedEmbeddings;
 
     /** Constructor used by the IntelliJ project-service container. */
     public MemoryManager(@NotNull Project project) {
@@ -44,6 +55,7 @@ public class MemoryManager implements Disposable {
 
     public MemoryManager(MemoryStore store) {
         this.store = store;
+        this.storedEmbeddings = new ConcurrentHashMap<>(store.loadAllEmbeddings());
     }
 
     public static MemoryManager getInstance(@NotNull Project project) {
@@ -85,11 +97,25 @@ public class MemoryManager implements Disposable {
                 clampImportance(importance),
                 now);
         store.insert(entry);
+        try {
+            // Best-effort: a memory without an embedding is still searchable by keyword.
+            float[] vector = EmbeddingService.getInstance().embed(entry.getContent());
+            if (vector != null) {
+                store.saveEmbedding(entry.getId(), vector);
+                storedEmbeddings.put(entry.getId(), vector);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to store embedding for memory " + entry.getId() + ": " + e.getMessage());
+        }
         return entry;
     }
 
     public boolean forget(String id) {
-        return store.deleteById(id);
+        boolean deleted = store.deleteById(id);
+        if (deleted) {
+            storedEmbeddings.remove(id);
+        }
+        return deleted;
     }
 
     /** Deletes every memory whose content or tags match the given keyword(s). Returns the number deleted. */
@@ -100,6 +126,7 @@ public class MemoryManager implements Disposable {
         for (MemoryEntry entry : store.findAll()) {
             if (matchScore(tokens, entry) > 0) {
                 store.deleteById(entry.getId());
+                storedEmbeddings.remove(entry.getId());
                 deleted++;
             }
         }
@@ -133,6 +160,138 @@ public class MemoryManager implements Disposable {
         Set<String> tokens = tokenize(query);
         if (tokens.isEmpty()) return List.of();
         return scoreAndRank(tokens, store.searchByKeyword(query), limit, true);
+    }
+
+    /**
+     * Hybrid retrieval: keyword search and embedding cosine similarity are ranked separately,
+     * fused with Reciprocal Rank Fusion (score = Σ 1/(60 + rank)), then re-ranked with an
+     * importance/recency/access-count boost. When no embedding is available (API down, no
+     * config) this degrades gracefully to keyword-only ranking.
+     *
+     * @param query    search text
+     * @param category optional category filter (case-insensitive name like "preference"), null/blank = all
+     * @param limit    max results
+     * @return numbered result list (content, category, importance, relative age), or "" if nothing matched
+     */
+    public String hybridSearch(String query, String category, int limit) {
+        if (query == null || query.isBlank()) return "";
+        if (limit <= 0) limit = 5;
+        MemoryCategory categoryFilter = parseCategory(category);
+
+        Map<String, MemoryEntry> byId = new HashMap<>();
+        for (MemoryEntry entry : store.findAll()) {
+            byId.put(entry.getId(), entry);
+        }
+        if (byId.isEmpty()) return "";
+
+        // Fuse the two rankings with RRF.
+        Map<String, Double> fused = new HashMap<>();
+        addRrfScores(fused, keywordRanking(query));
+        addRrfScores(fused, vectorRanking(query, byId.keySet()));
+        if (fused.isEmpty()) return "";
+
+        // Post-fusion re-rank: boost by importance, recency and access count.
+        long now = System.currentTimeMillis();
+        List<ScoredEntry> scored = new ArrayList<>();
+        for (Map.Entry<String, Double> fusedEntry : fused.entrySet()) {
+            MemoryEntry entry = byId.get(fusedEntry.getKey());
+            if (entry == null) continue;
+            if (categoryFilter != null && entry.getCategory() != categoryFilter) continue;
+            double boost = 1.0
+                    + entry.getImportance() * 0.05
+                    + recencyScore(entry.getLastAccessedAt(), now) * 0.10
+                    + Math.log(1 + entry.getAccessCount()) * 0.02;
+            scored.add(new ScoredEntry(entry, fusedEntry.getValue() * boost));
+        }
+        scored.sort((a, b) -> Double.compare(b.score, a.score));
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < scored.size() && i < limit; i++) {
+            MemoryEntry entry = scored.get(i).entry;
+            store.update(entry.withAccessed(now));
+            sb.append(i + 1)
+                    .append(". [").append(entry.getCategory().name().toLowerCase(Locale.ROOT)).append("] ")
+                    .append(entry.getContent())
+                    .append("（重要度 ").append(entry.getImportance()).append("/10，")
+                    .append(relativeAge(entry.getCreatedAt(), now)).append("）\n");
+        }
+        return sb.toString().trim();
+    }
+
+    /** Memory ids ordered by keyword relevance (best first); empty when nothing matches. */
+    private List<String> keywordRanking(String query) {
+        Set<String> tokens = tokenize(query);
+        if (tokens.isEmpty()) return List.of();
+        List<ScoredEntry> scored = new ArrayList<>();
+        for (MemoryEntry entry : store.searchByKeyword(query)) {
+            double relevance = matchScore(tokens, entry);
+            if (relevance > 0) {
+                scored.add(new ScoredEntry(entry, relevance));
+            }
+        }
+        scored.sort((a, b) -> Double.compare(b.score, a.score));
+        List<String> ids = new ArrayList<>(scored.size());
+        for (ScoredEntry s : scored) {
+            ids.add(s.entry.getId());
+        }
+        return ids;
+    }
+
+    /** Memory ids ordered by cosine similarity to the query embedding; empty when unavailable. */
+    private List<String> vectorRanking(String query, Set<String> candidateIds) {
+        if (storedEmbeddings.isEmpty()) return List.of();
+        float[] queryVector = embeddingCache.get(query);
+        if (queryVector == null) {
+            try {
+                queryVector = EmbeddingService.getInstance().embed(query);
+            } catch (Exception e) {
+                LOG.warn("Query embedding failed, falling back to keyword-only search: " + e.getMessage());
+            }
+            if (queryVector == null) return List.of();
+            embeddingCache.put(query, queryVector);
+        }
+
+        List<Map.Entry<String, Double>> similarities = new ArrayList<>();
+        for (Map.Entry<String, float[]> stored : storedEmbeddings.entrySet()) {
+            if (!candidateIds.contains(stored.getKey())) continue;
+            double similarity = EmbeddingService.cosineSimilarity(queryVector, stored.getValue());
+            if (similarity > 0) {
+                similarities.add(Map.entry(stored.getKey(), similarity));
+            }
+        }
+        similarities.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+        List<String> ids = new ArrayList<>(similarities.size());
+        for (Map.Entry<String, Double> s : similarities) {
+            ids.add(s.getKey());
+        }
+        return ids;
+    }
+
+    private static void addRrfScores(Map<String, Double> fused, List<String> rankedIds) {
+        for (int rank = 0; rank < rankedIds.size(); rank++) {
+            fused.merge(rankedIds.get(rank), 1.0 / (RRF_K + rank + 1), Double::sum);
+        }
+    }
+
+    private static MemoryCategory parseCategory(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return MemoryCategory.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static String relativeAge(long timestamp, long now) {
+        long minutes = Math.max(0, now - timestamp) / (60 * 1000);
+        if (minutes < 1) return "刚刚";
+        if (minutes < 60) return minutes + "分钟前";
+        long hours = minutes / 60;
+        if (hours < 24) return hours + "小时前";
+        long days = hours / 24;
+        if (days < 30) return days + "天前";
+        if (days < 365) return (days / 30) + "个月前";
+        return (days / 365) + "年前";
     }
 
     /** Used for automatic prompt injection: finds memories relevant to the current chat message. */
@@ -261,6 +420,7 @@ public class MemoryManager implements Disposable {
             for (MemoryEntry candidate : group) {
                 if (!candidate.getId().equals(keeper.getId())) {
                     store.deleteById(candidate.getId());
+                    storedEmbeddings.remove(candidate.getId());
                 }
             }
         }
