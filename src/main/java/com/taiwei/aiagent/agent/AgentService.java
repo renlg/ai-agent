@@ -443,6 +443,9 @@ public class AgentService implements Disposable {
             }
             LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代（流式）");
 
+            // 每次调用 LLM 前都通知 UI 进入思考状态（不只是第一次迭代）
+            listener.onThinking();
+
             checkAndCompress(context, llmClient, lastPromptTokens[0], listener);
 
             final StringBuilder iterContent = new StringBuilder();

@@ -294,6 +294,7 @@
         if (currentAssistantEl && currentContentEl) {
             // 纯文本增量追加，不触发 Markdown 渲染
             currentContentEl.textContent += content;
+            keepThinkingAtBottom();
             scrollToBottom();
             return;
         }
@@ -306,6 +307,7 @@
         currentContentEl = msg.querySelector('.message-content');
         // 初始内容用 textContent 设置
         currentContentEl.textContent = accumulatedContent;
+        keepThinkingAtBottom();
         scrollToBottom();
     }
 
@@ -346,6 +348,7 @@
                 '<div class="tool-status">&#x6267;&#x884c;&#x4e2d;...</div>';
 
             messagesArea.appendChild(el);
+            keepThinkingAtBottom();
             scrollToBottom();
         });
     };
@@ -371,6 +374,7 @@
                     break;
                 }
             }
+            keepThinkingAtBottom();
             scrollToBottom();
         });
     };
@@ -393,7 +397,6 @@
                 return;
             }
 
-            removeThinking();
             // 不同迭代的文本之间加换行分隔
             if (accumulatedContent.length > 0 && !accumulatedContent.endsWith('\n')) {
                 accumulatedContent += '\n';
@@ -412,6 +415,7 @@
                 '<div class="command-progress-bar"><div class="command-progress-indeterminate"></div></div>' +
                 '<div class="command-status-text">' + MarkdownRenderer.escapeHtml(status) + '</div>';
             messagesArea.appendChild(el);
+            keepThinkingAtBottom();
             scrollToBottom();
         });
     };
@@ -436,7 +440,6 @@
             var existing = document.getElementById('runbtn-' + toolCallId);
             if (existing) return;
 
-            removeThinking();
             // 不同迭代的文本之间加换行分隔
             if (accumulatedContent.length > 0 && !accumulatedContent.endsWith('\n')) {
                 accumulatedContent += '\n';
@@ -460,6 +463,7 @@
                 '<button class="command-run-btn" onclick="window.runCommandAction(\'' + toolCallId + '\')">&#x25b6; &#x8fd0;&#x884c;</button>';
 
             messagesArea.appendChild(el);
+            keepThinkingAtBottom();
             scrollToBottom();
         });
     };
@@ -807,14 +811,26 @@
     }
 
     function showThinking() {
-        removeThinking();
-        var el = document.createElement('div');
-        el.className = 'thinking-indicator';
-        el.id = 'thinkingIndicator';
-        el.innerHTML =
-            '<div class="thinking-dots"><span></span><span></span><span></span></div>';
+        var el = document.getElementById('thinkingIndicator');
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'thinking-indicator';
+            el.id = 'thinkingIndicator';
+            el.innerHTML =
+                '<div class="thinking-dots"><span></span><span></span><span></span></div>';
+        }
+        // appendChild 对已在 DOM 中的节点是移动操作：始终保持指示器在消息区底部
         messagesArea.appendChild(el);
         scrollToBottom();
+    }
+
+    // 新元素（流式文本、工具卡片、进度条）追加后，把 thinking 指示器挪回底部；
+    // 指示器在整个 Agent 循环期间常驻，仅在 onComplete/onError 时移除
+    function keepThinkingAtBottom() {
+        var el = document.getElementById('thinkingIndicator');
+        if (el && el !== messagesArea.lastElementChild) {
+            messagesArea.appendChild(el);
+        }
     }
 
     function removeThinking() {
@@ -823,8 +839,8 @@
     }
 
     // 暴露给 Java 端调用
-    window.showThinking = showThinking;
-    window.removeThinking = removeThinking;
+    window.showThinking = function () { whenReady(showThinking); };
+    window.removeThinking = function () { whenReady(removeThinking); };
 
     function showRoundLoading() {
         removeRoundLoading();

@@ -914,6 +914,14 @@ public class ChatPanel extends JPanel implements Disposable {
 
                 @Override
                 public void onThinking() {
+                    // Agent 循环每次调用 LLM 前触发（可能多次），保持前端 thinking 指示器常驻
+                    List<ChatEntry> entries = sessionState.chatEntries;
+                    if (entries.isEmpty() || entries.get(entries.size() - 1).type != ChatEntry.Type.THINKING) {
+                        entries.add(ChatEntry.thinking());
+                    }
+                    if (sessionId.equals(agentService.getActiveSessionId())) {
+                        pushToJs("showThinking", "");
+                    }
                 }
 
                 @Override

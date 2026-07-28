@@ -17,6 +17,7 @@ import com.taiwei.aiagent.tool.impl.FindReferencesTool;
 import com.taiwei.aiagent.tool.impl.FindSymbolTool;
 import com.taiwei.aiagent.tool.impl.GoToDefinitionTool;
 import com.taiwei.aiagent.tool.impl.LoadSkillTool;
+import com.taiwei.aiagent.tool.impl.MemoryTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
 import com.taiwei.aiagent.tool.impl.TodoPlanTool;
@@ -234,6 +235,7 @@ public class AgentContext {
         result.add(new RunCommandTool(project));
         result.add(new LoadSkillTool(project));
         result.add(new TodoPlanTool());
+        result.add(new MemoryTool(project));
         result.add(new BrowserTool(project));
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
