@@ -29,6 +29,9 @@ import java.util.regex.Pattern;
  * <p>Application-level singleton; all public methods are safe for concurrent use. Every method
  * is best-effort: on any failure (no API config, network error, unparseable reply) it returns
  * {@code null} for the affected text so callers can degrade to keyword-only search.
+ *
+ * <p>Embedding calls block on the LLM API for seconds; invoke them only from background
+ * threads (see MemoryManager's embedding executor), never from a chat/tool-execution thread.
  */
 public final class EmbeddingService {
 

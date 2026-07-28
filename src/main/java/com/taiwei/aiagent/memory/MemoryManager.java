@@ -18,6 +18,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Pattern;
 
 /**
@@ -47,6 +49,19 @@ public class MemoryManager implements Disposable {
     private final Map<String, float[]> embeddingCache = new ConcurrentHashMap<>();
     /** Memory id -> stored embedding, loaded from SQLite on init and kept in sync with the DB. */
     private final Map<String, float[]> storedEmbeddings;
+    /** Queries whose embedding is being generated in the background, to avoid duplicate submissions. */
+    private final Set<String> pendingQueryEmbeddings = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Runs embedding generation off the caller's thread: LLM-backed embedding takes 1-3s, so
+     * {@link #remember} and {@link #hybridSearch} never wait on it. Single daemon thread —
+     * embeddings are best-effort and keyword search covers the gap until they land.
+     */
+    private final ScheduledExecutorService embeddingExecutor = Executors.newScheduledThreadPool(1, r -> {
+        Thread t = new Thread(r, "memory-embedder");
+        t.setDaemon(true);
+        return t;
+    });
 
     /** Constructor used by the IntelliJ project-service container. */
     public MemoryManager(@NotNull Project project) {
@@ -97,17 +112,25 @@ public class MemoryManager implements Disposable {
                 clampImportance(importance),
                 now);
         store.insert(entry);
+        // Best-effort: a memory without an embedding is still searchable by keyword.
+        embeddingExecutor.execute(() -> generateAndStoreEmbedding(entry.getId(), entry.getContent()));
+        return entry;
+    }
+
+    /**
+     * Background task: embeds {@code content} and persists the vector. No retry on failure —
+     * the memory stays keyword-searchable without an embedding.
+     */
+    private void generateAndStoreEmbedding(String id, String content) {
         try {
-            // Best-effort: a memory without an embedding is still searchable by keyword.
-            float[] vector = EmbeddingService.getInstance().embed(entry.getContent());
+            float[] vector = EmbeddingService.getInstance().embed(content);
             if (vector != null) {
-                store.saveEmbedding(entry.getId(), vector);
-                storedEmbeddings.put(entry.getId(), vector);
+                store.saveEmbedding(id, vector);
+                storedEmbeddings.put(id, vector);
             }
         } catch (Exception e) {
-            LOG.warn("Failed to store embedding for memory " + entry.getId() + ": " + e.getMessage());
+            LOG.warn("Failed to store embedding for memory " + id + ": " + e.getMessage());
         }
-        return entry;
     }
 
     public boolean forget(String id) {
@@ -165,8 +188,9 @@ public class MemoryManager implements Disposable {
     /**
      * Hybrid retrieval: keyword search and embedding cosine similarity are ranked separately,
      * fused with Reciprocal Rank Fusion (score = Σ 1/(60 + rank)), then re-ranked with an
-     * importance/recency/access-count boost. When no embedding is available (API down, no
-     * config) this degrades gracefully to keyword-only ranking.
+     * importance/recency/access-count boost. When no embedding is available yet (first search
+     * for a query, API down, no config) this degrades gracefully to keyword-only ranking
+     * without blocking; the query embedding is prepared in the background for later searches.
      *
      * @param query    search text
      * @param category optional category filter (case-insensitive name like "preference"), null/blank = all
@@ -237,18 +261,19 @@ public class MemoryManager implements Disposable {
         return ids;
     }
 
-    /** Memory ids ordered by cosine similarity to the query embedding; empty when unavailable. */
+    /**
+     * Memory ids ordered by cosine similarity to the query embedding; empty when unavailable.
+     * Never blocks: an uncached query embedding is generated in the background for later
+     * searches while this one degrades to keyword-only.
+     */
     private List<String> vectorRanking(String query, Set<String> candidateIds) {
         if (storedEmbeddings.isEmpty()) return List.of();
         float[] queryVector = embeddingCache.get(query);
         if (queryVector == null) {
-            try {
-                queryVector = EmbeddingService.getInstance().embed(query);
-            } catch (Exception e) {
-                LOG.warn("Query embedding failed, falling back to keyword-only search: " + e.getMessage());
+            if (pendingQueryEmbeddings.add(query)) {
+                embeddingExecutor.execute(() -> cacheQueryEmbedding(query));
             }
-            if (queryVector == null) return List.of();
-            embeddingCache.put(query, queryVector);
+            return List.of();
         }
 
         List<Map.Entry<String, Double>> similarities = new ArrayList<>();
@@ -265,6 +290,20 @@ public class MemoryManager implements Disposable {
             ids.add(s.getKey());
         }
         return ids;
+    }
+
+    /** Background task: embeds a search query and caches it so the next identical search runs full hybrid. */
+    private void cacheQueryEmbedding(String query) {
+        try {
+            float[] vector = EmbeddingService.getInstance().embed(query);
+            if (vector != null) {
+                embeddingCache.put(query, vector);
+            }
+        } catch (Exception e) {
+            LOG.warn("Query embedding failed, keyword-only search will be used: " + e.getMessage());
+        } finally {
+            pendingQueryEmbeddings.remove(query);
+        }
     }
 
     private static void addRrfScores(Map<String, Double> fused, List<String> rankedIds) {
@@ -479,6 +518,7 @@ public class MemoryManager implements Disposable {
 
     @Override
     public void dispose() {
+        embeddingExecutor.shutdownNow();
         store.close();
     }
 }
