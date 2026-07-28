@@ -241,11 +241,18 @@ public class AgentService implements Disposable {
         // 解析 @ 提及，增强用户消息（附加文件内容、项目结构、Git 上下文等）
         String augmentedMessage = ContextMentionResolver.augment(project, userMessage);
 
-        // 添加用户消息到对话历史（使用增强后的消息，包含 @ 引用的上下文）
-        ctx.getConversation().addUserMessage(augmentedMessage, images);
+        // 检索与本条消息相关的长期记忆，追加到用户消息末尾（而非系统提示词）
+        // 这样系统提示词在整个会话内保持字节完全一致，能持续命中前缀缓存（DeepSeek/通义/OpenAI）
+        String memoryContext = ctx.getPromptManager().buildRelevantMemoryContext(augmentedMessage);
+        String userContent = (memoryContext != null && !memoryContext.isEmpty())
+                ? augmentedMessage + "\n\n## Memory\n以下是与当前对话相关的长期记忆（本地存储，用户此前要求你记住的内容）：\n\n" + memoryContext
+                : augmentedMessage;
 
-        // 基于当前用户消息检索相关长期记忆，重建系统提示词（就地替换，不影响已有对话历史）
-        ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode(), augmentedMessage));
+        // 添加用户消息到对话历史（使用增强后的消息，包含 @ 引用的上下文及相关记忆）
+        ctx.getConversation().addUserMessage(userContent, images);
+
+        // 更新系统提示词（不再注入 memory，保证前缀缓存命中）
+        ctx.getConversation().updateSystemPrompt(ctx.getPromptManager().buildSystemPrompt(ctx.getMode()));
 
         ctx.setStopped(false);
         ctx.setActiveLlmClient(ctx.getLlmClient());
@@ -608,7 +615,7 @@ public class AgentService implements Disposable {
                 for (ChatMessage.ToolCall toolCall : iterToolCalls) {
                     String result = toolResults.get(toolCall.getId());
                     if (result != null) {
-                        context.getConversation().addToolResult(result, toolCall.getId());
+                        context.getConversation().addToolResult(truncateToolResult(result), toolCall.getId());
                     }
                 }
 
@@ -664,6 +671,44 @@ public class AgentService implements Disposable {
         usage.setCompletionTokens(totalUsage[1]);
         usage.setTotalTokens(totalUsage[2]);
         return usage;
+    }
+
+    // 工具结果截断阈值（近似 token 数）：超过该值时仅保留首尾各半
+    private static final int TOOL_RESULT_MAX_TOKENS = 8000;
+    private static final int TOOL_RESULT_HEAD_TOKENS = 4000;
+    private static final int TOOL_RESULT_TAIL_TOKENS = 4000;
+    // 粗略近似：1 token ≈ 4 字符（不引入外部分词依赖）
+    private static final int CHARS_PER_TOKEN = 4;
+
+    /**
+     * 工具结果截断闸门：所有工具类型（run_command、MCP、浏览器、文件读取等）的结果
+     * 在写入会话历史前统一经过此方法，避免超长输出（如构建日志）无限制占用上下文 token。
+     * 超出阈值时保留头部 + 尾部，中间插入明确的截断提示。
+     */
+    private static String truncateToolResult(String result) {
+        if (result == null || result.isEmpty()) {
+            return result;
+        }
+        int totalTokens = (int) Math.ceil(result.length() / (double) CHARS_PER_TOKEN);
+        if (totalTokens <= TOOL_RESULT_MAX_TOKENS) {
+            return result;
+        }
+
+        int headChars = TOOL_RESULT_HEAD_TOKENS * CHARS_PER_TOKEN;
+        int tailChars = TOOL_RESULT_TAIL_TOKENS * CHARS_PER_TOKEN;
+        if (headChars + tailChars >= result.length()) {
+            return result;
+        }
+
+        String head = result.substring(0, headChars);
+        String tail = result.substring(result.length() - tailChars);
+        String notice = "\n\n[... truncated — original result was " + totalTokens
+                + " tokens, showing first and last portions ...]\n\n";
+
+        LOG.info("Truncated tool result from " + totalTokens + " to "
+                + (TOOL_RESULT_HEAD_TOKENS + TOOL_RESULT_TAIL_TOKENS) + " tokens");
+
+        return head + notice + tail;
     }
 
     /**

@@ -10,9 +10,16 @@ import com.intellij.codeInsight.inline.completion.InlineCompletionRequest
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
 import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSingleSuggestion
 import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSuggestion
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiJavaFile
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.util.PsiTreeUtil
 import com.taiwei.aiagent.settings.AiAgentSettings
 import kotlinx.coroutines.flow.flowOf
 import okhttp3.MediaType.Companion.toMediaType
@@ -117,7 +124,8 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
         val language = detectLanguage(editor)
         val languageContext = if (language.isNotEmpty()) "[$language] " else ""
 
-        val smartPrefix = smartTruncatePrefix(rawPrefix, MAX_CONTEXT_CHARS)
+        val psiContext = buildPsiContext(editor, offset)
+        val smartPrefix = psiContext + smartTruncatePrefix(rawPrefix, MAX_CONTEXT_CHARS)
         val smartSuffix = smartTruncateSuffix(rawSuffix, MAX_CONTEXT_CHARS)
 
         val settings = AiAgentSettings.getInstance()
@@ -148,7 +156,79 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
         return FIM_MODEL_PATTERNS.any { lower.contains(it) }
     }
 
-    // ==================== 2. 语言检测 ====================
+    // ==================== 2. PSI 上下文提取 ====================
+
+    /**
+     * Extract imports, enclosing class signature, and enclosing method signature at the cursor
+     * to provide the LLM with structural context beyond the raw character window.
+     * Runs in a ReadAction so it is safe to call from any thread.
+     */
+    private fun buildPsiContext(editor: Editor, offset: Int): String {
+        return try {
+            ReadAction.compute<String, Exception> {
+                val project = editor.project ?: return@compute ""
+                val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(editor.document)
+                    ?: return@compute ""
+
+                val sb = StringBuilder()
+
+                // Collect import statements (Java)
+                if (psiFile is PsiJavaFile) {
+                    val importList = psiFile.importList
+                    if (importList != null && importList.allImportStatements.isNotEmpty()) {
+                        importList.allImportStatements.forEach { sb.append(it.text).append("\n") }
+                        sb.append("\n")
+                    }
+                }
+
+                // Collect imports for other file types by scanning leading lines (Kotlin, etc.)
+                if (psiFile !is PsiJavaFile) {
+                    val text = psiFile.text
+                    val lines = text.lines()
+                    val importLines = lines.takeWhile { it.isBlank() || it.startsWith("import ") || it.startsWith("package ") }
+                    if (importLines.isNotEmpty()) {
+                        importLines.filter { it.startsWith("import ") }.forEach { sb.append(it).append("\n") }
+                        if (sb.isNotEmpty()) sb.append("\n")
+                    }
+                }
+
+                // Find enclosing PSI elements at the cursor
+                val element = psiFile.findElementAt(minOf(offset, psiFile.textLength - 1).coerceAtLeast(0))
+                if (element != null) {
+                    val enclosingClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)
+                    val enclosingMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
+
+                    if (enclosingClass != null) {
+                        sb.append("// class: ").append(enclosingClass.name)
+                        val superClass = enclosingClass.superClass
+                        if (superClass != null && superClass.name != "Object") {
+                            sb.append(" extends ").append(superClass.name)
+                        }
+                        enclosingClass.interfaces.forEach { sb.append(" implements ").append(it.name) }
+                        sb.append("\n")
+
+                        // Include field declarations for context
+                        enclosingClass.fields.forEach { field ->
+                            sb.append("  ").append(field.type.presentableText).append(" ").append(field.name).append(";\n")
+                        }
+                    }
+
+                    if (enclosingMethod != null) {
+                        sb.append("// method: ").append(enclosingMethod.name)
+                            .append(enclosingMethod.parameterList.text).append("\n")
+                    }
+
+                    if (sb.isNotEmpty()) sb.append("\n")
+                }
+
+                sb.toString()
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    // ==================== 3. 语言检测 ====================
 
     private fun detectLanguage(editor: com.intellij.openapi.editor.Editor): String {
         val vFile: VirtualFile = editor.virtualFile ?: return ""
@@ -156,7 +236,7 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
         return EXT_LANGUAGE_MAP[ext] ?: ""
     }
 
-    // ==================== 3. 智能上下文截断 ====================
+    // ==================== 4. 智能上下文截断 ====================
 
     private fun smartTruncatePrefix(rawPrefix: String, maxChars: Int): String {
         if (rawPrefix.length <= maxChars) return rawPrefix

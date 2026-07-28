@@ -8,17 +8,19 @@ import com.taiwei.aiagent.llm.openai.OpenAiLlmClient;
 import com.taiwei.aiagent.model.Conversation;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.tool.ToolRegistry;
+import com.taiwei.aiagent.tool.impl.BrowserTool;
 import com.taiwei.aiagent.tool.impl.DdgSearchTool;
 import com.taiwei.aiagent.tool.impl.FileReadTool;
 import com.taiwei.aiagent.tool.impl.FileReplaceTool;
 import com.taiwei.aiagent.tool.impl.FileWriteTool;
 import com.taiwei.aiagent.tool.impl.FindReferencesTool;
 import com.taiwei.aiagent.tool.impl.FindSymbolTool;
-import com.taiwei.aiagent.tool.impl.RunCommandTool;
+import com.taiwei.aiagent.tool.impl.GoToDefinitionTool;
 import com.taiwei.aiagent.tool.impl.LoadSkillTool;
+import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
+import com.taiwei.aiagent.tool.impl.TodoPlanTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
-import com.taiwei.aiagent.tool.impl.BrowserTool;
 
 /**
  * Agent 会话上下文
@@ -39,7 +41,7 @@ public class AgentContext {
     /**
      * Agent 循环最大迭代次数（防止无限循环）
      */
-    private static final int MAX_ITERATIONS = 10;
+    private static final int MAX_ITERATIONS = 50;
 
     private LlmClient cachedClient;
     private String cachedBaseUrl;
@@ -228,8 +230,10 @@ public class AgentContext {
         result.add(new SearchCodeTool(project));
         result.add(new FindSymbolTool(project));
         result.add(new FindReferencesTool(project));
+        result.add(new GoToDefinitionTool(project));
         result.add(new RunCommandTool(project));
         result.add(new LoadSkillTool(project));
+        result.add(new TodoPlanTool());
         result.add(new BrowserTool(project));
 
         AiAgentSettings settings = AiAgentSettings.getInstance();

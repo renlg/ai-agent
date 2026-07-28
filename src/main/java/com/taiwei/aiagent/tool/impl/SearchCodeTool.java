@@ -3,10 +3,15 @@ package com.taiwei.aiagent.tool.impl;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileVisitor;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.PsiSearchHelper;
 import com.taiwei.aiagent.tool.Tool;
 
 import com.google.gson.Gson;
@@ -21,13 +26,16 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * 搜索代码工具
- * Agent 可以通过此工具在项目中按关键词或正则搜索代码
+ * 搜索代码工具（IntelliJ 索引加速版）
+ * 优先使用 PsiSearchHelper 单词索引缩小候选文件范围，再做正则/文本匹配
  */
 public class SearchCodeTool implements Tool {
 
     private final Project project;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+
+    // minimum word length for index pre-filtering
+    private static final int MIN_WORD_LEN = 4;
 
     public SearchCodeTool(Project project) {
         this.project = project;
@@ -79,11 +87,12 @@ public class SearchCodeTool implements Tool {
             try {
                 pattern = Pattern.compile(query, Pattern.CASE_INSENSITIVE);
             } catch (PatternSyntaxException e) {
-                // 如果不是有效正则，按字面量搜索
                 pattern = Pattern.compile(Pattern.quote(query), Pattern.CASE_INSENSITIVE);
             }
 
             final Pattern searchPattern = pattern;
+            final String indexWord = extractIndexWord(query);
+
             return ReadAction.compute(() -> {
                 VirtualFile baseDir = project.getBaseDir();
                 if (baseDir == null) {
@@ -93,10 +102,16 @@ public class SearchCodeTool implements Tool {
                 }
 
                 List<Map<String, Object>> results = new ArrayList<>();
-                searchInDirectory(baseDir, searchPattern, filePattern, maxResults, results);
+
+                if (indexWord != null) {
+                    searchWithIndex(indexWord, searchPattern, filePattern, maxResults, results, baseDir);
+                } else {
+                    searchInDirectory(baseDir, searchPattern, filePattern, maxResults, results);
+                }
 
                 Map<String, Object> output = new LinkedHashMap<>();
                 output.put("query", query);
+                output.put("index_word", indexWord != null ? indexWord : "(none — full scan)");
                 output.put("total", results.size());
                 output.put("results", results);
 
@@ -110,68 +125,124 @@ public class SearchCodeTool implements Tool {
         }
     }
 
+    /**
+     * Extract the longest alphanumeric word (≥ MIN_WORD_LEN) from the query for index pre-filtering.
+     * Returns null if no suitable word is found.
+     */
+    private String extractIndexWord(String query) {
+        Matcher m = Pattern.compile("[A-Za-z][A-Za-z0-9_]{" + (MIN_WORD_LEN - 1) + ",}").matcher(query);
+        String longest = null;
+        while (m.find()) {
+            String word = m.group();
+            if (longest == null || word.length() > longest.length()) {
+                longest = word;
+            }
+        }
+        return longest;
+    }
+
+    /**
+     * Index-accelerated search: use PsiSearchHelper to find only files containing the index word,
+     * then do full pattern matching within those files.
+     */
+    private void searchWithIndex(String indexWord, Pattern pattern, String filePattern,
+                                 int maxResults, List<Map<String, Object>> results, VirtualFile baseDir) {
+        PsiSearchHelper helper = PsiSearchHelper.getInstance(project);
+        GlobalSearchScope scope = GlobalSearchScope.projectScope(project);
+
+        helper.processAllFilesWithWord(indexWord, scope, psiFile -> {
+            if (results.size() >= maxResults) return false;
+
+            VirtualFile vFile = psiFile.getVirtualFile();
+            if (vFile == null) return true;
+
+            // File pattern filter
+            if (filePattern != null && !matchGlob(vFile.getName(), filePattern)) return true;
+
+            // Skip generated / build outputs that are outside the project source tree but in scope
+            String path = vFile.getPath();
+            if (path.contains("/build/") || path.contains("/node_modules/")) return true;
+
+            Document document = PsiDocumentManager.getInstance(project).getDocument(psiFile);
+            if (document == null) return true;
+
+            matchInDocument(document, vFile, pattern, maxResults, results, baseDir);
+            return results.size() < maxResults;
+        }, false /* case-insensitive pre-filter */);
+    }
+
+    /**
+     * Fallback VFS traversal for queries without an extractable index word (e.g., pure symbols like ".*").
+     */
     private void searchInDirectory(VirtualFile dir, Pattern pattern, String filePattern,
                                    int maxResults, List<Map<String, Object>> results) {
         VfsUtilCore.visitChildrenRecursively(dir, new VirtualFileVisitor<Void>() {
             @Override
             public boolean visitFile(VirtualFile file) {
-                if (results.size() >= maxResults) {
-                    return false;
-                }
+                if (results.size() >= maxResults) return false;
 
-                // 跳过隐藏目录和构建目录
                 if (file.isDirectory()) {
                     String name = file.getName();
                     return !name.startsWith(".") && !name.equals("build") && !name.equals("node_modules");
                 }
 
-                // 文件名过滤
-                if (filePattern != null && !matchGlob(file.getName(), filePattern)) {
-                    return false;
-                }
-
-                // 跳过二进制文件和大文件
-                if (file.getLength() > 1_000_000) {
-                    return false;
-                }
+                if (filePattern != null && !matchGlob(file.getName(), filePattern)) return true;
+                if (file.getLength() > 1_000_000) return true;
 
                 try {
                     String content = new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
-                    String[] lines = content.split("\n");
-                    for (int i = 0; i < lines.length; i++) {
-                        if (results.size() >= maxResults) break;
-                        Matcher matcher = pattern.matcher(lines[i]);
-                        if (matcher.find()) {
-                            String relativePath = VfsUtilCore.getRelativePath(file, project.getBaseDir());
-                            Map<String, Object> entry = new LinkedHashMap<>();
-                            entry.put("file", relativePath);
-                            entry.put("line", i + 1);
-                            entry.put("symbol_type", "text_match");
-                            entry.put("signature", "");
-                            entry.put("containing_class", "");
-                            // 上下文预览行
-                            List<String> preview = new ArrayList<>();
-                            int start = Math.max(0, i - 2);
-                            int end = Math.min(lines.length, i + 3);
-                            for (int j = start; j < end; j++) {
-                                preview.add((j == i ? ">>> " : "    ") + lines[j].trim());
-                            }
-                            entry.put("preview_lines", preview);
-                            results.add(entry);
-                        }
-                    }
+                    matchInText(content, file, pattern, maxResults, results, dir.getParent() != null ? dir.getParent() : dir);
                 } catch (Exception ignored) {
-                    // 跳过无法读取的文件
                 }
-
                 return true;
             }
         });
     }
 
-    /**
-     * 简单的 glob 匹配（支持 * 和 ?）
-     */
+    private void matchInDocument(Document document, VirtualFile vFile, Pattern pattern,
+                                 int maxResults, List<Map<String, Object>> results, VirtualFile baseDir) {
+        String content = document.getText();
+        String[] lines = content.split("\n");
+        String relativePath = VfsUtilCore.getRelativePath(vFile, baseDir);
+        if (relativePath == null) relativePath = vFile.getPath();
+
+        for (int i = 0; i < lines.length; i++) {
+            if (results.size() >= maxResults) break;
+            if (pattern.matcher(lines[i]).find()) {
+                results.add(buildEntry(relativePath, i, lines));
+            }
+        }
+    }
+
+    private void matchInText(String content, VirtualFile vFile, Pattern pattern,
+                             int maxResults, List<Map<String, Object>> results, VirtualFile baseDir) {
+        String[] lines = content.split("\n");
+        String relativePath = VfsUtilCore.getRelativePath(vFile, baseDir);
+        if (relativePath == null) relativePath = vFile.getPath();
+
+        for (int i = 0; i < lines.length; i++) {
+            if (results.size() >= maxResults) break;
+            if (pattern.matcher(lines[i]).find()) {
+                results.add(buildEntry(relativePath, i, lines));
+            }
+        }
+    }
+
+    private Map<String, Object> buildEntry(String relativePath, int lineIndex, String[] lines) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("file", relativePath);
+        entry.put("line", lineIndex + 1);
+
+        List<String> preview = new ArrayList<>();
+        int start = Math.max(0, lineIndex - 2);
+        int end = Math.min(lines.length, lineIndex + 3);
+        for (int j = start; j < end; j++) {
+            preview.add((j == lineIndex ? ">>> " : "    ") + lines[j]);
+        }
+        entry.put("preview_lines", preview);
+        return entry;
+    }
+
     private boolean matchGlob(String fileName, String glob) {
         String regex = glob
                 .replace(".", "\\.")

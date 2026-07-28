@@ -202,7 +202,8 @@ public class RunCommandTool implements Tool {
             // 清理临时文件
             cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
 
-            return String.format("退出码: %d\n\n输出:\n%s", exitCode, output);
+            String hint = exitCode != 0 ? buildFailureHint(command, exitCode, output) : "";
+            return String.format("退出码: %d\n%s\n输出:\n%s", exitCode, hint, output);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -301,6 +302,33 @@ public class RunCommandTool implements Tool {
     private String truncate(String s, int maxLen) {
         if (s.length() <= maxLen) return s;
         return s.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * Build an actionable hint when a command exits with a non-zero code.
+     */
+    private String buildFailureHint(String command, int exitCode, String output) {
+        String lowerOutput = output.toLowerCase();
+        String lowerCmd = command.toLowerCase();
+        StringBuilder hint = new StringBuilder();
+
+        if (lowerOutput.contains("command not found") || lowerOutput.contains("not found") && exitCode == 127) {
+            String cmdName = command.trim().split("\\s+")[0];
+            hint.append("提示: 命令 \"").append(cmdName).append("\" 未找到。")
+                .append("请确认该命令已安装，或检查 PATH 环境变量。");
+        } else if (lowerOutput.contains("permission denied") || exitCode == 126) {
+            hint.append("提示: 权限不足。可尝试 chmod +x <文件> 或检查文件权限。");
+        } else if (lowerOutput.contains("no such file or directory")) {
+            hint.append("提示: 文件或目录不存在。请先用 ls 确认路径是否正确。");
+        } else if ((lowerCmd.contains("gradle") || lowerCmd.contains("mvn")) && exitCode != 0) {
+            hint.append("提示: 构建失败，请检查上方错误信息中的 \"error:\" 行。");
+        } else if (lowerOutput.contains("out of memory") || lowerOutput.contains("outofmemoryerror")) {
+            hint.append("提示: 内存不足。可在命令中增加 JVM 参数如 -Xmx2g。");
+        } else if (exitCode != 0) {
+            hint.append("提示: 命令以退出码 ").append(exitCode).append(" 结束，请检查上方输出的错误信息。");
+        }
+
+        return hint.length() > 0 ? hint + "\n" : "";
     }
 
     /**

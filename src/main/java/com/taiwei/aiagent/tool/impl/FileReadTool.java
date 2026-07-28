@@ -7,11 +7,11 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.tool.Tool;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.stream.Collectors;
 
 /**
  * 读取文件工具
@@ -67,7 +67,7 @@ public class FileReadTool implements Tool {
 
             Path resolved = resolvePath(filePath);
             if (!Files.exists(resolved)) {
-                return "错误: 文件不存在 - " + resolved;
+                return buildFileNotFoundError(resolved);
             }
             if (Files.isDirectory(resolved)) {
                 return "错误: 路径是目录而非文件 - " + resolved;
@@ -102,6 +102,51 @@ public class FileReadTool implements Tool {
         } catch (Exception e) {
             return "读取文件失败: " + e.getMessage();
         }
+    }
+
+    private String buildFileNotFoundError(Path resolved) {
+        StringBuilder msg = new StringBuilder();
+        msg.append("错误: 文件不存在 - ").append(resolved).append("\n");
+
+        Path parent = resolved.getParent();
+        if (parent != null && Files.isDirectory(parent)) {
+            try {
+                String targetName = resolved.getFileName() != null ? resolved.getFileName().toString().toLowerCase() : "";
+                java.util.List<String> similar = Files.list(parent)
+                        .filter(p -> !Files.isDirectory(p))
+                        .map(p -> p.getFileName().toString())
+                        .filter(name -> {
+                            String lower = name.toLowerCase();
+                            // Show files with similar name (share ≥4 chars with target)
+                            if (targetName.length() >= 4 && lower.contains(targetName.substring(0, Math.min(4, targetName.length())))) return true;
+                            if (targetName.length() >= 4 && targetName.contains(lower.substring(0, Math.min(4, lower.length())))) return true;
+                            return false;
+                        })
+                        .sorted()
+                        .limit(8)
+                        .collect(Collectors.toList());
+
+                if (!similar.isEmpty()) {
+                    msg.append("同目录下相似文件:\n");
+                    for (String name : similar) {
+                        msg.append("  ").append(parent).append("/").append(name).append("\n");
+                    }
+                } else {
+                    // List all files in parent dir as fallback
+                    java.util.List<String> all = Files.list(parent)
+                            .map(p -> (Files.isDirectory(p) ? "[dir] " : "      ") + p.getFileName())
+                            .sorted()
+                            .limit(20)
+                            .collect(Collectors.toList());
+                    if (!all.isEmpty()) {
+                        msg.append("父目录 ").append(parent).append(" 中的文件:\n");
+                        all.forEach(f -> msg.append("  ").append(f).append("\n"));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return msg.toString();
     }
 
     private Path resolvePath(String filePath) {

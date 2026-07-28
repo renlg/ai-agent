@@ -122,7 +122,7 @@ public class FileReplaceTool implements Tool {
         int count = countOccurrences(oldContent, args.old_string);
 
         if (count == 0) {
-            return "错误: 未找到匹配内容 - " + truncate(args.old_string, 80);
+            return buildStrReplaceNotFoundError(oldContent, args.old_string, resolved.toString());
         }
 
         String newContent;
@@ -274,6 +274,61 @@ public class FileReplaceTool implements Tool {
         if (error[0] != null) {
             throw new Exception(error[0]);
         }
+    }
+
+    /**
+     * Build a helpful error message when str_replace finds no match.
+     * Searches for the longest matching prefix of old_string's first non-blank line
+     * and shows surrounding context to help the caller identify what changed.
+     */
+    private String buildStrReplaceNotFoundError(String content, String oldString, String filePath) {
+        StringBuilder msg = new StringBuilder();
+        msg.append("错误: str_replace 未找到匹配内容\n");
+        msg.append("文件: ").append(filePath).append("\n");
+        msg.append("搜索内容 (前 120 字符): ").append(truncate(oldString, 120)).append("\n");
+        msg.append("建议: 用 read_file 重新读取文件，核实内容后重新构造 old_string\n");
+
+        // Find the first non-blank line of old_string and search for a partial match
+        String[] targetLines = oldString.split("\n");
+        String anchorLine = null;
+        for (String l : targetLines) {
+            if (!l.trim().isEmpty()) {
+                anchorLine = l.trim();
+                break;
+            }
+        }
+
+        if (anchorLine != null && anchorLine.length() >= 6) {
+            String[] contentLines = content.split("\n");
+            // Try progressively shorter prefixes of the anchor line to find closest match
+            int bestLine = -1;
+            int bestPrefixLen = 0;
+            for (int minLen = Math.min(anchorLine.length(), 40); minLen >= 6; minLen -= 4) {
+                String prefix = anchorLine.substring(0, minLen);
+                for (int i = 0; i < contentLines.length; i++) {
+                    if (contentLines[i].contains(prefix)) {
+                        if (minLen > bestPrefixLen) {
+                            bestPrefixLen = minLen;
+                            bestLine = i;
+                        }
+                    }
+                }
+                if (bestLine >= 0) break;
+            }
+
+            if (bestLine >= 0) {
+                msg.append("\n最接近的部分匹配位于第 ").append(bestLine + 1).append(" 行，上下文:\n");
+                int start = Math.max(0, bestLine - 4);
+                int end = Math.min(contentLines.length, bestLine + 6);
+                for (int i = start; i < end; i++) {
+                    msg.append(String.format("%4d | %s\n", i + 1, contentLines[i]));
+                }
+            } else {
+                msg.append("(文件中未找到与 old_string 相似的内容)\n");
+            }
+        }
+
+        return msg.toString();
     }
 
     private int countOccurrences(String content, String target) {

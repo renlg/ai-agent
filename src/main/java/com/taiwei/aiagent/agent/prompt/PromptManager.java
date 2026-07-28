@@ -65,21 +65,11 @@ public class PromptManager {
     }
 
     /**
-     * 生成系统提示词（不携带当前用户消息，无法注入相关长期记忆）
+     * 生成系统提示词（不注入相关记忆，保证系统提示词在整个会话内字节完全一致，从而命中前缀缓存）
      *
      * @param mode 当前 Agent 模式（Plan/Build），决定提示词中工具能力描述与行为约束
      */
     public String buildSystemPrompt(AgentMode mode) {
-        return buildSystemPrompt(mode, null);
-    }
-
-    /**
-     * 生成系统提示词
-     *
-     * @param mode        当前 Agent 模式（Plan/Build），决定提示词中工具能力描述与行为约束
-     * @param userMessage 当前用户消息，用于检索并注入相关的长期记忆；为 null 时跳过记忆注入
-     */
-    public String buildSystemPrompt(AgentMode mode, String userMessage) {
         VelocityContext context = new VelocityContext();
 
         context.put("workingDir", getWorkingDir());
@@ -93,13 +83,6 @@ public class PromptManager {
             context.put("skills", skillsContext);
         }
 
-        if (userMessage != null && !userMessage.isBlank()) {
-            String memoryContext = memoryManager.buildPromptContext(userMessage, RELEVANT_MEMORY_LIMIT);
-            if (memoryContext != null && !memoryContext.isEmpty()) {
-                context.put("memory", memoryContext);
-            }
-        }
-
         String rulesContext = buildRulesContext();
         if (rulesContext != null && !rulesContext.isEmpty()) {
             context.put("rules", rulesContext);
@@ -110,6 +93,28 @@ public class PromptManager {
         StringWriter writer = new StringWriter();
         velocityEngine.evaluate(context, writer, "system_prompt", templateContent);
         return writer.toString();
+    }
+
+    /**
+     * 检索与用户消息相关的长期记忆，供调用方追加到当前用户消息末尾。
+     * 将记忆从系统提示词移到用户消息尾部，可保证系统提示词字节完全一致，从而命中前缀缓存。
+     *
+     * @param userMessage 当前用户消息，用于语义检索相关记忆
+     * @return 已格式化的记忆上下文字符串；无相关记忆时返回空字符串
+     */
+    public String buildRelevantMemoryContext(String userMessage) {
+        if (userMessage == null || userMessage.isBlank()) return "";
+        String memoryContext = memoryManager.buildPromptContext(userMessage, RELEVANT_MEMORY_LIMIT);
+        return memoryContext != null ? memoryContext : "";
+    }
+
+    /**
+     * @deprecated 直接调用 {@link #buildSystemPrompt(AgentMode)}；记忆内容请通过
+     *             {@link #buildRelevantMemoryContext(String)} 获取后追加到用户消息末尾。
+     */
+    @Deprecated
+    public String buildSystemPrompt(AgentMode mode, String userMessage) {
+        return buildSystemPrompt(mode);
     }
 
     /**

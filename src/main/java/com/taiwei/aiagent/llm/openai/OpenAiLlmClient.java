@@ -5,6 +5,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.llm.LlmClient;
 import com.taiwei.aiagent.llm.LlmResponse;
 import com.taiwei.aiagent.llm.LlmStreamListener;
+import com.taiwei.aiagent.llm.TokenCounter;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.tool.Tool;
 import com.taiwei.aiagent.settings.AiAgentSettings;
@@ -14,6 +15,9 @@ import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +45,8 @@ public class OpenAiLlmClient implements LlmClient {
     );
 
     private static final int DEFAULT_CONTEXT_WINDOW = 128000;
+    private static final int CACHE_MAX_SIZE = 32;
+    private static final long CACHE_TTL_MS = 3_000L;
 
     private final String baseUrl;
     private final String apiKey;
@@ -48,6 +54,52 @@ public class OpenAiLlmClient implements LlmClient {
     private final OkHttpClient httpClient;
     private final Gson gson;
     private volatile EventSource currentEventSource;
+    private final Map<String, CacheEntry> completionCache;
+
+    // ========== LRU cache types ==========
+
+    private static class ToolCallRecord {
+        final String id, name, args;
+        ToolCallRecord(String id, String name, String args) {
+            this.id = id; this.name = name; this.args = args;
+        }
+    }
+
+    private static class CacheEntry {
+        final String lastUserMessage;
+        final LlmResponse response;             // non-null for chat() entries
+        final String streamContent;             // non-null for chatStream() entries
+        final List<ToolCallRecord> streamToolCalls;
+        final LlmResponse.Usage streamUsage;
+        final long cachedAt;
+
+        CacheEntry(String lastUserMessage, LlmResponse response) {
+            this.lastUserMessage = lastUserMessage;
+            this.response = response;
+            this.streamContent = null;
+            this.streamToolCalls = null;
+            this.streamUsage = null;
+            this.cachedAt = System.currentTimeMillis();
+        }
+
+        CacheEntry(String lastUserMessage, String streamContent,
+                   List<ToolCallRecord> streamToolCalls, LlmResponse.Usage streamUsage) {
+            this.lastUserMessage = lastUserMessage;
+            this.response = null;
+            this.streamContent = streamContent;
+            this.streamToolCalls = streamToolCalls;
+            this.streamUsage = streamUsage;
+            this.cachedAt = System.currentTimeMillis();
+        }
+
+        boolean isExpired() {
+            return System.currentTimeMillis() - cachedAt > CACHE_TTL_MS;
+        }
+
+        boolean isStreamEntry() {
+            return response == null;
+        }
+    }
 
     public OpenAiLlmClient(String baseUrl, String apiKey, String model) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
@@ -60,24 +112,57 @@ public class OpenAiLlmClient implements LlmClient {
                 .writeTimeout(120, TimeUnit.SECONDS)
                 .build();
         this.gson = new GsonBuilder().create();
+        this.completionCache = Collections.synchronizedMap(
+                new LinkedHashMap<String, CacheEntry>(16, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<String, CacheEntry> eldest) {
+                        return size() > CACHE_MAX_SIZE;
+                    }
+                }
+        );
     }
 
     @Override
     public LlmResponse chat(List<ChatMessage> messages, List<Tool> tools) {
-        String url = baseUrl + "chat/completions";
-        LOG.info("LLM 请求 - url=" + url + ", model=" + model);
-        JsonObject requestBody = buildRequestBody(messages, tools, false);
+        if (messages.isEmpty()) {
+            return LlmResponse.error("消息列表为空");
+        }
 
+        String prefixKey = buildPrefixKey(messages, tools);
+        String lastContent = getLastMessageContent(messages);
+
+        synchronized (completionCache) {
+            CacheEntry cached = completionCache.get(prefixKey);
+            if (cached != null && !cached.isExpired() && !cached.isStreamEntry()) {
+                if (lastContent.equals(cached.lastUserMessage)) {
+                    LOG.info("LRU cache hit (chat) key=" + prefixKey);
+                    return cached.response;
+                }
+                LOG.info("LRU cache invalidated (chat) - last message changed, key=" + prefixKey);
+                completionCache.remove(prefixKey);
+            }
+        }
+
+        LOG.info("LRU cache miss (chat) - calling API, url=" + baseUrl + "chat/completions, model=" + model);
+        JsonObject requestBody = buildRequestBody(messages, tools, false);
         Request request = buildRequest(requestBody);
 
         try (Response response = httpClient.newCall(request).execute()) {
             String body = response.body() != null ? response.body().string() : "";
-
             if (!response.isSuccessful()) {
                 return LlmResponse.error("HTTP " + response.code() + ": " + body);
             }
-
-            return parseResponse(body);
+            LlmResponse result = parseResponse(body);
+            if (result.isSuccess()) {
+                if (result.getUsage() == null) {
+                    result.setUsage(TokenCounter.estimate(messages, result.getContent()));
+                }
+                synchronized (completionCache) {
+                    completionCache.put(prefixKey, new CacheEntry(lastContent, result));
+                }
+                LOG.info("LRU cache stored (chat) key=" + prefixKey);
+            }
+            return result;
         } catch (IOException e) {
             return LlmResponse.error("请求失败: " + e.getMessage());
         }
@@ -85,16 +170,100 @@ public class OpenAiLlmClient implements LlmClient {
 
     @Override
     public void chatStream(List<ChatMessage> messages, List<Tool> tools, LlmStreamListener listener) {
+        if (messages.isEmpty()) {
+            listener.onError("消息列表为空", null);
+            return;
+        }
+
+        String prefixKey = buildPrefixKey(messages, tools);
+        String lastContent = getLastMessageContent(messages);
+
+        synchronized (completionCache) {
+            CacheEntry cached = completionCache.get(prefixKey);
+            if (cached != null && !cached.isExpired() && cached.isStreamEntry()) {
+                if (lastContent.equals(cached.lastUserMessage)) {
+                    LOG.info("LRU cache hit (stream) key=" + prefixKey);
+                    replayStreamCache(cached, listener);
+                    return;
+                }
+                LOG.info("LRU cache invalidated (stream) - last message changed, key=" + prefixKey);
+                completionCache.remove(prefixKey);
+            }
+        }
+
+        LOG.info("LRU cache miss (stream) - calling API, model=" + model + ", messages=" + messages.size()
+                + ", tools=" + (tools != null ? tools.size() : 0));
+
+        // Wrap listener to accumulate the response for caching on completion
+        StringBuilder contentAccum = new StringBuilder();
+        List<ToolCallRecord> toolCallAccum = new ArrayList<>();
+        LlmResponse.Usage[] usageHolder = {null};
+
+        LlmStreamListener accumListener = new LlmStreamListener() {
+            @Override
+            public void onContent(String delta) {
+                contentAccum.append(delta);
+                listener.onContent(delta);
+            }
+
+            @Override
+            public void onToolCall(String toolCallId, String functionName, String arguments) {
+                toolCallAccum.add(new ToolCallRecord(toolCallId, functionName, arguments));
+                listener.onToolCall(toolCallId, functionName, arguments);
+            }
+
+            @Override
+            public void onUsage(LlmResponse.Usage usage) {
+                usageHolder[0] = usage;
+                listener.onUsage(usage);
+            }
+
+            @Override
+            public void onComplete() {
+                if (usageHolder[0] == null) {
+                    LlmResponse.Usage estimated = TokenCounter.estimate(messages, contentAccum.toString());
+                    usageHolder[0] = estimated;
+                    listener.onUsage(estimated);
+                }
+                synchronized (completionCache) {
+                    completionCache.put(prefixKey, new CacheEntry(
+                            lastContent, contentAccum.toString(), toolCallAccum, usageHolder[0]));
+                }
+                LOG.info("LRU cache stored (stream) key=" + prefixKey);
+                listener.onComplete();
+            }
+
+            @Override
+            public void onError(String error, Throwable throwable) {
+                // Do not cache error responses
+                listener.onError(error, throwable);
+            }
+        };
+
         JsonObject requestBody = buildRequestBody(messages, tools, true);
-
         Request request = buildRequest(requestBody);
+        doStreamRequest(request, accumListener);
+    }
 
+    private void replayStreamCache(CacheEntry cached, LlmStreamListener listener) {
+        if (cached.streamContent != null && !cached.streamContent.isEmpty()) {
+            listener.onContent(cached.streamContent);
+        }
+        if (cached.streamToolCalls != null) {
+            for (ToolCallRecord tc : cached.streamToolCalls) {
+                listener.onToolCall(tc.id, tc.name, tc.args);
+            }
+        }
+        if (cached.streamUsage != null) {
+            listener.onUsage(cached.streamUsage);
+        }
+        listener.onComplete();
+    }
+
+    private void doStreamRequest(Request request, LlmStreamListener listener) {
         EventSource.Factory factory = EventSources.createFactory(httpClient);
-
-        LOG.info("chatStream 开始 - model=" + model + ", messages=" + messages.size() + ", tools=" + (tools != null ? tools.size() : 0));
         EventSource eventSource = factory.newEventSource(request, new EventSourceListener() {
 
-            // 用于累积流式工具调用
             private final Map<Integer, StringBuilder> toolCallIdMap = new ConcurrentHashMap<>();
             private final Map<Integer, StringBuilder> toolCallNameMap = new ConcurrentHashMap<>();
             private final Map<Integer, StringBuilder> toolCallArgsMap = new ConcurrentHashMap<>();
@@ -263,6 +432,58 @@ public class OpenAiLlmClient implements LlmClient {
     @Override
     public int getContextWindowSize() {
         return MODEL_CONTEXT_WINDOWS.getOrDefault(model, DEFAULT_CONTEXT_WINDOW);
+    }
+
+    // ========== Cache helpers ==========
+
+    /**
+     * Builds a stable string key representing all messages except the last, plus generation config.
+     * Uses a 64-bit hash (two independent 32-bit hashes combined) to keep the key compact while
+     * minimising collision risk for a 32-entry cache.
+     */
+    private String buildPrefixKey(List<ChatMessage> messages, List<Tool> tools) {
+        AiAgentSettings.ModelConfig cfg = AiAgentSettings.getInstance().getActiveModelConfig();
+        int maxTokens = cfg != null ? cfg.maxTokens : AiAgentSettings.getInstance().getMaxTokens();
+        double temperature = cfg != null ? cfg.temperature : 0.3;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(model).append('\0').append(maxTokens).append('\0').append(temperature).append('\0');
+
+        int limit = messages.size() - 1; // exclude last message from prefix
+        for (int i = 0; i < limit; i++) {
+            ChatMessage msg = messages.get(i);
+            sb.append(msg.getRole()).append('\1');
+            if (msg.getContent() != null) sb.append(msg.getContent());
+            if (msg.getToolCalls() != null) {
+                for (ChatMessage.ToolCall tc : msg.getToolCalls()) {
+                    sb.append('\3').append(tc.getId()).append('\4')
+                      .append(tc.getFunction().getName()).append('\4')
+                      .append(tc.getFunction().getArguments());
+                }
+            }
+            if (msg.getToolCallId() != null) sb.append('\3').append(msg.getToolCallId());
+            sb.append('\2');
+        }
+
+        if (tools != null) {
+            for (Tool t : tools) {
+                sb.append('\5').append(t.getName()).append('\6');
+            }
+        }
+
+        String prefix = sb.toString();
+        int h1 = prefix.hashCode();
+        // Second independent hash using a large-prime seed (FNV-inspired)
+        long h2 = 1125899906842597L;
+        for (int i = 0; i < prefix.length(); i++) {
+            h2 = h2 * 31 + prefix.charAt(i);
+        }
+        return h1 + ":" + (int) h2;
+    }
+
+    private String getLastMessageContent(List<ChatMessage> messages) {
+        ChatMessage last = messages.get(messages.size() - 1);
+        return last.getContent() != null ? last.getContent() : "";
     }
 
     // ========== 内部方法 ==========
