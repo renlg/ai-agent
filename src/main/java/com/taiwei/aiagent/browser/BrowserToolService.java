@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 @Service(Service.Level.PROJECT)
 public final class BrowserToolService implements Disposable {
@@ -39,6 +40,7 @@ public final class BrowserToolService implements Disposable {
     private volatile JBCefJSQuery jsQuery;
     private volatile String bridgeInjectCode;
     private volatile boolean networkCaptureEnabled = false;
+    private volatile Consumer<String> urlChangeListener;
     private final CopyOnWriteArrayList<String> capturedRequests = new CopyOnWriteArrayList<>();
     private final ConcurrentHashMap<String, CompletableFuture<String>> pendingEvaluations = new ConcurrentHashMap<>();
 
@@ -48,6 +50,17 @@ public final class BrowserToolService implements Disposable {
 
     public static BrowserToolService getInstance(Project project) {
         return project.getService(BrowserToolService.class);
+    }
+
+    public void setUrlChangeListener(Consumer<String> listener) {
+        this.urlChangeListener = listener;
+    }
+
+    private void notifyUrlChanged(String url) {
+        Consumer<String> listener = urlChangeListener;
+        if (listener != null) {
+            listener.accept(url);
+        }
     }
 
     public synchronized JBCefBrowser getOrCreateBrowser() {
@@ -80,6 +93,10 @@ public final class BrowserToolService implements Disposable {
                     injectBridgeFunction();
                     if (networkCaptureEnabled) {
                         cefBrowser.executeJavaScript(getNetworkCaptureScript(), "taiwei-netcap", 0);
+                    }
+                    String url = cefBrowser.getURL();
+                    if (url != null && !url.isEmpty()) {
+                        notifyUrlChanged(url);
                     }
                 }
             }
@@ -126,6 +143,7 @@ public final class BrowserToolService implements Disposable {
 
     public void openUrl(String url) {
         JBCefBrowser b = getOrCreateBrowser();
+        notifyUrlChanged(url);
         SwingUtilities.invokeLater(() -> b.loadURL(url));
     }
 

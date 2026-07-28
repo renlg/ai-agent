@@ -72,6 +72,8 @@ public class BrowserToolPanel extends JPanel implements Disposable {
         }
         add(browserComponent, BorderLayout.CENTER);
 
+        service.setUrlChangeListener(url -> SwingUtilities.invokeLater(() -> urlField.setText(url)));
+
         backButton.addActionListener(e -> service.getOrCreateBrowser().getCefBrowser().goBack());
         forwardButton.addActionListener(e -> service.getOrCreateBrowser().getCefBrowser().goForward());
         refreshButton.addActionListener(e -> service.getOrCreateBrowser().getCefBrowser().reload());
