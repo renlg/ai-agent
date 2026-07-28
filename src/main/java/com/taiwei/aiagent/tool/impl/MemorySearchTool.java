@@ -14,6 +14,7 @@ public class MemorySearchTool implements Tool {
 
     private static final int DEFAULT_LIMIT = 5;
     private static final int MAX_LIMIT = 20;
+    private static final double DEFAULT_MIN_RELEVANCE = 0.15;
 
     private final Project project;
 
@@ -49,6 +50,10 @@ public class MemorySearchTool implements Tool {
                     "limit": {
                       "type": "integer",
                       "description": "最多返回条数（可选，默认 5，最大 20）"
+                    },
+                    "minRelevance": {
+                      "type": "number",
+                      "description": "最低相关度阈值（可选，默认 0.15，范围 0-1）：低于该值的记忆会被过滤，调高更严格、调低更宽松"
                     }
                   },
                   "required": ["query"]
@@ -70,8 +75,10 @@ public class MemorySearchTool implements Tool {
             String category = args.has("category") ? args.get("category").getAsString() : null;
             int limit = args.has("limit") ? args.get("limit").getAsInt() : DEFAULT_LIMIT;
             limit = Math.max(1, Math.min(limit, MAX_LIMIT));
+            double minRelevance = args.has("minRelevance") ? args.get("minRelevance").getAsDouble() : DEFAULT_MIN_RELEVANCE;
+            minRelevance = Math.max(0.0, Math.min(minRelevance, 1.0));
 
-            String result = MemoryManager.getInstance(project).hybridSearch(query, category, limit);
+            String result = MemoryManager.getInstance(project).hybridSearch(query, category, limit, minRelevance);
             return result.isBlank() ? "未找到相关记忆" : result;
 
         } catch (Exception e) {

@@ -39,6 +39,15 @@ public class MemoryManager implements Disposable {
     /** RRF constant: fused score = Σ 1/(K + rank) over each ranking a memory appears in. */
     private static final int RRF_K = 60;
 
+    /** Max {@link #matchScore} contribution per query token: 1.0 content hit + 2.0 for a tag hit. */
+    private static final double MAX_SCORE_PER_TOKEN = 3.0;
+
+    /** Default floor on normalized keyword relevance (matchScore / max attainable), 0..1 scale. */
+    public static final double DEFAULT_MIN_KEYWORD_RELEVANCE = 0.15;
+
+    /** Floor on cosine similarity for a vector match to count as relevant. */
+    private static final double MIN_VECTOR_SIMILARITY = 0.3;
+
     /** Default cap on the on-disk size of the memory database. */
     public static final long MAX_STORAGE_BYTES = 50 * 1024 * 1024;
 
@@ -192,14 +201,31 @@ public class MemoryManager implements Disposable {
      * for a query, API down, no config) this degrades gracefully to keyword-only ranking
      * without blocking; the query embedding is prepared in the background for later searches.
      *
+     * <p>A relevance floor is applied at fusion time: an entry is dropped only when it clears
+     * neither the keyword threshold ({@code minRelevance}, on the normalized 0..1 matchScore
+     * scale) nor the vector threshold ({@link #MIN_VECTOR_SIMILARITY}). Passing either one is
+     * enough, so keyword-only matches survive the async window before embeddings exist. If
+     * every candidate fails both, the result is empty.
+     *
      * @param query    search text
      * @param category optional category filter (case-insensitive name like "preference"), null/blank = all
      * @param limit    max results
      * @return numbered result list (content, category, importance, relative age), or "" if nothing matched
      */
     public String hybridSearch(String query, String category, int limit) {
+        return hybridSearch(query, category, limit, DEFAULT_MIN_KEYWORD_RELEVANCE);
+    }
+
+    /**
+     * Same as {@link #hybridSearch(String, String, int)} with an explicit keyword relevance floor.
+     *
+     * @param minRelevance minimum normalized keyword relevance (0..1); negative values fall back
+     *                     to {@link #DEFAULT_MIN_KEYWORD_RELEVANCE}
+     */
+    public String hybridSearch(String query, String category, int limit, double minRelevance) {
         if (query == null || query.isBlank()) return "";
         if (limit <= 0) limit = 5;
+        if (minRelevance < 0) minRelevance = DEFAULT_MIN_KEYWORD_RELEVANCE;
         MemoryCategory categoryFilter = parseCategory(category);
 
         Map<String, MemoryEntry> byId = new HashMap<>();
@@ -208,10 +234,13 @@ public class MemoryManager implements Disposable {
         }
         if (byId.isEmpty()) return "";
 
-        // Fuse the two rankings with RRF.
+        // Fuse the two rankings with RRF, then drop entries that clear neither relevance floor.
+        Ranking keyword = keywordRanking(query, minRelevance);
+        Ranking vector = vectorRanking(query, byId.keySet());
         Map<String, Double> fused = new HashMap<>();
-        addRrfScores(fused, keywordRanking(query));
-        addRrfScores(fused, vectorRanking(query, byId.keySet()));
+        addRrfScores(fused, keyword.rankedIds);
+        addRrfScores(fused, vector.rankedIds);
+        fused.keySet().removeIf(id -> !keyword.passingIds.contains(id) && !vector.passingIds.contains(id));
         if (fused.isEmpty()) return "";
 
         // Post-fusion re-rank: boost by importance, recency and access count.
@@ -242,10 +271,16 @@ public class MemoryManager implements Disposable {
         return sb.toString().trim();
     }
 
-    /** Memory ids ordered by keyword relevance (best first); empty when nothing matches. */
-    private List<String> keywordRanking(String query) {
+    /**
+     * Memory ids ordered by keyword relevance (best first); empty when nothing matches.
+     * {@code passingIds} holds the subset whose matchScore, normalized by the maximum
+     * attainable for the query ({@link #MAX_SCORE_PER_TOKEN} × token count), reaches
+     * {@code minRelevance} — raw matchScore is an unbounded hit count, so the threshold
+     * operates on the normalized 0..1 scale.
+     */
+    private Ranking keywordRanking(String query, double minRelevance) {
         Set<String> tokens = tokenize(query);
-        if (tokens.isEmpty()) return List.of();
+        if (tokens.isEmpty()) return Ranking.EMPTY;
         List<ScoredEntry> scored = new ArrayList<>();
         for (MemoryEntry entry : store.searchByKeyword(query)) {
             double relevance = matchScore(tokens, entry);
@@ -255,25 +290,31 @@ public class MemoryManager implements Disposable {
         }
         scored.sort((a, b) -> Double.compare(b.score, a.score));
         List<String> ids = new ArrayList<>(scored.size());
+        Set<String> passing = new HashSet<>();
+        double maxScore = MAX_SCORE_PER_TOKEN * tokens.size();
         for (ScoredEntry s : scored) {
             ids.add(s.entry.getId());
+            if (s.score / maxScore >= minRelevance) {
+                passing.add(s.entry.getId());
+            }
         }
-        return ids;
+        return new Ranking(ids, passing);
     }
 
     /**
      * Memory ids ordered by cosine similarity to the query embedding; empty when unavailable.
+     * {@code passingIds} holds the subset at or above {@link #MIN_VECTOR_SIMILARITY}.
      * Never blocks: an uncached query embedding is generated in the background for later
      * searches while this one degrades to keyword-only.
      */
-    private List<String> vectorRanking(String query, Set<String> candidateIds) {
-        if (storedEmbeddings.isEmpty()) return List.of();
+    private Ranking vectorRanking(String query, Set<String> candidateIds) {
+        if (storedEmbeddings.isEmpty()) return Ranking.EMPTY;
         float[] queryVector = embeddingCache.get(query);
         if (queryVector == null) {
             if (pendingQueryEmbeddings.add(query)) {
                 embeddingExecutor.execute(() -> cacheQueryEmbedding(query));
             }
-            return List.of();
+            return Ranking.EMPTY;
         }
 
         List<Map.Entry<String, Double>> similarities = new ArrayList<>();
@@ -286,10 +327,14 @@ public class MemoryManager implements Disposable {
         }
         similarities.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
         List<String> ids = new ArrayList<>(similarities.size());
+        Set<String> passing = new HashSet<>();
         for (Map.Entry<String, Double> s : similarities) {
             ids.add(s.getKey());
+            if (s.getValue() >= MIN_VECTOR_SIMILARITY) {
+                passing.add(s.getKey());
+            }
         }
-        return ids;
+        return new Ranking(ids, passing);
     }
 
     /** Background task: embeds a search query and caches it so the next identical search runs full hybrid. */
@@ -504,6 +549,19 @@ public class MemoryManager implements Disposable {
     /** Dynamically changes the storage cap. Pass 0 or negative to disable the limit. */
     public void setMaxStorageBytes(long bytes) {
         this.maxStorageBytes = bytes;
+    }
+
+    /** One retrieval ranking: full RRF order plus the subset that clears its relevance threshold. */
+    private static class Ranking {
+        static final Ranking EMPTY = new Ranking(List.of(), Set.of());
+
+        final List<String> rankedIds;
+        final Set<String> passingIds;
+
+        Ranking(List<String> rankedIds, Set<String> passingIds) {
+            this.rankedIds = rankedIds;
+            this.passingIds = passingIds;
+        }
     }
 
     private static class ScoredEntry {
