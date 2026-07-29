@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 public class PromptManager {
 
     private static final int RELEVANT_MEMORY_LIMIT = 8;
-    private static final int AGENTS_MD_MAX_LENGTH = 4000;
+    private static final int AGENTS_MD_MAX_LENGTH = 50000;
 
     private final Project project;
     private final VelocityEngine velocityEngine;
