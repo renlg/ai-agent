@@ -40,13 +40,6 @@
 ${skills}
 #end
 
-#if($memory && !$memory.isEmpty())
-## Memory
-以下是与当前对话相关的长期记忆（本地存储，用户此前要求你记住的内容）：
-
-${memory}
-#end
-
 #if($rules && !$rules.isEmpty())
 ## 用户自定义规则
 以下是用户设置的自定义指令，请严格遵守：
