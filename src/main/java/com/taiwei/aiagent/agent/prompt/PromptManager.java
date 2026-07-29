@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class PromptManager {
 
     private static final int RELEVANT_MEMORY_LIMIT = 8;
+    private static final int AGENTS_MD_MAX_LENGTH = 4000;
 
     private final Project project;
     private final VelocityEngine velocityEngine;
@@ -86,6 +87,11 @@ public class PromptManager {
         String rulesContext = buildRulesContext();
         if (rulesContext != null && !rulesContext.isEmpty()) {
             context.put("rules", rulesContext);
+        }
+
+        String agentsMd = loadAgentsMd();
+        if (agentsMd != null && !agentsMd.isEmpty()) {
+            context.put("agentsMd", agentsMd);
         }
 
         String templateName = mode == AgentMode.PLAN ? "templates/system_prompt_plan.vm" : "templates/system_prompt_build.vm";
@@ -198,6 +204,30 @@ public class PromptManager {
 
         try {
             return Files.readString(rulesFile, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 读取项目根目录 AGENTS.md（不缓存，每次实时读取，因为 /init 可能在会话中重新生成该文件）
+     * 超过 {@link #AGENTS_MD_MAX_LENGTH} 时截断并附加提示
+     */
+    private String loadAgentsMd() {
+        String basePath = project.getBasePath();
+        if (basePath == null) return null;
+
+        Path agentsMdFile = Paths.get(basePath, "AGENTS.md");
+        if (!Files.exists(agentsMdFile)) return null;
+
+        try {
+            String content = Files.readString(agentsMdFile, StandardCharsets.UTF_8);
+            if (content.length() > AGENTS_MD_MAX_LENGTH) {
+                String truncated = content.substring(0, AGENTS_MD_MAX_LENGTH);
+                return truncated + "\n\n[内容已截断：AGENTS.md 文件过大（实际 " + content.length()
+                        + " 字符，仅显示前 " + AGENTS_MD_MAX_LENGTH + " 字符）]";
+            }
+            return content;
         } catch (Exception e) {
             return null;
         }

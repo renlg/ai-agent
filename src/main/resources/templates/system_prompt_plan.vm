@@ -40,6 +40,14 @@
 ${skills}
 #end
 
+#if($agentsMd && !$agentsMd.isEmpty())
+## 项目上下文（AGENTS.md）
+以下是项目根目录 AGENTS.md 中记录的项目背景、架构与开发约定，请优先参考：
+
+${agentsMd}
+#end
+
+
 #if($rules && !$rules.isEmpty())
 ## 用户自定义规则
 以下是用户设置的自定义指令，请严格遵守：
