@@ -26,8 +26,6 @@ public class ModelConfigurable implements Configurable {
     private JPanel mainPanel;
     private ModelTableModel tableModel;
     private JBTable table;
-    private JCheckBox inlineCompletionCheckbox;
-    private JCheckBox inlineActionCheckbox;
 
     private List<AiAgentSettings.ModelConfig> editingConfigs;
 
@@ -77,20 +75,6 @@ public class ModelConfigurable implements Configurable {
         modelSection.add(scrollPane, BorderLayout.CENTER);
         modelSection.add(buttonPanel, BorderLayout.SOUTH);
 
-        // ===== 功能开关 =====
-        inlineCompletionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineCompletionEnabled"));
-        inlineActionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineActionEnabled"));
-        inlineActionCheckbox.setToolTipText(I18nUtil.getMessage("general.inlineActionEnabled.desc"));
-
-        JPanel checkboxPanel = new JPanel();
-        checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
-        checkboxPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        inlineCompletionCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
-        inlineActionCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
-        checkboxPanel.add(inlineCompletionCheckbox);
-        checkboxPanel.add(Box.createVerticalStrut(4));
-        checkboxPanel.add(inlineActionCheckbox);
-
         // ===== 组装主面板 =====
         mainPanel = new JPanel();
         mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
@@ -98,9 +82,6 @@ public class ModelConfigurable implements Configurable {
 
         modelSection.setAlignmentX(Component.LEFT_ALIGNMENT);
         mainPanel.add(modelSection);
-        mainPanel.add(Box.createVerticalStrut(20));
-
-        mainPanel.add(checkboxPanel);
         mainPanel.add(Box.createVerticalGlue());
 
         reset();
@@ -168,8 +149,6 @@ public class ModelConfigurable implements Configurable {
     @Override
     public boolean isModified() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
-        if (inlineCompletionCheckbox.isSelected() != settings.isCompletionEnabled()) return true;
-        if (inlineActionCheckbox.isSelected() != settings.isInlineActionEnabled()) return true;
 
         List<AiAgentSettings.ModelConfig> current = settings.getModelConfigs();
         if (editingConfigs.size() != current.size()) return true;
@@ -209,8 +188,6 @@ public class ModelConfigurable implements Configurable {
 
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setModelConfigs(new ArrayList<>(editingConfigs));
-        settings.setCompletionEnabled(inlineCompletionCheckbox.isSelected());
-        settings.setInlineActionEnabled(inlineActionCheckbox.isSelected());
 
         // 保持当前选中的模型索引（如果索引有效）
         int currentActiveIndex = settings.getActiveModelIndex();
@@ -232,8 +209,6 @@ public class ModelConfigurable implements Configurable {
         if (!editingConfigs.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
         }
-        inlineCompletionCheckbox.setSelected(settings.isCompletionEnabled());
-        inlineActionCheckbox.setSelected(settings.isInlineActionEnabled());
     }
 
     @Override
@@ -241,8 +216,6 @@ public class ModelConfigurable implements Configurable {
         mainPanel = null;
         table = null;
         tableModel = null;
-        inlineCompletionCheckbox = null;
-        inlineActionCheckbox = null;
         editingConfigs = null;
     }
 

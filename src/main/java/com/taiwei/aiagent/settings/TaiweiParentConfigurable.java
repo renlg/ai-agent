@@ -22,6 +22,7 @@ public class TaiweiParentConfigurable implements Configurable {
 
     private JPanel mainPanel;
     private JCheckBox completionCheckBox;
+    private JCheckBox inlineActionCheckBox;
     private JCheckBox gitCommitReviewCheckBox;
     private JComboBox<String> toolManagerCombo;
     private static final String PLACEHOLDER = "────── 操作 ──────";
@@ -36,7 +37,12 @@ public class TaiweiParentConfigurable implements Configurable {
     @Override
     public @Nullable JComponent createComponent() {
         completionCheckBox = new JCheckBox(I18nUtil.getMessage("general.completionEnabled"));
+        inlineActionCheckBox = new JCheckBox(I18nUtil.getMessage("general.inlineActionEnabled"));
+        inlineActionCheckBox.setToolTipText(I18nUtil.getMessage("general.inlineActionEnabled.desc"));
         gitCommitReviewCheckBox = new JCheckBox(I18nUtil.getMessage("general.gitCommitReviewEnabled"));
+
+        JLabel codeSectionLabel = new JLabel(I18nUtil.getMessage("general.codeCompletionSectionTitle"));
+        codeSectionLabel.setFont(codeSectionLabel.getFont().deriveFont(Font.BOLD));
 
         toolManagerCombo = new JComboBox<>(new String[]{PLACEHOLDER, ACTION_MANAGE});
         toolManagerCombo.addItemListener(e -> {
@@ -50,7 +56,9 @@ public class TaiweiParentConfigurable implements Configurable {
         toolManagerPanel.add(toolManagerCombo);
 
         mainPanel = FormBuilder.createFormBuilder()
+                .addComponent(codeSectionLabel)
                 .addComponent(completionCheckBox)
+                .addComponent(inlineActionCheckBox)
                 .addComponent(gitCommitReviewCheckBox)
                 .addComponent(toolManagerPanel)
                 .addComponentFillVertically(new JPanel(), 0)
@@ -65,6 +73,7 @@ public class TaiweiParentConfigurable implements Configurable {
     public boolean isModified() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         return completionCheckBox.isSelected() != settings.isCompletionEnabled()
+                || inlineActionCheckBox.isSelected() != settings.isInlineActionEnabled()
                 || gitCommitReviewCheckBox.isSelected() != settings.isGitCommitReviewEnabled();
     }
 
@@ -72,6 +81,7 @@ public class TaiweiParentConfigurable implements Configurable {
     public void apply() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         settings.setCompletionEnabled(completionCheckBox.isSelected());
+        settings.setInlineActionEnabled(inlineActionCheckBox.isSelected());
         settings.setGitCommitReviewEnabled(gitCommitReviewCheckBox.isSelected());
         settings.fireSettingsChanged();
     }
@@ -80,6 +90,7 @@ public class TaiweiParentConfigurable implements Configurable {
     public void reset() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         completionCheckBox.setSelected(settings.isCompletionEnabled());
+        inlineActionCheckBox.setSelected(settings.isInlineActionEnabled());
         gitCommitReviewCheckBox.setSelected(settings.isGitCommitReviewEnabled());
     }
 
@@ -87,6 +98,7 @@ public class TaiweiParentConfigurable implements Configurable {
     public void disposeUIResources() {
         mainPanel = null;
         completionCheckBox = null;
+        inlineActionCheckBox = null;
         gitCommitReviewCheckBox = null;
         toolManagerCombo = null;
     }
