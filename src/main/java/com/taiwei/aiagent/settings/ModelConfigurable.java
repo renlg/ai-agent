@@ -80,6 +80,7 @@ public class ModelConfigurable implements Configurable {
         // ===== 功能开关 =====
         inlineCompletionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineCompletionEnabled"));
         inlineActionCheckbox = new JCheckBox(I18nUtil.getMessage("general.inlineActionEnabled"));
+        inlineActionCheckbox.setToolTipText(I18nUtil.getMessage("general.inlineActionEnabled.desc"));
 
         JPanel checkboxPanel = new JPanel();
         checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));

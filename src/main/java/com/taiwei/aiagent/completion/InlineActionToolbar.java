@@ -5,14 +5,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.colors.EditorColors;
-import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
+import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
-import com.intellij.ui.JBColor;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
@@ -57,7 +55,7 @@ public class InlineActionToolbar {
     private final String filePath;
     private final String language;
 
-    private JWindow toolbarWindow;
+    private JBPopup toolbarPopup;
     private Balloon resultBalloon;
     private volatile boolean processing = false;
     private final AtomicReference<Call> currentCall = new AtomicReference<>();
@@ -80,10 +78,11 @@ public class InlineActionToolbar {
 
     public void hide() {
         ApplicationManager.getApplication().invokeLater(() -> {
-            if (toolbarWindow != null) {
-                toolbarWindow.setVisible(false);
-                toolbarWindow.dispose();
-                toolbarWindow = null;
+            if (toolbarPopup != null) {
+                if (!toolbarPopup.isDisposed()) {
+                    toolbarPopup.cancel();
+                }
+                toolbarPopup = null;
             }
             if (resultBalloon != null && !resultBalloon.isDisposed()) {
                 resultBalloon.hide();
@@ -101,44 +100,45 @@ public class InlineActionToolbar {
 
         JPanel toolbarPanel = createToolbarPanel();
 
-        toolbarWindow = new JWindow(
-                SwingUtilities.getWindowAncestor(editor.getContentComponent()));
-        toolbarWindow.setAlwaysOnTop(true);
-        toolbarWindow.setFocusableWindowState(false);
-        toolbarWindow.setFocusable(false);
-        toolbarWindow.add(toolbarPanel);
-        toolbarWindow.pack();
+        // A lightweight JBPopup automatically gets native rounded corners and a drop
+        // shadow (see AbstractPopup/WindowRoundedCornersManager), matching the same
+        // modern look used by quick-doc and intention popups across the IDE.
+        toolbarPopup = JBPopupFactory.getInstance()
+                .createComponentPopupBuilder(toolbarPanel, null)
+                .setRequestFocus(false)
+                .setFocusable(false)
+                .setResizable(false)
+                .setMovable(false)
+                .setCancelOnClickOutside(false)
+                .setCancelOnOtherWindowOpen(false)
+                .setCancelOnWindowDeactivation(false)
+                .setCancelKeyEnabled(false)
+                .setShowShadow(true)
+                .setShowBorder(true)
+                .createPopup();
 
-        Point location = calculateScreenPosition();
+        Point location = calculateScreenPosition(toolbarPanel.getPreferredSize());
         if (location != null) {
-            toolbarWindow.setLocation(location);
+            toolbarPopup.showInScreenCoordinates(editor.getContentComponent(), location);
+        } else {
+            toolbarPopup.cancel();
+            toolbarPopup = null;
         }
-        toolbarWindow.setVisible(true);
     }
 
     private JPanel createToolbarPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
-
-        EditorColorsScheme scheme = editor.getColorsScheme();
-        Color bg = scheme.getColor(EditorColors.GUTTER_BACKGROUND);
-        if (bg == null) {
-            bg = UIUtil.getPanelBackground();
-        }
-        Color border = JBColor.border();
-
-        panel.setBackground(bg);
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(border, 1),
-                JBUI.Borders.empty(2, 4)
-        ));
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(2), 0));
         panel.setOpaque(true);
+        panel.setBackground(JBUI.CurrentTheme.Popup.BACKGROUND);
+        panel.setBorder(JBUI.Borders.empty(4, 6));
 
         for (int i = 0; i < ACTION_LABELS.length; i++) {
             JButton btn = createActionButton(ACTION_LABELS[i], i);
             panel.add(btn);
             if (i < ACTION_LABELS.length - 1) {
                 JSeparator sep = new JSeparator(SwingConstants.VERTICAL);
-                sep.setPreferredSize(new Dimension(1, 18));
+                sep.setForeground(JBUI.CurrentTheme.Popup.borderColor(false));
+                sep.setPreferredSize(new Dimension(1, JBUI.scale(16)));
                 panel.add(sep);
             }
         }
@@ -147,26 +147,16 @@ public class InlineActionToolbar {
     }
 
     private JButton createActionButton(String text, int actionIndex) {
-        JButton button = new JButton(text);
-        button.setFont(button.getFont().deriveFont(11f));
-        button.setMargin(JBUI.insets(2, 8));
+        JButton button = new RoundedHoverButton(text);
+        button.setFont(JBUI.Fonts.label(12f));
+        button.setForeground(UIUtil.getLabelForeground());
+        button.setMargin(JBUI.insets(4, 10));
         button.setFocusable(false);
+        button.setFocusPainted(false);
         button.setBorderPainted(false);
         button.setContentAreaFilled(false);
+        button.setOpaque(false);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-        button.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                button.setContentAreaFilled(true);
-                button.setBackground(new JBColor(new Color(0xDAE4ED), new Color(0x4B5662)));
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e) {
-                button.setContentAreaFilled(false);
-            }
-        });
 
         button.addActionListener(e -> {
             if (processing) return;
@@ -176,7 +166,42 @@ public class InlineActionToolbar {
         return button;
     }
 
-    private Point calculateScreenPosition() {
+    /** Flat text button that paints a rounded, IDE-themed highlight on hover instead of a square background. */
+    private static class RoundedHoverButton extends JButton {
+        private boolean hovered = false;
+
+        RoundedHoverButton(String text) {
+            super(text);
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    hovered = true;
+                    repaint();
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    hovered = false;
+                    repaint();
+                }
+            });
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            if (hovered) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(JBUI.CurrentTheme.ActionButton.hoverBackground());
+                int arc = JBUI.scale(6);
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), arc, arc);
+                g2.dispose();
+            }
+            super.paintComponent(g);
+        }
+    }
+
+    private Point calculateScreenPosition(Dimension popupSize) {
         int selectionEnd = editor.getCaretModel().getOffset();
         if (selectionEnd <= 0) return null;
 
@@ -191,7 +216,7 @@ public class InlineActionToolbar {
         int x = editorScreenLoc.x + point.x + 20;
         int y = editorScreenLoc.y + point.y + editor.getLineHeight() + 4;
 
-        Dimension windowSize = toolbarWindow != null ? toolbarWindow.getSize() : new Dimension(300, 32);
+        Dimension windowSize = popupSize != null ? popupSize : new Dimension(300, 32);
         Rectangle visibleArea = editor.getScrollingModel().getVisibleArea();
         int visibleRight = editorScreenLoc.x + visibleArea.x + visibleArea.width;
         int visibleBottom = editorScreenLoc.y + visibleArea.y + visibleArea.height;
@@ -350,16 +375,21 @@ public class InlineActionToolbar {
         ApplicationManager.getApplication().invokeLater(() -> {
             if (editor.isDisposed()) return;
 
-            JBLabel label = new JBLabel("<html><body style='width:200px'>\u601d\u8003\u4e2d...</body></html>");
-            label.setBorder(JBUI.Borders.empty(6, 10));
-            label.setForeground(JBColor.GRAY);
+            JBLabel label = new JBLabel("<html><body style='width:200px'>\u601d\u8003\u4e2d\u2026</body></html>",
+                    new com.intellij.ui.AnimatedIcon.Default(), SwingConstants.LEFT);
+            label.setBorder(JBUI.Borders.empty(8, 12));
+            label.setFont(JBUI.Fonts.label(12f));
+            label.setIconTextGap(JBUI.scale(8));
+            label.setForeground(UIUtil.getContextHelpForeground());
 
             hideBalloon();
 
             resultBalloon = JBPopupFactory.getInstance()
                     .createBalloonBuilder(label)
-                    .setFillColor(UIUtil.getPanelBackground())
-                    .setBorderColor(JBColor.border())
+                    .setFillColor(JBUI.CurrentTheme.Popup.BACKGROUND)
+                    .setBorderColor(JBUI.CurrentTheme.Popup.borderColor(true))
+                    .setCornerRadius(JBUI.scale(8))
+                    .setShadow(true)
                     .setHideOnClickOutside(true)
                     .setHideOnKeyOutside(true)
                     .setHideOnAction(true)
@@ -381,9 +411,10 @@ public class InlineActionToolbar {
             textArea.setEditable(false);
             textArea.setLineWrap(true);
             textArea.setWrapStyleWord(true);
-            textArea.setFont(UIUtil.getLabelFont());
-            textArea.setBackground(UIUtil.getPanelBackground());
-            textArea.setBorder(JBUI.Borders.empty(8, 12));
+            textArea.setFont(JBUI.Fonts.label(12f));
+            textArea.setBackground(JBUI.CurrentTheme.Popup.BACKGROUND);
+            textArea.setForeground(UIUtil.getLabelForeground());
+            textArea.setBorder(JBUI.Borders.empty(10, 14));
             textArea.setColumns(50);
             textArea.setRows(Math.min(20, text.split("\n").length + 2));
 
@@ -397,8 +428,10 @@ public class InlineActionToolbar {
 
             resultBalloon = JBPopupFactory.getInstance()
                     .createBalloonBuilder(scrollPane)
-                    .setFillColor(UIUtil.getPanelBackground())
-                    .setBorderColor(JBColor.border())
+                    .setFillColor(JBUI.CurrentTheme.Popup.BACKGROUND)
+                    .setBorderColor(JBUI.CurrentTheme.Popup.borderColor(true))
+                    .setCornerRadius(JBUI.scale(8))
+                    .setShadow(true)
                     .setHideOnClickOutside(true)
                     .setHideOnKeyOutside(true)
                     .setHideOnAction(false)
