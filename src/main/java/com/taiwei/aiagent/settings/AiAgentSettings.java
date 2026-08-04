@@ -85,6 +85,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         copy.completionEnabled = src.completionEnabled;
         copy.gitCommitReviewEnabled = src.gitCommitReviewEnabled;
         copy.inlineActionEnabled = src.inlineActionEnabled;
+        copy.bypassHostnameVerification = src.bypassHostnameVerification;
         copy.customRules = src.customRules;
         return copy;
     }
@@ -316,6 +317,18 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
     public void setInlineActionEnabled(boolean enabled) {
         synchronized (stateLock) {
             state.inlineActionEnabled = enabled;
+        }
+    }
+
+    public boolean isBypassHostnameVerificationEnabled() {
+        synchronized (stateLock) {
+            return state.bypassHostnameVerification;
+        }
+    }
+
+    public void setBypassHostnameVerificationEnabled(boolean enabled) {
+        synchronized (stateLock) {
+            state.bypassHostnameVerification = enabled;
         }
     }
 
@@ -553,6 +566,11 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
          * 是否启用 Inline Action（选中文本后显示浮动操作栏）
          */
         public boolean inlineActionEnabled = true;
+
+        /**
+         * 是否跳过 LLM API 请求的 TLS 主机名校验（默认关闭，仅用于自签名证书等特殊场景）
+         */
+        public boolean bypassHostnameVerification = false;
 
         /**
          * 用户自定义规则（全局），会注入到系统提示词中

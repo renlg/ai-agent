@@ -24,6 +24,7 @@ public class TaiweiParentConfigurable implements Configurable {
     private JCheckBox completionCheckBox;
     private JCheckBox inlineActionCheckBox;
     private JCheckBox gitCommitReviewCheckBox;
+    private JCheckBox bypassHostnameVerificationCheckBox;
     private JComboBox<String> toolManagerCombo;
     private static final String PLACEHOLDER = "────── 操作 ──────";
     private static final String ACTION_MANAGE = "管理工具...";
@@ -40,6 +41,8 @@ public class TaiweiParentConfigurable implements Configurable {
         inlineActionCheckBox = new JCheckBox(I18nUtil.getMessage("general.inlineActionEnabled"));
         inlineActionCheckBox.setToolTipText(I18nUtil.getMessage("general.inlineActionEnabled.desc"));
         gitCommitReviewCheckBox = new JCheckBox(I18nUtil.getMessage("general.gitCommitReviewEnabled"));
+        bypassHostnameVerificationCheckBox = new JCheckBox(I18nUtil.getMessage("general.bypassHostnameVerification"));
+        bypassHostnameVerificationCheckBox.setToolTipText(I18nUtil.getMessage("general.bypassHostnameVerification.desc"));
 
         JLabel codeSectionLabel = new JLabel(I18nUtil.getMessage("general.codeCompletionSectionTitle"));
         codeSectionLabel.setFont(codeSectionLabel.getFont().deriveFont(Font.BOLD));
@@ -60,6 +63,7 @@ public class TaiweiParentConfigurable implements Configurable {
                 .addComponent(completionCheckBox)
                 .addComponent(inlineActionCheckBox)
                 .addComponent(gitCommitReviewCheckBox)
+                .addComponent(bypassHostnameVerificationCheckBox)
                 .addComponent(toolManagerPanel)
                 .addComponentFillVertically(new JPanel(), 0)
                 .getPanel();
@@ -74,7 +78,8 @@ public class TaiweiParentConfigurable implements Configurable {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         return completionCheckBox.isSelected() != settings.isCompletionEnabled()
                 || inlineActionCheckBox.isSelected() != settings.isInlineActionEnabled()
-                || gitCommitReviewCheckBox.isSelected() != settings.isGitCommitReviewEnabled();
+                || gitCommitReviewCheckBox.isSelected() != settings.isGitCommitReviewEnabled()
+                || bypassHostnameVerificationCheckBox.isSelected() != settings.isBypassHostnameVerificationEnabled();
     }
 
     @Override
@@ -83,6 +88,7 @@ public class TaiweiParentConfigurable implements Configurable {
         settings.setCompletionEnabled(completionCheckBox.isSelected());
         settings.setInlineActionEnabled(inlineActionCheckBox.isSelected());
         settings.setGitCommitReviewEnabled(gitCommitReviewCheckBox.isSelected());
+        settings.setBypassHostnameVerificationEnabled(bypassHostnameVerificationCheckBox.isSelected());
         settings.fireSettingsChanged();
     }
 
@@ -92,6 +98,7 @@ public class TaiweiParentConfigurable implements Configurable {
         completionCheckBox.setSelected(settings.isCompletionEnabled());
         inlineActionCheckBox.setSelected(settings.isInlineActionEnabled());
         gitCommitReviewCheckBox.setSelected(settings.isGitCommitReviewEnabled());
+        bypassHostnameVerificationCheckBox.setSelected(settings.isBypassHostnameVerificationEnabled());
     }
 
     @Override
@@ -100,6 +107,7 @@ public class TaiweiParentConfigurable implements Configurable {
         completionCheckBox = null;
         inlineActionCheckBox = null;
         gitCommitReviewCheckBox = null;
+        bypassHostnameVerificationCheckBox = null;
         toolManagerCombo = null;
     }
 

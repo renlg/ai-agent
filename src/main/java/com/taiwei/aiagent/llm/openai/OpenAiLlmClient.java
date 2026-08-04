@@ -106,11 +106,15 @@ public class OpenAiLlmClient implements LlmClient {
         this.apiKey = apiKey;
         this.model = model;
         LOG.info("OpenAiLlmClient 创建 - baseUrl=" + this.baseUrl + ", model=" + model);
-        this.httpClient = new OkHttpClient.Builder()
+        OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(120, TimeUnit.SECONDS)
-                .build();
+                .writeTimeout(120, TimeUnit.SECONDS);
+        if (AiAgentSettings.getInstance().isBypassHostnameVerificationEnabled()) {
+            LOG.warn("已启用跳过主机名校验，LLM API 请求将不校验 TLS 证书主机名");
+            clientBuilder.hostnameVerifier((hostname, session) -> true);
+        }
+        this.httpClient = clientBuilder.build();
         this.gson = new GsonBuilder().create();
         this.completionCache = Collections.synchronizedMap(
                 new LinkedHashMap<String, CacheEntry>(16, 0.75f, true) {
