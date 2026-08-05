@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
+import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.settings.ImageGenSettings;
 import com.taiwei.aiagent.tool.Tool;
 import okhttp3.*;
@@ -16,11 +17,17 @@ public class ImageGenerationTool implements Tool {
     private static final Logger LOG = Logger.getInstance(ImageGenerationTool.class);
     private static final int TIMEOUT_SECONDS = 120;
 
-    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
-            .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .writeTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .build();
+    private static OkHttpClient buildHttpClient() {
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        if (AiAgentSettings.getInstance().isBypassHostnameVerificationEnabled()) {
+            LOG.warn("已启用跳过主机名校验，图像生成 API 请求将不校验 TLS 证书主机名");
+            builder.hostnameVerifier((hostname, session) -> true);
+        }
+        return builder.build();
+    }
 
     @Override
     public String getName() {
@@ -100,7 +107,7 @@ public class ImageGenerationTool implements Tool {
                     .header("Content-Type", "application/json")
                     .build();
 
-            try (Response response = HTTP_CLIENT.newCall(request).execute()) {
+            try (Response response = buildHttpClient().newCall(request).execute()) {
                 String responseBody = response.body() != null ? response.body().string() : "";
                 if (!response.isSuccessful()) {
                     LOG.warn("图像生成 API 失败: HTTP " + response.code() + " " + responseBody);
