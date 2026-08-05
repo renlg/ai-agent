@@ -141,20 +141,34 @@ public class ImageGenerationTool implements Tool {
 
             JsonArray images = new JsonArray();
             for (int i = 0; i < data.size(); i++) {
+                if (!data.get(i).isJsonObject()) {
+                    continue;
+                }
                 JsonObject item = data.get(i).getAsJsonObject();
+
+                String url = getNonBlankString(item, "url");
+                String b64Json = url == null ? getNonBlankString(item, "b64_json") : null;
+                if (url == null && b64Json == null) {
+                    continue;
+                }
+
                 JsonObject imgObj = new JsonObject();
                 imgObj.addProperty("mimeType", "image/png");
-
-                if (item.has("b64_json")) {
-                    imgObj.addProperty("base64", item.get("b64_json").getAsString());
-                } else if (item.has("url")) {
-                    imgObj.addProperty("url", item.get("url").getAsString());
+                if (url != null) {
+                    imgObj.addProperty("url", url);
+                } else {
+                    imgObj.addProperty("base64", b64Json);
                 }
 
-                if (item.has("revised_prompt")) {
-                    imgObj.addProperty("revisedPrompt", item.get("revised_prompt").getAsString());
+                String revisedPrompt = getNonBlankString(item, "revised_prompt");
+                if (revisedPrompt != null) {
+                    imgObj.addProperty("revisedPrompt", revisedPrompt);
                 }
                 images.add(imgObj);
+            }
+
+            if (images.size() == 0) {
+                return "【图像生成失败】API 返回数据中未找到有效的图像 url 或 b64_json: " + truncate(responseBody, 300);
             }
 
             JsonObject result = new JsonObject();
@@ -168,6 +182,21 @@ public class ImageGenerationTool implements Tool {
             LOG.warn("解析图像生成响应失败", e);
             return "【图像生成失败】解析响应失败: " + e.getMessage();
         }
+    }
+
+    /**
+     * 安全提取字段为非空字符串：字段缺失、值为 JsonNull、非字符串类型或空白字符串均返回 null，不抛异常。
+     */
+    private static String getNonBlankString(JsonObject obj, String key) {
+        if (!obj.has(key)) {
+            return null;
+        }
+        com.google.gson.JsonElement el = obj.get(key);
+        if (el == null || el.isJsonNull() || !el.isJsonPrimitive() || !el.getAsJsonPrimitive().isString()) {
+            return null;
+        }
+        String s = el.getAsString();
+        return (s == null || s.isBlank()) ? null : s;
     }
 
     private static String truncate(String s, int max) {
