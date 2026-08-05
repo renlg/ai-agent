@@ -90,7 +90,6 @@ public class ImageGenerationTool implements Tool {
             body.addProperty("prompt", prompt);
             body.addProperty("n", n);
             body.addProperty("size", size);
-            body.addProperty("response_format", "b64_json");
 
             String baseUrl = settings.getBaseUrl();
             if (!baseUrl.endsWith("/")) baseUrl += "/";
@@ -127,7 +126,14 @@ public class ImageGenerationTool implements Tool {
 
     private String parseImageResponse(String responseBody, String prompt, String size) {
         try {
-            JsonObject resp = JsonParser.parseString(responseBody).getAsJsonObject();
+            if (responseBody == null || responseBody.isBlank()) {
+                return "【图像生成失败】API 返回内容为空";
+            }
+            com.google.gson.JsonElement respElement = JsonParser.parseString(responseBody);
+            if (respElement == null || respElement.isJsonNull() || !respElement.isJsonObject()) {
+                return "【图像生成失败】API 返回内容不是有效的 JSON 对象: " + truncate(responseBody, 300);
+            }
+            JsonObject resp = respElement.getAsJsonObject();
             JsonArray data = resp.getAsJsonArray("data");
             if (data == null || data.size() == 0) {
                 return "【图像生成失败】API 返回数据为空: " + truncate(responseBody, 300);
