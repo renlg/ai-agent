@@ -1152,6 +1152,80 @@
         });
     };
 
+    /* ===== Generated Image Display ===== */
+
+    window.showGeneratedImage = function (toolCallId, resultJson) {
+        whenReady(function () {
+            var parsed;
+            try {
+                parsed = typeof resultJson === 'string' ? JSON.parse(resultJson) : resultJson;
+            } catch (e) {
+                return;
+            }
+            var images = parsed.images || [];
+            if (images.length === 0) return;
+
+            var prompt = parsed.prompt || '';
+            var size   = parsed.size   || '';
+
+            var card = document.createElement('div');
+            card.className = 'message assistant generated-image-card';
+            card.id = 'genimg-' + toolCallId;
+
+            var labelHtml = '🎨 生成图像'; // 🎨 生成图像
+            var header = '<div class="message-label">' + labelHtml + '</div>';
+            var promptDiv = prompt
+                ? '<div class="generated-image-prompt">' + MarkdownRenderer.escapeHtml(prompt) + (size ? ' &middot; ' + MarkdownRenderer.escapeHtml(size) : '') + '</div>'
+                : '';
+
+            var gridHtml = '<div class="generated-image-grid">';
+            for (var i = 0; i < images.length; i++) {
+                var img = images[i];
+                var src = '';
+                if (img.base64) {
+                    src = 'data:' + (img.mimeType || 'image/png') + ';base64,' + img.base64;
+                } else if (img.url) {
+                    src = img.url;
+                }
+                if (!src) continue;
+
+                var revisedDiv = img.revisedPrompt
+                    ? '<div class="generated-image-revised">' + MarkdownRenderer.escapeHtml(img.revisedPrompt) + '</div>'
+                    : '';
+
+                var downloadBtnId = 'dln-' + toolCallId + '-' + i;
+                gridHtml +=
+                    '<div class="generated-image-item">' +
+                        '<img class="generated-image-img" src="' + src + '" alt="' + MarkdownRenderer.escapeHtml(prompt) + '" />' +
+                        revisedDiv +
+                        '<button class="generated-image-download-btn" id="' + downloadBtnId + '">⬇ 下载</button>' +
+                    '</div>';
+
+                // store image data for download callback
+                (function (btnId, imgData, imgPrompt, imgMime) {
+                    setTimeout(function () {
+                        var btn = document.getElementById(btnId);
+                        if (!btn) return;
+                        btn.addEventListener('click', function () {
+                            callJava('downloadImage', {
+                                base64:   imgData.base64   || '',
+                                url:      imgData.url      || '',
+                                mimeType: imgMime,
+                                prompt:   imgPrompt
+                            });
+                        });
+                    }, 0);
+                })(downloadBtnId, img, prompt, img.mimeType || 'image/png');
+            }
+            gridHtml += '</div>';
+
+            card.innerHTML = header + promptDiv + gridHtml;
+            messagesArea.appendChild(card);
+            keepThinkingAtBottom();
+            scrollToBottom();
+        });
+    };
+
     /* ===== Utility ===== */
     window.escapeHtml = function (text) {
         return MarkdownRenderer.escapeHtml(text);

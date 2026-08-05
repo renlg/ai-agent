@@ -1261,3 +1261,79 @@ html, body {
     color: var(--text-tertiary);
     text-align: center;
 }
+
+/* ===== Generated Image Cards ===== */
+
+.generated-image-card {
+    border-left-color: #9b59b6;
+    background: #fdf8ff;
+}
+.dark .generated-image-card {
+    background: #1e1a24;
+    border-left-color: #9b59b6;
+}
+
+.generated-image-prompt {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    font-style: italic;
+    line-height: 1.4;
+}
+
+.generated-image-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.generated-image-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.generated-image-img {
+    max-width: 100%;
+    max-height: 480px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    display: block;
+}
+
+.generated-image-revised {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    line-height: 1.4;
+    max-width: 480px;
+}
+
+.generated-image-download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    font-size: 12px;
+    border: 1px solid #9b59b6;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: #9b59b6;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.generated-image-download-btn:hover {
+    background: #9b59b6;
+    color: #fff;
+}
+.dark .generated-image-download-btn {
+    border-color: #c39bd3;
+    color: #c39bd3;
+}
+.dark .generated-image-download-btn:hover {
+    background: #9b59b6;
+    color: #fff;
+}

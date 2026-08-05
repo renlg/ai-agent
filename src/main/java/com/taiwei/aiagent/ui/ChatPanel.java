@@ -251,6 +251,59 @@ public class ChatPanel extends JPanel implements Disposable {
         });
     }
 
+    private void downloadImageToLocal(com.google.gson.JsonObject data) {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                String base64 = data.has("base64") ? data.get("base64").getAsString() : null;
+                String url    = data.has("url")    ? data.get("url").getAsString()    : null;
+                String mime   = data.has("mimeType") ? data.get("mimeType").getAsString() : "image/png";
+                String prompt = data.has("prompt") ? data.get("prompt").getAsString() : "generated";
+
+                String ext = mime.contains("jpeg") || mime.contains("jpg") ? "jpg" : "png";
+                String safeName = prompt.replaceAll("[^a-zA-Z0-9\\u4e00-\\u9fa5]", "_");
+                if (safeName.length() > 40) safeName = safeName.substring(0, 40);
+                String filename = "ai-image-" + System.currentTimeMillis() + "-" + safeName + "." + ext;
+
+                java.io.File downloadsDir = new java.io.File(System.getProperty("user.home"), "Downloads");
+                if (!downloadsDir.exists()) downloadsDir = new java.io.File(System.getProperty("user.home"));
+                java.io.File outFile = new java.io.File(downloadsDir, filename);
+
+                byte[] imageBytes = null;
+                if (base64 != null && !base64.isEmpty()) {
+                    imageBytes = java.util.Base64.getDecoder().decode(base64);
+                } else if (url != null && !url.isEmpty()) {
+                    okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
+                            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                            .build();
+                    okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
+                    try (okhttp3.Response resp = client.newCall(req).execute()) {
+                        if (resp.isSuccessful() && resp.body() != null) {
+                            imageBytes = resp.body().bytes();
+                        }
+                    }
+                }
+
+                if (imageBytes == null) {
+                    pushToJs("showNotification", escapeJsString("图像下载失败：无可用数据"));
+                    return;
+                }
+
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
+                    fos.write(imageBytes);
+                }
+
+                final String savedPath = outFile.getAbsolutePath();
+                LOG.info("图像已保存到: " + savedPath);
+                pushToJs("showNotification", escapeJsString("图像已保存到: " + savedPath));
+
+            } catch (Exception e) {
+                LOG.error("图像下载失败", e);
+                pushToJs("showNotification", escapeJsString("图像保存失败: " + e.getMessage()));
+            }
+        });
+    }
+
     public void submitExternalPrompt(String prompt) {
         String sessionId = agentService.getActiveSessionId();
         if (sessionId == null) {
@@ -572,6 +625,9 @@ public class ChatPanel extends JPanel implements Disposable {
                 case "getMentionSuggestions":
                     String mentionQuery = data.has("query") ? data.get("query").getAsString() : "";
                     pushMentionSuggestionsToJs(mentionQuery);
+                    break;
+                case "downloadImage":
+                    downloadImageToLocal(data);
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);
@@ -987,6 +1043,14 @@ public class ChatPanel extends JPanel implements Disposable {
                     });
                     hideTimer.setRepeats(false);
                     hideTimer.start();
+
+                    // 图像生成结果：在对话中内联展示图像
+                    if (result != null && result.contains("\"__type\":\"generated_image\"")) {
+                        if (sessionId.equals(agentService.getActiveSessionId())) {
+                            pushToJs("showGeneratedImage",
+                                    escapeJsString(toolCallId) + "," + escapeJsString(result));
+                        }
+                    }
                 }
 
                 @Override
