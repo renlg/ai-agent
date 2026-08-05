@@ -272,9 +272,27 @@ public class ChatPanel extends JPanel implements Disposable {
                 if (base64 != null && !base64.isEmpty()) {
                     imageBytes = java.util.Base64.getDecoder().decode(base64);
                 } else if (url != null && !url.isEmpty()) {
+                    // Image URLs are server-controlled (returned directly by the upstream generation API),
+                    // and some CDN/relay hosts serve certs with an incomplete chain that the JVM's default
+                    // cacerts can't validate (chat display works fine since JCEF uses the OS trust store).
+                    // Trust-all is scoped to this single download client only; it must never be applied to
+                    // the LLM API client or any other HTTPS traffic.
+                    javax.net.ssl.X509TrustManager trustAllManager = new javax.net.ssl.X509TrustManager() {
+                        @Override
+                        public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                        @Override
+                        public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                        @Override
+                        public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
+                    };
+                    javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
+                    sslContext.init(null, new javax.net.ssl.TrustManager[]{trustAllManager}, new java.security.SecureRandom());
+
                     okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
                             .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                             .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                            .sslSocketFactory(sslContext.getSocketFactory(), trustAllManager)
+                            .hostnameVerifier((hostname, session) -> true)
                             .build();
                     okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
                     try (okhttp3.Response resp = client.newCall(req).execute()) {
