@@ -188,6 +188,21 @@ public class Conversation {
         return null;
     }
 
+    /**
+     * 获取最近一条携带图片附件的用户消息（用于图生图工具自动取参考图）
+     */
+    public ChatMessage getLastUserMessageWithImages() {
+        synchronized (messages) {
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                ChatMessage msg = messages.get(i);
+                if ("user".equals(msg.getRole()) && msg.hasImages()) {
+                    return msg;
+                }
+            }
+        }
+        return null;
+    }
+
     // ========== Getters ==========
 
     public String getId() {

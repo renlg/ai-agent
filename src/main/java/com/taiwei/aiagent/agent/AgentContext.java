@@ -90,6 +90,7 @@ public class AgentContext {
         // 注册工具
         this.toolRegistry = new ToolRegistry();
         registerDefaultTools();
+        wireConversationAwareTools();
     }
 
     /**
@@ -101,8 +102,20 @@ public class AgentContext {
         this.conversation = conversation;
         this.toolRegistry = new ToolRegistry();
         registerDefaultTools();
+        wireConversationAwareTools();
         // 恢复的会话可能未携带系统提示词（历史持久化数据 systemPrompt 为 null），补齐当前模式对应的系统提示词
         conversation.updateSystemPrompt(promptManager.buildSystemPrompt(mode));
+    }
+
+    /**
+     * 为需要读取会话历史的工具（如图像生成工具读取最近一条带图用户消息作为参考图）注入 Conversation 引用。
+     * buildDefaultTools() 是静态方法（供 ToolManagerDialog 复用，无实际会话），因此在此单独补齐。
+     */
+    private void wireConversationAwareTools() {
+        com.taiwei.aiagent.tool.Tool tool = toolRegistry.getTool("generate_image");
+        if (tool instanceof ImageGenerationTool imageTool) {
+            imageTool.setConversationSupplier(() -> conversation);
+        }
     }
 
     /**
