@@ -12,8 +12,12 @@ import com.taiwei.aiagent.tool.Tool;
 import okhttp3.*;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -21,6 +25,51 @@ public class ImageGenerationTool implements Tool {
 
     private static final Logger LOG = Logger.getInstance(ImageGenerationTool.class);
     private static final int TIMEOUT_SECONDS = 120;
+
+    /**
+     * 工具描述/参数说明文案的模板资源路径，用户可直接编辑该文件调整文案而无需改代码。
+     * 文件缺失或缺少某个 key 时回退到下方内置默认文案，并记录一条警告日志。
+     */
+    private static final String PROMPTS_RESOURCE = "prompts/image_generation.properties";
+
+    private static final String DEFAULT_TOOL_DESCRIPTION =
+            "根据文字描述生成图像。接受文本提示词，调用图像生成 API（OpenAI 兼容格式）创建图像，" +
+            "生成的图像将内联显示在对话中并可下载保存。适用于需要可视化内容、插图、概念设计的场景。" +
+            "如果用户最近一条消息附带了图片（例如“按这张图生成一只猫”“参考这张图……”），会自动将该图片作为参考图进行图生图（image-to-image），无需在参数中传入图片数据。";
+    private static final String DEFAULT_PROMPT_PARAM_DESCRIPTION =
+            "图像描述提示词（支持中英文），描述要生成的图像内容、风格、色彩、构图等细节";
+    private static final String DEFAULT_SIZE_PARAM_DESCRIPTION =
+            "图像尺寸，可选：256x256、512x512、1024x1024、1792x1024（横版）、1024x1792（竖版）";
+    private static final String DEFAULT_N_PARAM_DESCRIPTION =
+            "生成图像数量（1-4），默认使用设置中配置的值";
+
+    private static volatile Properties cachedPrompts;
+
+    private static Properties loadPrompts() {
+        Properties local = cachedPrompts;
+        if (local != null) {
+            return local;
+        }
+        Properties props = new Properties();
+        try (InputStream is = ImageGenerationTool.class.getClassLoader().getResourceAsStream(PROMPTS_RESOURCE)) {
+            if (is == null) {
+                LOG.warn("图像生成提示词模板未找到: " + PROMPTS_RESOURCE + "，将使用内置默认文案");
+            } else {
+                try (InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
+                    props.load(reader);
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("加载图像生成提示词模板失败: " + PROMPTS_RESOURCE + "，将使用内置默认文案", e);
+        }
+        cachedPrompts = props;
+        return props;
+    }
+
+    private static String getPrompt(String key, String defaultValue) {
+        String value = loadPrompts().getProperty(key);
+        return (value != null && !value.isBlank()) ? value : defaultValue;
+    }
 
     /**
      * 提供当前会话引用，用于自动读取最近一条带图用户消息作为图生图参考图。
@@ -51,36 +100,45 @@ public class ImageGenerationTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "根据文字描述生成图像。接受文本提示词，调用图像生成 API（OpenAI 兼容格式）创建图像，" +
-               "生成的图像将内联显示在对话中并可下载保存。适用于需要可视化内容、插图、概念设计的场景。" +
-               "如果用户最近一条消息附带了图片（例如“按这张图生成一只猫”“参考这张图……”），会自动将该图片作为参考图进行图生图（image-to-image），无需在参数中传入图片数据。";
+        return getPrompt("image_gen.tool_description", DEFAULT_TOOL_DESCRIPTION);
     }
 
     @Override
     public String getParametersSchema() {
+        String promptDesc = getPrompt("image_gen.param.prompt.description", DEFAULT_PROMPT_PARAM_DESCRIPTION);
+        String sizeDesc = getPrompt("image_gen.param.size.description", DEFAULT_SIZE_PARAM_DESCRIPTION);
+        String nDesc = getPrompt("image_gen.param.n.description", DEFAULT_N_PARAM_DESCRIPTION);
+
         return """
                 {
                   "type": "object",
                   "properties": {
                     "prompt": {
                       "type": "string",
-                      "description": "图像描述提示词（支持中英文），描述要生成的图像内容、风格、色彩、构图等细节"
+                      "description": "%s"
                     },
                     "size": {
                       "type": "string",
-                      "description": "图像尺寸，可选：256x256、512x512、1024x1024、1792x1024（横版）、1024x1792（竖版）",
+                      "description": "%s",
                       "enum": ["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
                     },
                     "n": {
                       "type": "integer",
-                      "description": "生成图像数量（1-4），默认使用设置中配置的值",
+                      "description": "%s",
                       "minimum": 1,
                       "maximum": 4
                     }
                   },
                   "required": ["prompt"]
                 }
-                """;
+                """.formatted(escapeJson(promptDesc), escapeJson(sizeDesc), escapeJson(nDesc));
+    }
+
+    /**
+     * 转义 JSON 字符串中的反斜杠和双引号，防止用户在模板文件中自定义文案时破坏 JSON 结构。
+     */
+    private static String escapeJson(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     @Override
