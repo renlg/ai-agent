@@ -251,73 +251,18 @@ public class ChatPanel extends JPanel implements Disposable {
         });
     }
 
-    private void downloadImageToLocal(com.google.gson.JsonObject data) {
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+    private void openImageInBrowser(com.google.gson.JsonObject data) {
+        String url = data.has("url") ? data.get("url").getAsString() : null;
+        if (url == null || url.isEmpty()) {
+            pushToJs("showNotification", escapeJsString("图像打开失败：无可用链接"));
+            return;
+        }
+        ApplicationManager.getApplication().invokeLater(() -> {
             try {
-                String base64 = data.has("base64") ? data.get("base64").getAsString() : null;
-                String url    = data.has("url")    ? data.get("url").getAsString()    : null;
-                String mime   = data.has("mimeType") ? data.get("mimeType").getAsString() : "image/png";
-                String prompt = data.has("prompt") ? data.get("prompt").getAsString() : "generated";
-
-                String ext = mime.contains("jpeg") || mime.contains("jpg") ? "jpg" : "png";
-                String safeName = prompt.replaceAll("[^a-zA-Z0-9\\u4e00-\\u9fa5]", "_");
-                if (safeName.length() > 40) safeName = safeName.substring(0, 40);
-                String filename = "ai-image-" + System.currentTimeMillis() + "-" + safeName + "." + ext;
-
-                java.io.File downloadsDir = new java.io.File(System.getProperty("user.home"), "Downloads");
-                if (!downloadsDir.exists()) downloadsDir = new java.io.File(System.getProperty("user.home"));
-                java.io.File outFile = new java.io.File(downloadsDir, filename);
-
-                byte[] imageBytes = null;
-                if (base64 != null && !base64.isEmpty()) {
-                    imageBytes = java.util.Base64.getDecoder().decode(base64);
-                } else if (url != null && !url.isEmpty()) {
-                    // Image URLs are server-controlled (returned directly by the upstream generation API),
-                    // and some CDN/relay hosts serve certs with an incomplete chain that the JVM's default
-                    // cacerts can't validate (chat display works fine since JCEF uses the OS trust store).
-                    // Trust-all is scoped to this single download client only; it must never be applied to
-                    // the LLM API client or any other HTTPS traffic.
-                    javax.net.ssl.X509TrustManager trustAllManager = new javax.net.ssl.X509TrustManager() {
-                        @Override
-                        public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                        @Override
-                        public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                        @Override
-                        public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
-                    };
-                    javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
-                    sslContext.init(null, new javax.net.ssl.TrustManager[]{trustAllManager}, new java.security.SecureRandom());
-
-                    okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
-                            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                            .sslSocketFactory(sslContext.getSocketFactory(), trustAllManager)
-                            .hostnameVerifier((hostname, session) -> true)
-                            .build();
-                    okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
-                    try (okhttp3.Response resp = client.newCall(req).execute()) {
-                        if (resp.isSuccessful() && resp.body() != null) {
-                            imageBytes = resp.body().bytes();
-                        }
-                    }
-                }
-
-                if (imageBytes == null) {
-                    pushToJs("showNotification", escapeJsString("图像下载失败：无可用数据"));
-                    return;
-                }
-
-                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
-                    fos.write(imageBytes);
-                }
-
-                final String savedPath = outFile.getAbsolutePath();
-                LOG.info("图像已保存到: " + savedPath);
-                pushToJs("showNotification", escapeJsString("图像已保存到: " + savedPath));
-
+                com.intellij.ide.BrowserUtil.browse(url);
             } catch (Exception e) {
-                LOG.error("图像下载失败", e);
-                pushToJs("showNotification", escapeJsString("图像保存失败: " + e.getMessage()));
+                LOG.error("图像打开失败", e);
+                pushToJs("showNotification", escapeJsString("图像打开失败: " + e.getMessage()));
             }
         });
     }
@@ -669,8 +614,8 @@ public class ChatPanel extends JPanel implements Disposable {
                     String mentionQuery = data.has("query") ? data.get("query").getAsString() : "";
                     pushMentionSuggestionsToJs(mentionQuery);
                     break;
-                case "downloadImage":
-                    downloadImageToLocal(data);
+                case "openImage":
+                    openImageInBrowser(data);
                     break;
                 case "regenerateImage":
                     regenerateImage(data);

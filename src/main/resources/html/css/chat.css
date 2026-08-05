@@ -1310,7 +1310,7 @@ html, body {
     gap: 8px;
 }
 
-.generated-image-download-btn,
+.generated-image-open-btn,
 .generated-image-regenerate-btn {
     display: inline-flex;
     align-items: center;
@@ -1324,7 +1324,7 @@ html, body {
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
 }
-.generated-image-download-btn:hover,
+.generated-image-open-btn:hover,
 .generated-image-regenerate-btn:hover {
     background: #9b59b6;
     color: #fff;
@@ -1333,12 +1333,12 @@ html, body {
     opacity: 0.6;
     cursor: default;
 }
-.dark .generated-image-download-btn,
+.dark .generated-image-open-btn,
 .dark .generated-image-regenerate-btn {
     border-color: #c39bd3;
     color: #c39bd3;
 }
-.dark .generated-image-download-btn:hover,
+.dark .generated-image-open-btn:hover,
 .dark .generated-image-regenerate-btn:hover {
     background: #9b59b6;
     color: #fff;

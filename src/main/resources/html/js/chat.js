@@ -1154,8 +1154,8 @@
 
     /* ===== Generated Image Display ===== */
 
-    // Tracks the latest base64/url for each rendered <img id> so the download button always
-    // sends the image currently displayed, even after a regenerate replaces it.
+    // Tracks the latest base64/url for each rendered <img id> so the open button always
+    // opens the image currently displayed, even after a regenerate replaces it.
     var generatedImageState = {};
 
     window.showGeneratedImage = function (toolCallId, resultJson) {
@@ -1188,19 +1188,19 @@
                 if (!src) continue;
 
                 var imgId = 'genimg-img-' + toolCallId + '-' + i;
-                var downloadBtnId = 'dln-' + toolCallId + '-' + i;
+                var openBtnId = 'opn-' + toolCallId + '-' + i;
                 var regenerateBtnId = 'rgn-' + toolCallId + '-' + i;
                 gridHtml +=
                     '<div class="generated-image-item">' +
                         '<img class="generated-image-img" id="' + imgId + '" src="' + src + '" alt="' + MarkdownRenderer.escapeHtml(prompt) + '" />' +
                         '<div class="generated-image-actions">' +
-                            '<button class="generated-image-download-btn" id="' + downloadBtnId + '">⬇ 下载</button>' +
+                            '<button class="generated-image-open-btn" id="' + openBtnId + '">打开</button>' +
                             '<button class="generated-image-regenerate-btn" id="' + regenerateBtnId + '">↻ 重新生成</button>' +
                         '</div>' +
                     '</div>';
 
-                // store image data for download/regenerate callbacks; state is mutable so a
-                // later regenerate updates what the download button sends
+                // store image data for open/regenerate callbacks; state is mutable so a
+                // later regenerate updates what the open button opens
                 generatedImageState[imgId] = { base64: img.base64 || '', url: img.url || '' };
                 (function (btnId, regenBtnId, imgElId, imgIndex, imgPrompt, imgMime, imgSize) {
                     setTimeout(function () {
@@ -1208,11 +1208,8 @@
                         if (btn) {
                             btn.addEventListener('click', function () {
                                 var current = generatedImageState[imgElId] || {};
-                                callJava('downloadImage', {
-                                    base64:   current.base64 || '',
-                                    url:      current.url    || '',
-                                    mimeType: imgMime,
-                                    prompt:   imgPrompt
+                                callJava('openImage', {
+                                    url: current.url || ''
                                 });
                             });
                         }
@@ -1232,7 +1229,7 @@
                             });
                         }
                     }, 0);
-                })(downloadBtnId, regenerateBtnId, imgId, i, prompt, img.mimeType || 'image/png', size);
+                })(openBtnId, regenerateBtnId, imgId, i, prompt, img.mimeType || 'image/png', size);
             }
             gridHtml += '</div>';
 

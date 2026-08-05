@@ -183,10 +183,13 @@ var MarkdownRenderer = (function () {
 
         text = escapeHtml(text);
 
-        // images (before links) — 仅允许 http/https/mailto/data:image 协议
+        // images — 生成的图像已经由专属的工具结果卡片（generated-image-card）内联展示，
+        // 这里不再把 AI 回复文本中的 ![]() 渲染成 <img>，否则同一张图会重复显示两次。
+        // 仅允许 http/https/mailto/data:image 协议时渲染为可点击链接，其余情况仅保留替代文本。
         text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (m, alt, url) {
             if (isSafeUrl(url, true)) {
-                return '<img src="' + url + '" alt="' + alt + '" style="max-width:100%">';
+                var label = alt && alt.length > 0 ? alt : url;
+                return '<a href="' + url + '" target="_blank">' + label + '</a>';
             }
             return alt; // 协议不允许时仅渲染替代文本
         });
