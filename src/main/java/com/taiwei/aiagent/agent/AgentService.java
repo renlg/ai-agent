@@ -312,6 +312,9 @@ public class AgentService implements Disposable {
             request.add(ChatMessage.system("你是一名资深软件工程师，严格按照用户指示输出 AGENTS.md 正文内容，不要添加任何多余的解释或前后缀。"));
             request.add(ChatMessage.user(initPrompt));
 
+            // 在调用 LLM 之前先把用户的 /init 记入历史，确保后续调用失败时该消息不会丢失
+            ctx.getConversation().addUserMessage("/init");
+
             ctx.setStopped(false);
             LlmClient llmClient = ctx.getLlmClient();
             ctx.setActiveLlmClient(llmClient);
@@ -327,6 +330,7 @@ public class AgentService implements Disposable {
 
             if (response == null || !response.isSuccess() || response.getContent() == null || response.getContent().isEmpty()) {
                 String err = response != null ? response.getErrorMessage() : "LLM 未返回内容";
+                ctx.getConversation().addAssistantMessage("[/init 执行失败: " + err + "]");
                 listener.onError("生成 AGENTS.md 失败: " + err);
                 return;
             }
@@ -339,7 +343,6 @@ public class AgentService implements Disposable {
                     com.intellij.openapi.vfs.LocalFileSystem.getInstance()
                             .refreshAndFindFileByIoFile(agentsMdPath.toFile()));
 
-            ctx.getConversation().addUserMessage("/init");
             String summary = (existing != null ? "已更新" : "已生成") + " AGENTS.md（" + agentsMdPath + "）\n\n---\n\n" + agentsMdContent;
             ctx.getConversation().addAssistantMessage(summary);
 
@@ -350,6 +353,7 @@ public class AgentService implements Disposable {
             listener.onComplete(summary);
         } catch (Exception e) {
             LOG.error("/init 执行失败", e);
+            ctx.getConversation().addAssistantMessage("[/init 执行失败: " + e.getMessage() + "]");
             listener.onError("/init 执行失败: " + e.getMessage());
         }
     }
@@ -503,11 +507,13 @@ public class AgentService implements Disposable {
                 if (!completed) {
                     LOG.warn("Agent 循环第 " + (iteration + 1) + " 次迭代等待 LLM 响应超时（180s）");
                     llmClient.cancel();
+                    recordInterruptedTurn(context, iterContent.toString(), "LLM 响应超时（180秒）");
                     listener.onError("LLM 响应超时（180秒），请检查网络连接或模型配置");
                     return;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                recordInterruptedTurn(context, iterContent.toString(), "Agent 循环被中断");
                 listener.onError("Agent 循环被中断");
                 return;
             }
@@ -524,6 +530,7 @@ public class AgentService implements Disposable {
             if (iterError[0] != null) {
                 LOG.warn("流式调用错误: " + iterError[0]);
                 LOG.info("流式调用错误 - 迭代次数: " + (iteration + 1) + ", 模型: " + llmClient.getModelName());
+                recordInterruptedTurn(context, iterContent.toString(), iterError[0]);
                 listener.onError(iterError[0]);
                 return;
             }
@@ -656,9 +663,22 @@ public class AgentService implements Disposable {
         String msg = "\n\n[Agent 已达到最大迭代次数 (" + maxIterations + ")，停止执行]";
         listener.onContent(msg);
         fullResponse.append(msg);
+        context.getConversation().addAssistantMessage(msg.trim());
         LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
         if (usage != null) listener.onUsage(usage);
         listener.onComplete(fullResponse.toString());
+    }
+
+    /**
+     * 将本轮已产生的部分助手输出（若有）+ 失败原因写入会话历史，
+     * 确保超时/异常/流中断不会让本轮用户消息和已生成的部分回复凭空消失——
+     * 下一轮对话仍能在完整历史（含失败记录）基础上继续，而不是从一个"假装什么都没发生"的历史重新开始。
+     */
+    private void recordInterruptedTurn(AgentContext context, String partialContent, String error) {
+        String notice = (partialContent != null && !partialContent.isEmpty())
+                ? partialContent + "\n\n[响应中断: " + error + "]"
+                : "[本轮响应失败: " + error + "]";
+        context.getConversation().addAssistantMessage(notice);
     }
 
     /**
