@@ -322,6 +322,31 @@ public class ChatPanel extends JPanel implements Disposable {
         });
     }
 
+    private void regenerateImage(com.google.gson.JsonObject data) {
+        String toolCallId = data.has("toolCallId") ? data.get("toolCallId").getAsString() : "";
+        String imgElId = data.has("imgElId") ? data.get("imgElId").getAsString() : "";
+        String btnId = data.has("btnId") ? data.get("btnId").getAsString() : "";
+        String prompt = data.has("prompt") ? data.get("prompt").getAsString() : "";
+        String size = data.has("size") ? data.get("size").getAsString() : "";
+
+        if (prompt.isEmpty()) {
+            pushToJs("updateGeneratedImage",
+                    escapeJsString(imgElId) + "," + escapeJsString(btnId) + "," + escapeJsString("图像重新生成失败：找不到原始提示词"));
+            return;
+        }
+
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            com.google.gson.JsonObject args = new com.google.gson.JsonObject();
+            args.addProperty("prompt", prompt);
+            if (!size.isEmpty()) args.addProperty("size", size);
+            args.addProperty("n", 1);
+
+            String result = new com.taiwei.aiagent.tool.impl.ImageGenerationTool().execute(args.toString());
+            pushToJs("updateGeneratedImage",
+                    escapeJsString(imgElId) + "," + escapeJsString(btnId) + "," + escapeJsString(result));
+        });
+    }
+
     public void submitExternalPrompt(String prompt) {
         String sessionId = agentService.getActiveSessionId();
         if (sessionId == null) {
@@ -646,6 +671,9 @@ public class ChatPanel extends JPanel implements Disposable {
                     break;
                 case "downloadImage":
                     downloadImageToLocal(data);
+                    break;
+                case "regenerateImage":
+                    regenerateImage(data);
                     break;
                 default:
                     LOG.warn("Unknown JS action: " + action);

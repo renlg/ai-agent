@@ -1305,14 +1305,13 @@ html, body {
     display: block;
 }
 
-.generated-image-revised {
-    font-size: 11px;
-    color: var(--text-tertiary);
-    line-height: 1.4;
-    max-width: 480px;
+.generated-image-actions {
+    display: flex;
+    gap: 8px;
 }
 
-.generated-image-download-btn {
+.generated-image-download-btn,
+.generated-image-regenerate-btn {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -1325,15 +1324,22 @@ html, body {
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
 }
-.generated-image-download-btn:hover {
+.generated-image-download-btn:hover,
+.generated-image-regenerate-btn:hover {
     background: #9b59b6;
     color: #fff;
 }
-.dark .generated-image-download-btn {
+.generated-image-regenerate-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.dark .generated-image-download-btn,
+.dark .generated-image-regenerate-btn {
     border-color: #c39bd3;
     color: #c39bd3;
 }
-.dark .generated-image-download-btn:hover {
+.dark .generated-image-download-btn:hover,
+.dark .generated-image-regenerate-btn:hover {
     background: #9b59b6;
     color: #fff;
 }

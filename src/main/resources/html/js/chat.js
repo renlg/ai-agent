@@ -1154,6 +1154,10 @@
 
     /* ===== Generated Image Display ===== */
 
+    // Tracks the latest base64/url for each rendered <img id> so the download button always
+    // sends the image currently displayed, even after a regenerate replaces it.
+    var generatedImageState = {};
+
     window.showGeneratedImage = function (toolCallId, resultJson) {
         whenReady(function () {
             var parsed;
@@ -1172,12 +1176,6 @@
             card.className = 'message assistant generated-image-card';
             card.id = 'genimg-' + toolCallId;
 
-            var labelHtml = '🎨 生成图像'; // 🎨 生成图像
-            var header = '<div class="message-label">' + labelHtml + '</div>';
-            var promptDiv = prompt
-                ? '<div class="generated-image-prompt">' + MarkdownRenderer.escapeHtml(prompt) + (size ? ' &middot; ' + MarkdownRenderer.escapeHtml(size) : '') + '</div>'
-                : '';
-
             var gridHtml = '<div class="generated-image-grid">';
             for (var i = 0; i < images.length; i++) {
                 var img = images[i];
@@ -1189,40 +1187,102 @@
                 }
                 if (!src) continue;
 
-                var revisedDiv = img.revisedPrompt
-                    ? '<div class="generated-image-revised">' + MarkdownRenderer.escapeHtml(img.revisedPrompt) + '</div>'
-                    : '';
-
+                var imgId = 'genimg-img-' + toolCallId + '-' + i;
                 var downloadBtnId = 'dln-' + toolCallId + '-' + i;
+                var regenerateBtnId = 'rgn-' + toolCallId + '-' + i;
                 gridHtml +=
                     '<div class="generated-image-item">' +
-                        '<img class="generated-image-img" src="' + src + '" alt="' + MarkdownRenderer.escapeHtml(prompt) + '" />' +
-                        revisedDiv +
-                        '<button class="generated-image-download-btn" id="' + downloadBtnId + '">⬇ 下载</button>' +
+                        '<img class="generated-image-img" id="' + imgId + '" src="' + src + '" alt="' + MarkdownRenderer.escapeHtml(prompt) + '" />' +
+                        '<div class="generated-image-actions">' +
+                            '<button class="generated-image-download-btn" id="' + downloadBtnId + '">⬇ 下载</button>' +
+                            '<button class="generated-image-regenerate-btn" id="' + regenerateBtnId + '">↻ 重新生成</button>' +
+                        '</div>' +
                     '</div>';
 
-                // store image data for download callback
-                (function (btnId, imgData, imgPrompt, imgMime) {
+                // store image data for download/regenerate callbacks; state is mutable so a
+                // later regenerate updates what the download button sends
+                generatedImageState[imgId] = { base64: img.base64 || '', url: img.url || '' };
+                (function (btnId, regenBtnId, imgElId, imgIndex, imgPrompt, imgMime, imgSize) {
                     setTimeout(function () {
                         var btn = document.getElementById(btnId);
-                        if (!btn) return;
-                        btn.addEventListener('click', function () {
-                            callJava('downloadImage', {
-                                base64:   imgData.base64   || '',
-                                url:      imgData.url      || '',
-                                mimeType: imgMime,
-                                prompt:   imgPrompt
+                        if (btn) {
+                            btn.addEventListener('click', function () {
+                                var current = generatedImageState[imgElId] || {};
+                                callJava('downloadImage', {
+                                    base64:   current.base64 || '',
+                                    url:      current.url    || '',
+                                    mimeType: imgMime,
+                                    prompt:   imgPrompt
+                                });
                             });
-                        });
+                        }
+                        var regenBtn = document.getElementById(regenBtnId);
+                        if (regenBtn) {
+                            regenBtn.addEventListener('click', function () {
+                                regenBtn.disabled = true;
+                                regenBtn.textContent = '⏳ 生成中...';
+                                callJava('regenerateImage', {
+                                    toolCallId: toolCallId,
+                                    index:      String(imgIndex),
+                                    imgElId:    imgElId,
+                                    btnId:      regenBtnId,
+                                    prompt:     imgPrompt,
+                                    size:       imgSize
+                                });
+                            });
+                        }
                     }, 0);
-                })(downloadBtnId, img, prompt, img.mimeType || 'image/png');
+                })(downloadBtnId, regenerateBtnId, imgId, i, prompt, img.mimeType || 'image/png', size);
             }
             gridHtml += '</div>';
 
-            card.innerHTML = header + promptDiv + gridHtml;
+            card.innerHTML = gridHtml;
             messagesArea.appendChild(card);
             keepThinkingAtBottom();
             scrollToBottom();
+        });
+    };
+
+    /** Called from Java after regenerateImage completes (success or failure). */
+    window.updateGeneratedImage = function (imgElId, btnId, resultJson) {
+        whenReady(function () {
+            var regenBtn = document.getElementById(btnId);
+            var parsed = null;
+            try {
+                parsed = typeof resultJson === 'string' ? JSON.parse(resultJson) : resultJson;
+            } catch (e) {
+                parsed = null;
+            }
+
+            var images = parsed && parsed.images ? parsed.images : [];
+            if (images.length === 0) {
+                if (regenBtn) {
+                    regenBtn.disabled = false;
+                    regenBtn.textContent = '↻ 重新生成';
+                }
+                showNotification(typeof resultJson === 'string' ? resultJson : '图像重新生成失败');
+                return;
+            }
+
+            var newImg = images[0];
+            var src = '';
+            if (newImg.base64) {
+                src = 'data:' + (newImg.mimeType || 'image/png') + ';base64,' + newImg.base64;
+            } else if (newImg.url) {
+                src = newImg.url;
+            }
+
+            var imgEl = document.getElementById(imgElId);
+            if (imgEl && src) {
+                imgEl.src = src;
+            }
+            if (src) {
+                generatedImageState[imgElId] = { base64: newImg.base64 || '', url: newImg.url || '' };
+            }
+            if (regenBtn) {
+                regenBtn.disabled = false;
+                regenBtn.textContent = '↻ 重新生成';
+            }
         });
     };
 
