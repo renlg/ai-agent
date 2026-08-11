@@ -67,6 +67,11 @@ public class GoToDefinitionTool implements Tool {
 
     @Override
     public String execute(String arguments) {
+        if (!com.taiwei.aiagent.util.JavaPluginAvailability.isJavaPluginAvailable()) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("error", "Java plugin is not available in this IDE, symbol search is disabled. Please use the search_code tool instead.");
+            return gson.toJson(err);
+        }
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String symbol = args.get("symbol").getAsString();
@@ -161,7 +166,7 @@ public class GoToDefinitionTool implements Tool {
                 return gson.toJson(result);
             });
 
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("error", "go_to_definition 失败: " + e.getMessage());
             return gson.toJson(err);

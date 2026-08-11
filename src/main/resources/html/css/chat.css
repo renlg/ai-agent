@@ -558,7 +558,6 @@ html, body {
     border: 1px solid var(--input-border);
     border-radius: var(--radius-md);
     background: var(--input-bg);
-    overflow: hidden;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -577,6 +576,7 @@ html, body {
     color: var(--text-primary);
     background: transparent;
     border: none;
+    border-radius: var(--radius-md);
     resize: none;
     outline: none;
 }
@@ -759,7 +759,7 @@ html, body {
     bottom: calc(100% + 4px);
     left: 0;
     min-width: 100%;
-    max-height: 200px;
+    max-height: 400px;
     overflow-y: auto;
     background: var(--input-bg);
     border: 1px solid var(--border-color);

@@ -1,11 +1,13 @@
 package com.taiwei.aiagent.settings;
 
 import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import com.taiwei.aiagent.ui.ToolManagerDialog;
 import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.Nls;
@@ -44,6 +46,28 @@ public class TaiweiParentConfigurable implements Configurable {
         bypassHostnameVerificationCheckBox = new JCheckBox(I18nUtil.getMessage("general.bypassHostnameVerification"));
         bypassHostnameVerificationCheckBox.setToolTipText(I18nUtil.getMessage("general.bypassHostnameVerification.desc"));
 
+        JLabel modelEntryLabel = new JLabel(I18nUtil.getMessage("settings.modelEntry"));
+        modelEntryLabel.setForeground(UIUtil.getLabelForeground());
+        modelEntryLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        modelEntryLabel.setToolTipText(I18nUtil.getMessage("settings.modelEntry.tooltip"));
+        modelEntryLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                openModelSettings();
+            }
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                modelEntryLabel.setForeground(UIUtil.getLabelForeground());
+                ((JLabel) e.getSource()).setText("<html><u>" + I18nUtil.getMessage("settings.modelEntry") + "</u></html>");
+            }
+            @Override
+            public void mouseExited(MouseEvent e) {
+                ((JLabel) e.getSource()).setText(I18nUtil.getMessage("settings.modelEntry"));
+            }
+        });
+        JPanel modelEntryPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        modelEntryPanel.add(modelEntryLabel);
+
         JLabel codeSectionLabel = new JLabel(I18nUtil.getMessage("general.codeCompletionSectionTitle"));
         codeSectionLabel.setFont(codeSectionLabel.getFont().deriveFont(Font.BOLD));
 
@@ -59,6 +83,8 @@ public class TaiweiParentConfigurable implements Configurable {
         toolManagerPanel.add(toolManagerCombo);
 
         mainPanel = FormBuilder.createFormBuilder()
+                .addComponent(modelEntryPanel)
+                .addComponent(new JSeparator())
                 .addComponent(codeSectionLabel)
                 .addComponent(completionCheckBox)
                 .addComponent(inlineActionCheckBox)
@@ -118,5 +144,12 @@ public class TaiweiParentConfigurable implements Configurable {
             return;
         }
         new ToolManagerDialog(projects[0]).show();
+    }
+
+    private void openModelSettings() {
+        Project[] projects = ProjectManager.getInstance().getOpenProjects();
+        if (projects.length > 0) {
+            ShowSettingsUtil.getInstance().showSettingsDialog(projects[0], ModelConfigurable.class);
+        }
     }
 }

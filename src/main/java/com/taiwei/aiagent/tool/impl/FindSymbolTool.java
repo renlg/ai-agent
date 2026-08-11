@@ -73,6 +73,11 @@ public class FindSymbolTool implements Tool {
 
     @Override
     public String execute(String arguments) {
+        if (!com.taiwei.aiagent.util.JavaPluginAvailability.isJavaPluginAvailable()) {
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("error", "Java plugin is not available in this IDE, symbol search is disabled. Please use the search_code tool instead.");
+            return gson.toJson(error);
+        }
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String query = args.get("query").getAsString();
@@ -135,7 +140,7 @@ public class FindSymbolTool implements Tool {
                 return gson.toJson(output);
             });
 
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Map<String, Object> error = new LinkedHashMap<>();
             error.put("error", "符号搜索失败: " + e.getMessage());
             return gson.toJson(error);

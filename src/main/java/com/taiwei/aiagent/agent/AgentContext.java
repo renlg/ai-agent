@@ -244,9 +244,11 @@ public class AgentContext {
         result.add(new FileWriteTool(project));
         result.add(new FileReplaceTool(project));
         result.add(new SearchCodeTool(project));
-        result.add(new FindSymbolTool(project));
-        result.add(new FindReferencesTool(project));
-        result.add(new GoToDefinitionTool(project));
+        if (com.taiwei.aiagent.util.JavaPluginAvailability.isJavaPluginAvailable()) {
+            result.add(new FindSymbolTool(project));
+            result.add(new FindReferencesTool(project));
+            result.add(new GoToDefinitionTool(project));
+        }
         result.add(new RunCommandTool(project));
         result.add(new LoadSkillTool(project));
         result.add(new TodoPlanTool());

@@ -591,7 +591,7 @@ public class AgentService implements Disposable {
                                 if (tool != null) {
                                     try {
                                         result = tool.execute(args);
-                                    } catch (Exception e) {
+                                    } catch (Throwable e) {
                                         LOG.error("工具 " + toolName + " 执行异常", e);
                                         result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
                                         listener.onContent("\n\n⚠️ 工具 " + toolName + " 执行异常: " + e.getMessage());
@@ -602,7 +602,7 @@ public class AgentService implements Disposable {
                                 listener.onToolCallEnd(toolCallId, toolName, result);
                                 LOG.info("工具 " + toolName + " 执行完成");
                                 toolResults.put(toolCallId, result);
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 // Fix 2: 确保任何异常都有结果记录
                                 LOG.error("工具 " + toolName + " 回调异常", e);
                                 String errResult = "错误: 工具 '" + toolName + "' 内部异常: " + e.getMessage();
