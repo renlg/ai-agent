@@ -234,7 +234,7 @@
             if (isProcessing) {
                 console.warn('Safety timeout triggered, resetting UI state');
                 stopGeneration();
-                window.onError('请求超时（200秒无响应），请检查网络连接或模型配置');
+                window.onError('', true);
             }
         }, 200000);
     }
@@ -524,7 +524,7 @@
         });
     };
 
-    window.onError = function (error) {
+    window.onError = function (error, suppressDisplay) {
         whenReady(function () {
             // 清除安全超时定时器
             if (safetyTimeoutId) {
@@ -545,7 +545,9 @@
             if (currentContentEl && accumulatedContent.length > 0) {
                 currentContentEl.innerHTML = MarkdownRenderer.render(accumulatedContent);
             }
-            createMessageEl('error', '❌ 错误').querySelector('.message-content').textContent = error;
+            if (!suppressDisplay) {
+                createMessageEl('error', '❌ 错误').querySelector('.message-content').textContent = error;
+            }
             isProcessing = false;
             setButtonToSend();
             sendBtn.disabled = false;
