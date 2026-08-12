@@ -22,6 +22,7 @@ import com.taiwei.aiagent.tool.impl.MemorySearchTool;
 import com.taiwei.aiagent.tool.impl.MemoryTool;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.tool.impl.SearchCodeTool;
+import com.taiwei.aiagent.tool.impl.SerpApiSearchTool;
 import com.taiwei.aiagent.tool.impl.TodoPlanTool;
 import com.taiwei.aiagent.tool.impl.WebSearchTool;
 
@@ -260,6 +261,8 @@ public class AgentContext {
         AiAgentSettings settings = AiAgentSettings.getInstance();
         if ("ALIYUN_IQS".equals(settings.getSearchEngineType())) {
             result.add(new WebSearchTool());
+        } else if ("SERPAPI".equals(settings.getSearchEngineType())) {
+            result.add(new SerpApiSearchTool());
         } else {
             result.add(new DdgSearchTool());
         }

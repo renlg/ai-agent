@@ -547,7 +547,12 @@ public class OpenAiLlmClient implements LlmClient {
                 }
                 msgObj.add("content", contentArray);
             } else if (msg.getContent() != null) {
-                msgObj.addProperty("content", msg.getContent());
+                // tool 角色消息的 content 不能为空字符串，否则 API 会返回 "Invalid value: ''" 错误
+                String content = msg.getContent();
+                if ("tool".equals(msg.getRole()) && content.isEmpty()) {
+                    content = "(no output)";
+                }
+                msgObj.addProperty("content", content);
             }
 
             // 工具调用

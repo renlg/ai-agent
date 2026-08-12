@@ -1,7 +1,10 @@
 package com.taiwei.aiagent.memory;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,6 +25,14 @@ public class MemoryCommandHandler {
     private static final Pattern RECALL_PATTERN = Pattern.compile(
             "^(?:我上次说的|what\\s+do\\s+you\\s+know\\s+about)\\s*[:：]?\\s*(.+)$",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+    private static final Pattern TOKEN_SPLIT = Pattern.compile("[^\\p{IsHan}\\p{L}\\p{N}]+");
+
+    /** Maximum number of auto-generated tags for a memory entry. */
+    private static final int MAX_AUTO_TAGS = 5;
+
+    /** Minimum token length to qualify as a tag (filters out noise like single punctuation). */
+    private static final int MIN_TAG_LENGTH = 2;
 
     private final MemoryManager memoryManager;
 
@@ -56,8 +67,26 @@ public class MemoryCommandHandler {
         if (content.isEmpty()) {
             return "好的，不过我没听清要记住的内容，请再说一次。";
         }
-        memoryManager.remember(content, MemoryCategory.FACT, List.of(), 5);
-        return "已记住：" + content;
+        List<String> tags = generateTags(content);
+        memoryManager.remember(content, MemoryCategory.FACT, tags, 5);
+        return "已记住：" + content + "（标签: " + String.join(", ", tags) + "）";
+    }
+
+    /**
+     * 从记忆内容中自动提取标签。
+     * 按文本分词后取前 N 个有意义的 token 作为标签，过滤掉过短的噪声。
+     */
+    private static List<String> generateTags(String content) {
+        Set<String> seen = new HashSet<>();
+        List<String> tags = new ArrayList<>();
+        for (String token : TOKEN_SPLIT.split(content)) {
+            String t = token.trim();
+            if (t.length() >= MIN_TAG_LENGTH && seen.add(t)) {
+                tags.add(t);
+                if (tags.size() >= MAX_AUTO_TAGS) break;
+            }
+        }
+        return tags;
     }
 
     private String handleForget(String query) {

@@ -57,6 +57,14 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
         state.endpoint = endpoint;
     }
 
+    public String getSerpApiKey() {
+        return state.serpApiKey;
+    }
+
+    public void setSerpApiKey(String serpApiKey) {
+        state.serpApiKey = serpApiKey;
+    }
+
     /**
      * 检查是否已配置 AK/SK
      */
@@ -72,5 +80,6 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
         public String accessKeyId = "";
         public String accessKeySecret = "";
         public String endpoint = "iqs.cn-zhangjiakou.aliyuncs.com";
+        public String serpApiKey = "";
     }
 }

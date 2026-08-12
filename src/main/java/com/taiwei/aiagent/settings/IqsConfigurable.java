@@ -18,8 +18,10 @@ public class IqsConfigurable implements Configurable {
     private JPanel mainPanel;
     private JComboBox<String> searchEngineCombo;
     private JPanel iqsConfigPanel;
+    private JPanel serpApiConfigPanel;
     private JPasswordField accessKeyIdField;
     private JPasswordField accessKeySecretField;
+    private JPasswordField serpApiKeyField;
 
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
@@ -46,7 +48,7 @@ public class IqsConfigurable implements Configurable {
         JLabel engineLabel = new JLabel("搜索引擎: ");
         enginePanel.add(engineLabel);
 
-        searchEngineCombo = new JComboBox<>(new String[]{"低成本默认（DuckDuckGo）", "阿里云 IQS"});
+        searchEngineCombo = new JComboBox<>(new String[]{"低成本默认（DuckDuckGo）", "阿里云 IQS", "SerpAPI"});
         searchEngineCombo.addActionListener(e -> onEngineChanged());
         enginePanel.add(searchEngineCombo);
         mainPanel.add(enginePanel);
@@ -104,6 +106,47 @@ public class IqsConfigurable implements Configurable {
 
         iqsConfigPanel.add(formPanel);
         mainPanel.add(iqsConfigPanel);
+
+        // SerpAPI 配置面板（仅在选择 SerpAPI 时显示）
+        serpApiConfigPanel = new JPanel();
+        serpApiConfigPanel.setLayout(new BoxLayout(serpApiConfigPanel, BoxLayout.Y_AXIS));
+        serpApiConfigPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JTextArea serpHintArea = new JTextArea(
+                "SerpAPI 提供基于 Google 的网络搜索服务。\n" +
+                "请前往 https://serpapi.com 注册账号并获取 API Key。\n" +
+                "免费版每月有 100 次搜索额度。"
+        );
+        serpHintArea.setEditable(false);
+        serpHintArea.setFont(new Font("Dialog", Font.PLAIN, 12));
+        serpHintArea.setBackground(UIManager.getColor("Panel.background"));
+        serpHintArea.setForeground(UIManager.getColor("Label.disabledForeground"));
+        serpHintArea.setBorder(JBUI.Borders.empty(0, 0, 16, 0));
+        serpHintArea.setLineWrap(true);
+        serpHintArea.setWrapStyleWord(true);
+        serpHintArea.setAlignmentX(Component.LEFT_ALIGNMENT);
+        serpApiConfigPanel.add(serpHintArea);
+
+        JPanel serpFormPanel = new JPanel(new GridBagLayout());
+        serpFormPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        GridBagConstraints sgbc = new GridBagConstraints();
+        sgbc.fill = GridBagConstraints.HORIZONTAL;
+        sgbc.insets = new Insets(4, 4, 4, 4);
+
+        sgbc.gridx = 0;
+        sgbc.gridy = 0;
+        sgbc.weightx = 0;
+        JLabel serpKeyLabel = new JLabel("SerpAPI Key:");
+        serpKeyLabel.setPreferredSize(new Dimension(120, 28));
+        serpFormPanel.add(serpKeyLabel, sgbc);
+
+        sgbc.gridx = 1;
+        sgbc.weightx = 1.0;
+        serpApiKeyField = new JPasswordField(30);
+        serpFormPanel.add(serpApiKeyField, sgbc);
+
+        serpApiConfigPanel.add(serpFormPanel);
+        mainPanel.add(serpApiConfigPanel);
         mainPanel.add(Box.createVerticalGlue());
 
         reset();
@@ -111,21 +154,27 @@ public class IqsConfigurable implements Configurable {
     }
 
     private void onEngineChanged() {
-        boolean isIqs = searchEngineCombo.getSelectedIndex() == 1;
-        iqsConfigPanel.setVisible(isIqs);
+        int selected = searchEngineCombo.getSelectedIndex();
+        iqsConfigPanel.setVisible(selected == 1);
+        serpApiConfigPanel.setVisible(selected == 2);
     }
 
     @Override
     public boolean isModified() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
-        String currentType = searchEngineCombo.getSelectedIndex() == 1 ? "ALIYUN_IQS" : "LOW_COST";
+        int selected = searchEngineCombo.getSelectedIndex();
+        String currentType = selected == 1 ? "ALIYUN_IQS" : (selected == 2 ? "SERPAPI" : "LOW_COST");
         if (!currentType.equals(settings.getSearchEngineType())) {
             return true;
         }
-        if (searchEngineCombo.getSelectedIndex() == 1) {
+        if (selected == 1) {
             IqsSettings iqsSettings = IqsSettings.getInstance();
             return !getAccessKeyIdText().equals(iqsSettings.getAccessKeyId())
                     || !getAccessKeySecretText().equals(iqsSettings.getAccessKeySecret());
+        }
+        if (selected == 2) {
+            IqsSettings iqsSettings = IqsSettings.getInstance();
+            return !getSerpApikeyText().equals(iqsSettings.getSerpApiKey());
         }
         return false;
     }
@@ -133,8 +182,9 @@ public class IqsConfigurable implements Configurable {
     @Override
     public void apply() throws ConfigurationException {
         AiAgentSettings settings = AiAgentSettings.getInstance();
+        int selected = searchEngineCombo.getSelectedIndex();
 
-        if (searchEngineCombo.getSelectedIndex() == 1) {
+        if (selected == 1) {
             String akId = getAccessKeyIdText().trim();
             String akSecret = getAccessKeySecretText().trim();
 
@@ -157,6 +207,14 @@ public class IqsConfigurable implements Configurable {
             iqsSettings.setAccessKeyId(akId);
             iqsSettings.setAccessKeySecret(akSecret);
             settings.setSearchEngineType("ALIYUN_IQS");
+        } else if (selected == 2) {
+            String serpKey = getSerpApikeyText().trim();
+            if (serpKey.isEmpty()) {
+                throw new ConfigurationException("SerpAPI Key 不能为空");
+            }
+            IqsSettings iqsSettings = IqsSettings.getInstance();
+            iqsSettings.setSerpApiKey(serpKey);
+            settings.setSearchEngineType("SERPAPI");
         } else {
             settings.setSearchEngineType("LOW_COST");
         }
@@ -165,13 +223,16 @@ public class IqsConfigurable implements Configurable {
     @Override
     public void reset() {
         AiAgentSettings settings = AiAgentSettings.getInstance();
-        boolean isIqs = "ALIYUN_IQS".equals(settings.getSearchEngineType());
-        searchEngineCombo.setSelectedIndex(isIqs ? 1 : 0);
-        iqsConfigPanel.setVisible(isIqs);
+        String engineType = settings.getSearchEngineType();
+        int selectedIndex = "ALIYUN_IQS".equals(engineType) ? 1 : ("SERPAPI".equals(engineType) ? 2 : 0);
+        searchEngineCombo.setSelectedIndex(selectedIndex);
+        iqsConfigPanel.setVisible(selectedIndex == 1);
+        serpApiConfigPanel.setVisible(selectedIndex == 2);
 
         IqsSettings iqsSettings = IqsSettings.getInstance();
         accessKeyIdField.setText(iqsSettings.getAccessKeyId());
         accessKeySecretField.setText(iqsSettings.getAccessKeySecret());
+        serpApiKeyField.setText(iqsSettings.getSerpApiKey());
     }
 
     @Override
@@ -179,8 +240,10 @@ public class IqsConfigurable implements Configurable {
         mainPanel = null;
         searchEngineCombo = null;
         iqsConfigPanel = null;
+        serpApiConfigPanel = null;
         accessKeyIdField = null;
         accessKeySecretField = null;
+        serpApiKeyField = null;
     }
 
     private String getAccessKeyIdText() {
@@ -190,6 +253,11 @@ public class IqsConfigurable implements Configurable {
 
     private String getAccessKeySecretText() {
         char[] password = accessKeySecretField.getPassword();
+        return password != null ? new String(password) : "";
+    }
+
+    private String getSerpApikeyText() {
+        char[] password = serpApiKeyField.getPassword();
         return password != null ? new String(password) : "";
     }
 }
