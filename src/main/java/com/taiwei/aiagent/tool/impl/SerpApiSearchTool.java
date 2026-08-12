@@ -94,14 +94,13 @@ public class SerpApiSearchTool implements Tool {
             // 4. 执行请求
             try (Response response = HTTP_CLIENT.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    String body = response.body() != null ? response.body().string() : "";
                     if (response.code() == 401) {
                         return ToolError.of("AUTHENTICATION_FAILED", I18nUtil.getMessage("tool.serp.invalidKey"), I18nUtil.getMessage("tool.serp.configureHint"));
                     }
                     if (response.code() == 429) {
                         return ToolError.of("RATE_LIMITED", I18nUtil.getMessage("tool.serp.rateLimited"), I18nUtil.getMessage("tool.serp.rateLimitHint"));
                     }
-                    return ToolError.of("HTTP_ERROR", I18nUtil.getMessage("tool.search.httpFailedWithBody", response.code(), body), I18nUtil.getMessage("tool.search.retryHint"));
+                    return ToolError.of("HTTP_ERROR", I18nUtil.getMessage("tool.search.httpFailed", response.code()), I18nUtil.getMessage("tool.search.retryHint"));
                 }
 
                 String responseBody = response.body() != null ? response.body().string() : "";
@@ -109,11 +108,13 @@ public class SerpApiSearchTool implements Tool {
             }
 
         } catch (IOException e) {
-            LOG.warn("SerpAPI request failed: " + e.getMessage());
-            return ToolError.of("NETWORK_ERROR", I18nUtil.getMessage("tool.search.networkFailed", e.getMessage()), I18nUtil.getMessage("tool.search.networkHint"));
+            LOG.warn("SerpAPI request failed");
+            return ToolError.of("NETWORK_ERROR", I18nUtil.getMessage("tool.search.networkFailed", I18nUtil.getMessage("tool.error.unknown")), I18nUtil.getMessage("tool.search.networkHint"));
         } catch (Exception e) {
-            return ToolError.unexpected(LOG, "SerpAPI search failed unexpectedly", e,
-                    I18nUtil.getMessage("tool.search.failed", e.getMessage()), I18nUtil.getMessage("tool.search.retryHint"));
+            LOG.error("SerpAPI search failed unexpectedly");
+            return ToolError.of("INTERNAL_ERROR",
+                    I18nUtil.getMessage("tool.search.failed", I18nUtil.getMessage("tool.error.unknown")),
+                    I18nUtil.getMessage("tool.search.retryHint"));
         }
     }
 

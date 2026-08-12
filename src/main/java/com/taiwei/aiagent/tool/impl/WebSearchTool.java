@@ -109,7 +109,7 @@ public class WebSearchTool implements Tool {
             return GSON.toJson(response.getBody());
 
         } catch (com.aliyun.tea.TeaException e) {
-            LOG.warn("IQS request failed: " + e.getMessage());
+            LOG.warn("IQS request failed");
             String message = e.getMessage();
             if (message != null && message.contains("InvalidAccessKeyId")) {
                 return ToolError.of("AUTHENTICATION_FAILED", I18nUtil.getMessage("tool.iqs.invalidId"), I18nUtil.getMessage("tool.iqs.configureHint"));
@@ -120,11 +120,13 @@ public class WebSearchTool implements Tool {
             } else if (message != null && (message.contains("Timeout") || message.contains("timed out"))) {
                 return ToolError.of("NETWORK_TIMEOUT", I18nUtil.getMessage("tool.search.timeout"), I18nUtil.getMessage("tool.search.networkHint"));
             }
-            return ToolError.of("API_ERROR", message != null ? message : I18nUtil.getMessage("tool.error.unknown"), I18nUtil.getMessage("tool.search.retryHint"));
+            return ToolError.of("API_ERROR", I18nUtil.getMessage("tool.error.unknown"), I18nUtil.getMessage("tool.search.retryHint"));
 
         } catch (Exception e) {
-            return ToolError.unexpected(LOG, "IQS search failed unexpectedly", e,
-                    I18nUtil.getMessage("tool.search.failed", e.getMessage()), I18nUtil.getMessage("tool.search.retryHint"));
+            LOG.error("IQS search failed unexpectedly");
+            return ToolError.of("INTERNAL_ERROR",
+                    I18nUtil.getMessage("tool.search.failed", I18nUtil.getMessage("tool.error.unknown")),
+                    I18nUtil.getMessage("tool.search.retryHint"));
         }
     }
 }

@@ -25,11 +25,26 @@ public class ImageGenSettings implements PersistentStateComponent<ImageGenSettin
 
     @Override
     public @Nullable State getState() {
-        return state;
+        State persisted = new State();
+        persisted.baseUrl = state.baseUrl;
+        persisted.modelName = state.modelName;
+        persisted.imageSize = state.imageSize;
+        persisted.imageCount = state.imageCount;
+        state.encryptedApiKey = SecretEncryption.encryptedForStorage(
+                state.apiKey, state.encryptedApiKey);
+        persisted.encryptedApiKey = state.encryptedApiKey;
+        persisted.apiKey = null;
+        return persisted;
     }
 
     @Override
     public void loadState(@NotNull State state) {
+        if (state.encryptedApiKey == null || state.encryptedApiKey.isEmpty()) {
+            state.encryptedApiKey = SecretEncryption.encrypt(state.apiKey);
+        }
+        state.apiKey = state.encryptedApiKey != null && !state.encryptedApiKey.isEmpty()
+                ? SecretEncryption.decrypt(state.encryptedApiKey)
+                : (state.apiKey != null ? state.apiKey : "");
         this.state = state;
     }
 
@@ -82,6 +97,7 @@ public class ImageGenSettings implements PersistentStateComponent<ImageGenSettin
     public static class State {
         public String baseUrl = "";
         public String apiKey = "";
+        public String encryptedApiKey = "";
         public String modelName = "dall-e-3";
         public String imageSize = "1024x1024";
         public int imageCount = 1;

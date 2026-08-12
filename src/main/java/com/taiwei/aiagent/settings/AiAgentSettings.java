@@ -54,13 +54,30 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         // Return a deep copy so callers (IntelliJ's serialization framework, or anything else)
         // can't mutate our internal state out from under concurrent readers/writers.
         synchronized (stateLock) {
-            return deepCopyState(state);
+            State persisted = deepCopyState(state);
+            for (int i = 0; i < persisted.modelConfigs.size(); i++) {
+                ModelConfig runtime = state.modelConfigs.get(i);
+                ModelConfig stored = persisted.modelConfigs.get(i);
+                runtime.encryptedApiKey = SecretEncryption.encryptedForStorage(
+                        runtime.apiKey, runtime.encryptedApiKey);
+                stored.encryptedApiKey = runtime.encryptedApiKey;
+                stored.apiKey = null;
+            }
+            return persisted;
         }
     }
 
     @Override
     public void loadState(@NotNull State state) {
         synchronized (stateLock) {
+            for (ModelConfig config : state.modelConfigs) {
+                if (config.encryptedApiKey != null && !config.encryptedApiKey.isEmpty()) {
+                    config.apiKey = SecretEncryption.decrypt(config.encryptedApiKey);
+                } else {
+                    config.apiKey = config.apiKey != null ? config.apiKey : "";
+                    config.encryptedApiKey = SecretEncryption.encrypt(config.apiKey);
+                }
+            }
             this.state = state;
         }
     }
@@ -389,6 +406,8 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
         public String name = "qwen3-max";          // 显示名称
         public String baseUrl = "";
         public String apiKey = "";
+        /** Encrypted value used only by XML persistence; apiKey remains the runtime/UI value. */
+        public String encryptedApiKey = "";
         public String modelName = "qwen3-max";
         public int compressionThreshold = 75;
         public boolean visionCapable = true;
@@ -427,6 +446,7 @@ public class AiAgentSettings implements PersistentStateComponent<AiAgentSettings
 
         public ModelConfig copy() {
             ModelConfig c = new ModelConfig(name, baseUrl, apiKey, modelName, compressionThreshold, visionCapable);
+            c.encryptedApiKey = this.encryptedApiKey;
             c.recentTurnsToKeep = this.recentTurnsToKeep;
             c.contextWindowSize = this.contextWindowSize;
             c.temperature = this.temperature;

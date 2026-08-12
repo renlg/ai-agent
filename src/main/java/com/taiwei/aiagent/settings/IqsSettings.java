@@ -25,12 +25,44 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
 
     @Override
     public @Nullable State getState() {
-        return state;
+        State persisted = new State();
+        persisted.endpoint = state.endpoint;
+        state.encryptedAccessKeyId = SecretEncryption.encryptedForStorage(
+                state.accessKeyId, state.encryptedAccessKeyId);
+        state.encryptedAccessKeySecret = SecretEncryption.encryptedForStorage(
+                state.accessKeySecret, state.encryptedAccessKeySecret);
+        state.encryptedSerpApiKey = SecretEncryption.encryptedForStorage(
+                state.serpApiKey, state.encryptedSerpApiKey);
+        persisted.encryptedAccessKeyId = state.encryptedAccessKeyId;
+        persisted.encryptedAccessKeySecret = state.encryptedAccessKeySecret;
+        persisted.encryptedSerpApiKey = state.encryptedSerpApiKey;
+        persisted.accessKeyId = null;
+        persisted.accessKeySecret = null;
+        persisted.serpApiKey = null;
+        return persisted;
     }
 
     @Override
     public void loadState(@NotNull State state) {
+        if (state.encryptedAccessKeyId == null || state.encryptedAccessKeyId.isEmpty()) {
+            state.encryptedAccessKeyId = SecretEncryption.encrypt(state.accessKeyId);
+        }
+        if (state.encryptedAccessKeySecret == null || state.encryptedAccessKeySecret.isEmpty()) {
+            state.encryptedAccessKeySecret = SecretEncryption.encrypt(state.accessKeySecret);
+        }
+        if (state.encryptedSerpApiKey == null || state.encryptedSerpApiKey.isEmpty()) {
+            state.encryptedSerpApiKey = SecretEncryption.encrypt(state.serpApiKey);
+        }
+        state.accessKeyId = loadSecret(state.encryptedAccessKeyId, state.accessKeyId);
+        state.accessKeySecret = loadSecret(state.encryptedAccessKeySecret, state.accessKeySecret);
+        state.serpApiKey = loadSecret(state.encryptedSerpApiKey, state.serpApiKey);
         this.state = state;
+    }
+
+    private static String loadSecret(String encrypted, String legacyPlaintext) {
+        return encrypted != null && !encrypted.isEmpty()
+                ? SecretEncryption.decrypt(encrypted)
+                : (legacyPlaintext != null ? legacyPlaintext : "");
     }
 
     public String getAccessKeyId() {
@@ -38,7 +70,7 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
     }
 
     public void setAccessKeyId(String accessKeyId) {
-        state.accessKeyId = accessKeyId;
+        state.accessKeyId = accessKeyId != null ? accessKeyId : "";
     }
 
     public String getAccessKeySecret() {
@@ -46,7 +78,7 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
     }
 
     public void setAccessKeySecret(String accessKeySecret) {
-        state.accessKeySecret = accessKeySecret;
+        state.accessKeySecret = accessKeySecret != null ? accessKeySecret : "";
     }
 
     public String getEndpoint() {
@@ -62,7 +94,7 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
     }
 
     public void setSerpApiKey(String serpApiKey) {
-        state.serpApiKey = serpApiKey;
+        state.serpApiKey = serpApiKey != null ? serpApiKey : "";
     }
 
     /**
@@ -81,5 +113,8 @@ public class IqsSettings implements PersistentStateComponent<IqsSettings.State> 
         public String accessKeySecret = "";
         public String endpoint = "iqs.cn-zhangjiakou.aliyuncs.com";
         public String serpApiKey = "";
+        public String encryptedAccessKeyId = "";
+        public String encryptedAccessKeySecret = "";
+        public String encryptedSerpApiKey = "";
     }
 }
