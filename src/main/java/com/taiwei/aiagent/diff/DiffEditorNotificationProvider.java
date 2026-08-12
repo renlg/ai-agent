@@ -10,6 +10,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.ui.EditorNotificationPanel;
 import com.intellij.ui.EditorNotificationProvider;
 import com.intellij.ui.EditorNotifications;
+import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -49,20 +50,20 @@ public class DiffEditorNotificationProvider implements EditorNotificationProvide
 
         int totalCount = service.getDiffCount();
         int currentIdx = service.getCurrentIndex();
-        panel.setText("太微 | " + (currentIdx + 1) + " of " + totalCount + " Files");
+        panel.setText(I18nUtil.getMessage("diff.banner", currentIdx + 1, totalCount));
 
         DiffHighlighter highlighter = service.getHighlighter();
 
         // 上一个 / 下一个文件导航
         if (totalCount > 1) {
-            panel.createActionLabel("← 上一个", () -> {
+            panel.createActionLabel(I18nUtil.getMessage("diff.previous"), () -> {
                 int idx = service.getCurrentIndex();
                 if (idx > 0) {
                     service.setCurrentIndex(idx - 1);
                     navigateToCurrentDiff(project, service);
                 }
             });
-            panel.createActionLabel("下一个 →", () -> {
+            panel.createActionLabel(I18nUtil.getMessage("diff.next"), () -> {
                 int idx = service.getCurrentIndex();
                 if (idx < totalCount - 1) {
                     service.setCurrentIndex(idx + 1);
@@ -73,7 +74,7 @@ public class DiffEditorNotificationProvider implements EditorNotificationProvide
 
         // 隐藏/显示 Diff
         boolean isHidden = service.isDiffHidden(filePath);
-        panel.createActionLabel(isHidden ? "显示Diff" : "隐藏Diff", () -> {
+        panel.createActionLabel(I18nUtil.getMessage(isHidden ? "diff.show" : "diff.hide"), () -> {
             boolean nowHidden = service.toggleHidden(filePath);
             if (nowHidden) {
                 highlighter.clearHighlightsForFile(filePath);
@@ -87,14 +88,14 @@ public class DiffEditorNotificationProvider implements EditorNotificationProvide
         });
 
         // 撤销更改
-        panel.createActionLabel("撤销更改", () -> {
+        panel.createActionLabel(I18nUtil.getMessage("diff.revert"), () -> {
             highlighter.clearHighlightsForFile(filePath);
             service.revertByFile(filePath);
             EditorNotifications.getInstance(project).updateAllNotifications();
         });
 
         // 保留更改
-        panel.createActionLabel("保留更改", () -> {
+        panel.createActionLabel(I18nUtil.getMessage("diff.keep"), () -> {
             highlighter.clearHighlightsForFile(filePath);
             service.acceptByFile(filePath);
             EditorNotifications.getInstance(project).updateAllNotifications();

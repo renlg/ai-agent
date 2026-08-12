@@ -3,14 +3,19 @@ package com.taiwei.aiagent.tool.impl;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.taiwei.aiagent.browser.BrowserToolService;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import javax.swing.*;
 
 public class BrowserTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(BrowserTool.class);
 
     private final Project project;
 
@@ -25,9 +30,7 @@ public class BrowserTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "内置浏览器工具，可以打开网页、获取页面内容、执行 JavaScript、捕获网络请求。" +
-               "支持的操作：open_url（打开网页）、get_content（获取页面 HTML 或文本内容）、" +
-               "execute_js（在页面中执行 JavaScript 代码）、capture_network（注入拦截器捕获 XHR/fetch 网络请求）。";
+        return I18nUtil.getMessage("tool.description.browser");
     }
 
     @Override
@@ -73,22 +76,24 @@ public class BrowserTool implements Tool {
                 case "get_content" -> executeGetContent(service, args);
                 case "execute_js" -> executeJs(service, args);
                 case "capture_network" -> service.captureNetwork();
-                default -> "未知操作: " + action + "。支持的操作: open_url, get_content, execute_js, capture_network";
+                default -> ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.browser.unknownAction", action),
+                        I18nUtil.getMessage("tool.browser.supportedActions"));
             };
         } catch (Exception e) {
-            return "浏览器工具执行失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Browser tool failed", e,
+                    I18nUtil.getMessage("tool.browser.failed", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 
     private String executeOpenUrl(BrowserToolService service, JsonObject args) {
         if (!args.has("url") || args.get("url").getAsString().isEmpty()) {
-            return "错误: open_url 操作需要提供 url 参数";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.browser.urlRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
         String url = args.get("url").getAsString();
 
         activateToolWindow();
         service.openUrl(url);
-        return "已打开 URL: " + url;
+        return I18nUtil.getMessage("tool.browser.opened", url);
     }
 
     private String executeGetContent(BrowserToolService service, JsonObject args) {
@@ -98,7 +103,7 @@ public class BrowserTool implements Tool {
 
     private String executeJs(BrowserToolService service, JsonObject args) {
         if (!args.has("code") || args.get("code").getAsString().isEmpty()) {
-            return "错误: execute_js 操作需要提供 code 参数";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.browser.codeRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
         String code = args.get("code").getAsString();
         return service.executeJavaScript(code);

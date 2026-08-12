@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -16,6 +17,8 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.Query;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,6 +31,8 @@ import java.util.Map;
  * 利用 IDEA 的 Find Usages API (ReferencesSearch) 实现精确引用定位
  */
 public class FindReferencesTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(FindReferencesTool.class);
 
     private final Project project;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -43,7 +48,7 @@ public class FindReferencesTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "查询项目中指定类、方法或字段的所有引用（调用/使用）位置。利用 IntelliJ Find Usages API 精确查找，返回包含文件路径、行号和上下文的结构化结果。适用于重构前评估影响范围、追踪方法调用链等场景。";
+        return I18nUtil.getMessage("tool.description.findReferences");
     }
 
     @Override
@@ -77,9 +82,8 @@ public class FindReferencesTool implements Tool {
     @Override
     public String execute(String arguments) {
         if (!com.taiwei.aiagent.util.JavaPluginAvailability.isJavaPluginAvailable()) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("error", "Java plugin is not available in this IDE, symbol search is disabled. Please use the search_code tool instead.");
-            return gson.toJson(error);
+            return ToolError.of("DEPENDENCY_UNAVAILABLE", I18nUtil.getMessage("tool.javaPlugin.unavailable"),
+                    I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
         }
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
@@ -111,11 +115,8 @@ public class FindReferencesTool implements Tool {
                 }
 
                 if (targetElements.isEmpty()) {
-                    Map<String, Object> error = new LinkedHashMap<>();
-                    error.put("symbol_name", symbolName);
-                    error.put("symbol_type", symbolKind != null ? symbolKind : "any");
-                    error.put("error", "未找到名为 \"" + symbolName + "\" 的符号");
-                    return gson.toJson(error);
+                    return ToolError.of("SYMBOL_NOT_FOUND", I18nUtil.getMessage("tool.references.notFound", symbolName),
+                            I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
                 }
 
                 // 2. 对每个目标元素搜索引用
@@ -158,9 +159,8 @@ public class FindReferencesTool implements Tool {
             });
 
         } catch (Throwable e) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("error", "引用查询失败: " + e.getMessage());
-            return gson.toJson(error);
+            return ToolError.unexpected(LOG, "Reference search failed", e,
+                    I18nUtil.getMessage("tool.references.failed", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 

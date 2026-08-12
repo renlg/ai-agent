@@ -2,6 +2,8 @@ package com.taiwei.aiagent.browser;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -156,7 +158,7 @@ public final class BrowserToolService implements Disposable {
         }
         String result = evaluateExpression(expression);
         if (result != null && result.length() > MAX_CONTENT_LENGTH) {
-            return result.substring(0, MAX_CONTENT_LENGTH) + "\n\n... [内容过大，已截断]";
+            return result.substring(0, MAX_CONTENT_LENGTH) + I18nUtil.getMessage("tool.browser.contentTruncated");
         }
         return result;
     }
@@ -187,7 +189,8 @@ public final class BrowserToolService implements Disposable {
             ).get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             pendingEvaluations.remove(id);
-            return "执行失败: " + e.getMessage();
+            return ToolError.of("BROWSER_SCRIPT_FAILED", I18nUtil.getMessage("tool.browser.scriptFailed", e.getMessage()),
+                    I18nUtil.getMessage("tool.browser.scriptFailedHint"));
         }
     }
 
@@ -214,7 +217,8 @@ public final class BrowserToolService implements Disposable {
             ).get(JS_EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             pendingEvaluations.remove(id);
-            return "执行失败: " + e.getMessage();
+            return ToolError.of("BROWSER_CONTENT_FAILED", I18nUtil.getMessage("tool.browser.contentFailed", e.getMessage()),
+                    I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 
@@ -225,10 +229,10 @@ public final class BrowserToolService implements Disposable {
 
         List<String> snapshot = new ArrayList<>(capturedRequests);
         if (snapshot.isEmpty()) {
-            return "网络请求拦截已安装，暂无捕获的请求。后续页面请求将被自动捕获。";
+            return I18nUtil.getMessage("tool.browser.captureReady");
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("已捕获 ").append(snapshot.size()).append(" 个网络请求:\n");
+        sb.append(I18nUtil.getMessage("tool.browser.captured", snapshot.size())).append("\n");
         for (String req : snapshot) {
             sb.append(req).append("\n");
         }

@@ -4,6 +4,7 @@ import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.util.IconLoader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import javax.swing.*;
 
@@ -29,7 +30,7 @@ public class DiffGutterIconRenderer extends GutterIconRenderer {
 
     @Override
     public @Nullable String getTooltipText() {
-        return isAdded ? "新增行" : "修改行";
+        return I18nUtil.getMessage(isAdded ? "diff.addedLine" : "diff.modifiedLine");
     }
 
     @Override

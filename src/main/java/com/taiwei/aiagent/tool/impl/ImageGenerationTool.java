@@ -9,6 +9,8 @@ import com.taiwei.aiagent.model.Conversation;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.settings.ImageGenSettings;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 import okhttp3.*;
 
 import java.io.IOException;
@@ -32,16 +34,10 @@ public class ImageGenerationTool implements Tool {
      */
     private static final String PROMPTS_RESOURCE = "prompts/image_generation.properties";
 
-    private static final String DEFAULT_TOOL_DESCRIPTION =
-            "根据文字描述生成图像。接受文本提示词，调用图像生成 API（OpenAI 兼容格式）创建图像，" +
-            "生成的图像将内联显示在对话中并可下载保存。适用于需要可视化内容、插图、概念设计的场景。" +
-            "如果用户最近一条消息附带了图片（例如“按这张图生成一只猫”“参考这张图……”），会自动将该图片作为参考图进行图生图（image-to-image），无需在参数中传入图片数据。";
-    private static final String DEFAULT_PROMPT_PARAM_DESCRIPTION =
-            "图像描述提示词（支持中英文），描述要生成的图像内容、风格、色彩、构图等细节";
-    private static final String DEFAULT_SIZE_PARAM_DESCRIPTION =
-            "图像尺寸，可选：256x256、512x512、1024x1024、1792x1024（横版）、1024x1792（竖版）";
-    private static final String DEFAULT_N_PARAM_DESCRIPTION =
-            "生成图像数量（1-4），默认使用设置中配置的值";
+    private static final String DEFAULT_TOOL_DESCRIPTION = I18nUtil.getMessage("tool.description.generateImage");
+    private static final String DEFAULT_PROMPT_PARAM_DESCRIPTION = I18nUtil.getMessage("tool.image.promptDescription");
+    private static final String DEFAULT_SIZE_PARAM_DESCRIPTION = I18nUtil.getMessage("tool.image.sizeDescription");
+    private static final String DEFAULT_N_PARAM_DESCRIPTION = I18nUtil.getMessage("tool.image.countDescription");
 
     private static volatile Properties cachedPrompts;
 
@@ -53,14 +49,14 @@ public class ImageGenerationTool implements Tool {
         Properties props = new Properties();
         try (InputStream is = ImageGenerationTool.class.getClassLoader().getResourceAsStream(PROMPTS_RESOURCE)) {
             if (is == null) {
-                LOG.warn("图像生成提示词模板未找到: " + PROMPTS_RESOURCE + "，将使用内置默认文案");
+                LOG.warn("Image prompt template not found; using defaults: " + PROMPTS_RESOURCE);
             } else {
                 try (InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                     props.load(reader);
                 }
             }
         } catch (Exception e) {
-            LOG.warn("加载图像生成提示词模板失败: " + PROMPTS_RESOURCE + "，将使用内置默认文案", e);
+            LOG.warn("Failed to load image prompt template; using defaults: " + e.getMessage());
         }
         cachedPrompts = props;
         return props;
@@ -145,14 +141,14 @@ public class ImageGenerationTool implements Tool {
     public String execute(String arguments) {
         ImageGenSettings settings = ImageGenSettings.getInstance();
         if (!settings.isConfigured()) {
-            return "【图像生成失败】请先在设置页面（Settings → Tools → 太微 → 图像生成）配置 API 地址、API Key 和模型名称。";
+            return ToolError.of("NOT_CONFIGURED", I18nUtil.getMessage("tool.image.notConfigured"), I18nUtil.getMessage("tool.image.configureHint"));
         }
 
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String prompt = args.get("prompt").getAsString().trim();
             if (prompt.isEmpty()) {
-                return "【图像生成失败】提示词不能为空";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.image.promptEmpty"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
 
             String size = args.has("size") ? args.get("size").getAsString() : settings.getImageSize();
@@ -169,8 +165,8 @@ public class ImageGenerationTool implements Tool {
             return generateTextToImage(settings, baseUrl, prompt, size, n);
 
         } catch (Exception e) {
-            LOG.error("图像生成异常", e);
-            return "【图像生成失败】" + e.getMessage();
+            return ToolError.unexpected(LOG, "Image generation failed unexpectedly", e,
+                    I18nUtil.getMessage("tool.image.failed", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 
@@ -198,7 +194,7 @@ public class ImageGenerationTool implements Tool {
         body.addProperty("size", size);
 
         String endpoint = baseUrl + "images/generations";
-        LOG.info("调用图像生成 API: endpoint=" + endpoint + ", model=" + settings.getModelName());
+        LOG.debug("Calling image generation API: " + endpoint);
 
         try {
             RequestBody requestBody = RequestBody.create(
@@ -213,14 +209,14 @@ public class ImageGenerationTool implements Tool {
             try (Response response = buildHttpClient().newCall(request).execute()) {
                 String responseBody = response.body() != null ? response.body().string() : "";
                 if (!response.isSuccessful()) {
-                    LOG.warn("图像生成 API 失败: HTTP " + response.code() + " " + responseBody);
-                    return "【图像生成失败】HTTP " + response.code() + ": " + truncate(responseBody, 300);
+                    LOG.warn("Image generation API returned HTTP " + response.code());
+                    return ToolError.of("HTTP_ERROR", I18nUtil.getMessage("tool.search.httpFailedWithBody", response.code(), truncate(responseBody, 300)), I18nUtil.getMessage("tool.image.apiHint"));
                 }
                 return parseImageResponse(responseBody, prompt, size);
             }
         } catch (IOException e) {
-            LOG.error("图像生成网络请求失败", e);
-            return "【图像生成失败】网络请求失败: " + e.getMessage();
+            LOG.warn("Image generation request failed: " + e.getMessage());
+            return ToolError.of("NETWORK_ERROR", I18nUtil.getMessage("tool.image.networkFailed", e.getMessage()), I18nUtil.getMessage("tool.search.networkHint"));
         }
     }
 
@@ -236,14 +232,14 @@ public class ImageGenerationTool implements Tool {
                 return result;
             }
         } catch (Exception e) {
-            LOG.warn("images/edits 图生图调用失败，尝试回退到 images/generations + image 字段", e);
+            LOG.warn("images/edits failed; falling back to images/generations: " + e.getMessage());
         }
 
         try {
             return tryGenerationsWithImage(settings, baseUrl, prompt, size, n, referenceImages);
         } catch (Exception e) {
-            LOG.error("图生图回退调用也失败", e);
-            return "【图生图失败】上游不支持参考图: " + e.getMessage();
+            LOG.warn("Image-to-image fallback failed: " + e.getMessage());
+            return ToolError.of("REFERENCE_IMAGE_UNSUPPORTED", I18nUtil.getMessage("tool.image.referenceUnsupported", e.getMessage()), I18nUtil.getMessage("tool.image.referenceHint"));
         }
     }
 
@@ -253,7 +249,7 @@ public class ImageGenerationTool implements Tool {
     private String tryImagesEdits(ImageGenSettings settings, String baseUrl, String prompt, String size, int n,
                                     List<ChatMessage.ImageContent> referenceImages) throws IOException {
         String endpoint = baseUrl + "images/edits";
-        LOG.info("调用图生图 API (edits): endpoint=" + endpoint + ", model=" + settings.getModelName()
+        LOG.debug("Calling image edit API: endpoint=" + endpoint + ", model=" + settings.getModelName()
                 + ", refImages=" + referenceImages.size());
 
         MultipartBody.Builder multipart = new MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -280,7 +276,7 @@ public class ImageGenerationTool implements Tool {
         try (Response response = buildHttpClient().newCall(request).execute()) {
             String responseBody = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
-                LOG.warn("images/edits 调用失败: HTTP " + response.code() + " " + truncate(responseBody, 300));
+                LOG.warn("images/edits returned HTTP " + response.code());
                 return null;
             }
             return parseImageResponse(responseBody, prompt, size);
@@ -290,7 +286,7 @@ public class ImageGenerationTool implements Tool {
     private String tryGenerationsWithImage(ImageGenSettings settings, String baseUrl, String prompt, String size, int n,
                                              List<ChatMessage.ImageContent> referenceImages) throws IOException {
         String endpoint = baseUrl + "images/generations";
-        LOG.info("调用图生图 API (generations+image 回退): endpoint=" + endpoint + ", model=" + settings.getModelName());
+        LOG.debug("Calling image generation fallback API: " + endpoint);
 
         JsonObject body = new JsonObject();
         body.addProperty("model", settings.getModelName());
@@ -320,7 +316,7 @@ public class ImageGenerationTool implements Tool {
         try (Response response = buildHttpClient().newCall(request).execute()) {
             String responseBody = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
-                LOG.warn("images/generations+image 回退调用失败: HTTP " + response.code() + " " + responseBody);
+                LOG.warn("images/generations image fallback returned HTTP " + response.code());
                 throw new IOException("HTTP " + response.code() + ": " + truncate(responseBody, 300));
             }
             return parseImageResponse(responseBody, prompt, size);
@@ -330,16 +326,16 @@ public class ImageGenerationTool implements Tool {
     private String parseImageResponse(String responseBody, String prompt, String size) {
         try {
             if (responseBody == null || responseBody.isBlank()) {
-                return "【图像生成失败】API 返回内容为空";
+                return ToolError.of("EMPTY_RESPONSE", I18nUtil.getMessage("tool.image.emptyResponse"), I18nUtil.getMessage("tool.image.apiHint"));
             }
             com.google.gson.JsonElement respElement = JsonParser.parseString(responseBody);
             if (respElement == null || respElement.isJsonNull() || !respElement.isJsonObject()) {
-                return "【图像生成失败】API 返回内容不是有效的 JSON 对象: " + truncate(responseBody, 300);
+                return ToolError.of("INVALID_RESPONSE", I18nUtil.getMessage("tool.image.invalidResponse", truncate(responseBody, 300)), I18nUtil.getMessage("tool.image.apiHint"));
             }
             JsonObject resp = respElement.getAsJsonObject();
             JsonArray data = resp.getAsJsonArray("data");
             if (data == null || data.size() == 0) {
-                return "【图像生成失败】API 返回数据为空: " + truncate(responseBody, 300);
+                return ToolError.of("EMPTY_RESPONSE", I18nUtil.getMessage("tool.image.emptyData", truncate(responseBody, 300)), I18nUtil.getMessage("tool.image.apiHint"));
             }
 
             JsonArray images = new JsonArray();
@@ -371,7 +367,7 @@ public class ImageGenerationTool implements Tool {
             }
 
             if (images.size() == 0) {
-                return "【图像生成失败】API 返回数据中未找到有效的图像 url 或 b64_json: " + truncate(responseBody, 300);
+                return ToolError.of("INVALID_RESPONSE", I18nUtil.getMessage("tool.image.missingImage", truncate(responseBody, 300)), I18nUtil.getMessage("tool.image.apiHint"));
             }
 
             JsonObject result = new JsonObject();
@@ -382,8 +378,8 @@ public class ImageGenerationTool implements Tool {
             return result.toString();
 
         } catch (Exception e) {
-            LOG.warn("解析图像生成响应失败", e);
-            return "【图像生成失败】解析响应失败: " + e.getMessage();
+            LOG.warn("Failed to parse image response: " + e.getMessage());
+            return ToolError.of("INVALID_RESPONSE", I18nUtil.getMessage("tool.image.parseFailed", e.getMessage()), I18nUtil.getMessage("tool.image.apiHint"));
         }
     }
 

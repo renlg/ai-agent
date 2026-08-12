@@ -3,7 +3,10 @@ package com.taiwei.aiagent.tool.impl;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,6 +18,8 @@ import java.util.Map;
  * 在 Agent 会话内以内存 Map 维护一个有序任务列表，支持增删改查
  */
 public class TodoPlanTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(TodoPlanTool.class);
 
     private final List<String> items = new ArrayList<>();
     // index (0-based) -> completed
@@ -28,9 +33,7 @@ public class TodoPlanTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "轻量任务/计划追踪工具。在 Agent 会话内跨调用保持状态。"
-                + "操作：init（初始化计划并可选批量添加项目）、add（追加新项目）、"
-                + "complete（标记某项目完成）、status（查看当前状态和进度）。";
+        return I18nUtil.getMessage("tool.description.todoPlan");
     }
 
     @Override
@@ -74,15 +77,17 @@ public class TodoPlanTool implements Tool {
                 case "add"      -> doAdd(args);
                 case "complete" -> doComplete(args);
                 case "status"   -> doStatus();
-                default -> "错误: 未知操作 \"" + action + "\"，支持的操作: init, add, complete, status";
+                default -> ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.todo.unknownAction", action),
+                        I18nUtil.getMessage("tool.todo.supportedActions"));
             };
         } catch (Exception e) {
-            return "todo_plan 执行失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "todo_plan failed", e,
+                    I18nUtil.getMessage("tool.todo.failed", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 
     private synchronized String doInit(JsonObject args) {
-        planName = args.has("plan_name") ? args.get("plan_name").getAsString() : "未命名计划";
+        planName = args.has("plan_name") ? args.get("plan_name").getAsString() : I18nUtil.getMessage("tool.todo.unnamed");
         items.clear();
         completed.clear();
 
@@ -93,11 +98,11 @@ public class TodoPlanTool implements Tool {
             }
         }
 
-        return "计划 \"" + planName + "\" 已初始化，共 " + items.size() + " 项";
+        return I18nUtil.getMessage("tool.todo.initialized", planName, items.size());
     }
 
     private synchronized String doAdd(JsonObject args) {
-        if (!args.has("items")) return "错误: add 操作需要 items 参数";
+        if (!args.has("items")) return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.todo.itemsRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
 
         JsonArray arr = args.get("items").getAsJsonArray();
         int added = 0;
@@ -105,28 +110,28 @@ public class TodoPlanTool implements Tool {
             items.add(elem.getAsString());
             added++;
         }
-        return "已添加 " + added + " 个项目，当前共 " + items.size() + " 项";
+        return I18nUtil.getMessage("tool.todo.added", added, items.size());
     }
 
     private synchronized String doComplete(JsonObject args) {
-        if (!args.has("item_index")) return "错误: complete 操作需要 item_index 参数";
+        if (!args.has("item_index")) return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.todo.indexRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
 
         int idx = args.get("item_index").getAsInt();
         if (idx < 1 || idx > items.size()) {
-            return "错误: item_index " + idx + " 超出范围 [1, " + items.size() + "]";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.todo.indexOutOfRange", idx, items.size()), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
 
         completed.put(idx - 1, true);
-        return "项目 #" + idx + " 已标记完成: " + items.get(idx - 1);
+        return I18nUtil.getMessage("tool.todo.completed", idx, items.get(idx - 1));
     }
 
     private synchronized String doStatus() {
         if (items.isEmpty()) {
-            return "当前无计划。使用 init 操作创建计划。";
+            return I18nUtil.getMessage("tool.todo.empty");
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("计划: ").append(planName).append("\n\n");
+        sb.append(I18nUtil.getMessage("tool.todo.planLabel", planName)).append("\n\n");
 
         int doneCount = 0;
         for (int i = 0; i < items.size(); i++) {
@@ -135,8 +140,7 @@ public class TodoPlanTool implements Tool {
             sb.append(done ? "[x]" : "[ ]").append(" ").append(i + 1).append(". ").append(items.get(i)).append("\n");
         }
 
-        sb.append("\n进度: ").append(doneCount).append("/").append(items.size())
-          .append("  (待完成: ").append(items.size() - doneCount).append(")");
+        sb.append("\n").append(I18nUtil.getMessage("tool.todo.progress", doneCount, items.size(), items.size() - doneCount));
         return sb.toString();
     }
 }

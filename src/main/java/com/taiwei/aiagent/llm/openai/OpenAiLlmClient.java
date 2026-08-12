@@ -9,6 +9,7 @@ import com.taiwei.aiagent.llm.TokenCounter;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.tool.Tool;
 import com.taiwei.aiagent.settings.AiAgentSettings;
+import com.taiwei.aiagent.util.I18nUtil;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
@@ -105,7 +106,7 @@ public class OpenAiLlmClient implements LlmClient {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
         this.apiKey = apiKey;
         this.model = model;
-        LOG.info("OpenAiLlmClient 创建 - baseUrl=" + this.baseUrl + ", model=" + model);
+        LOG.debug("OpenAiLlmClient created: baseUrl=" + this.baseUrl + ", model=" + model);
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
@@ -129,7 +130,7 @@ public class OpenAiLlmClient implements LlmClient {
     @Override
     public LlmResponse chat(List<ChatMessage> messages, List<Tool> tools) {
         if (messages.isEmpty()) {
-            return LlmResponse.error("消息列表为空");
+            return LlmResponse.error(I18nUtil.getMessage("llm.messagesEmpty"));
         }
 
         String prefixKey = buildPrefixKey(messages, tools);
@@ -139,15 +140,15 @@ public class OpenAiLlmClient implements LlmClient {
             CacheEntry cached = completionCache.get(prefixKey);
             if (cached != null && !cached.isExpired() && !cached.isStreamEntry()) {
                 if (lastContent.equals(cached.lastUserMessage)) {
-                    LOG.info("LRU cache hit (chat) key=" + prefixKey);
+                    LOG.debug("LRU cache hit (chat) key=" + prefixKey);
                     return cached.response;
                 }
-                LOG.info("LRU cache invalidated (chat) - last message changed, key=" + prefixKey);
+                LOG.debug("LRU cache invalidated (chat) - last message changed, key=" + prefixKey);
                 completionCache.remove(prefixKey);
             }
         }
 
-        LOG.info("LRU cache miss (chat) - calling API, url=" + baseUrl + "chat/completions, model=" + model);
+        LOG.debug("LRU cache miss (chat) - calling API, model=" + model);
         JsonObject requestBody = buildRequestBody(messages, tools, false);
         Request request = buildRequest(requestBody);
 
@@ -164,18 +165,19 @@ public class OpenAiLlmClient implements LlmClient {
                 synchronized (completionCache) {
                     completionCache.put(prefixKey, new CacheEntry(lastContent, result));
                 }
-                LOG.info("LRU cache stored (chat) key=" + prefixKey);
+                LOG.debug("LRU cache stored (chat) key=" + prefixKey);
             }
             return result;
         } catch (IOException e) {
-            return LlmResponse.error("请求失败: " + e.getMessage());
+            LOG.warn("LLM request failed: " + e.getMessage());
+            return LlmResponse.error(I18nUtil.getMessage("llm.requestFailed", e.getMessage()));
         }
     }
 
     @Override
     public void chatStream(List<ChatMessage> messages, List<Tool> tools, LlmStreamListener listener) {
         if (messages.isEmpty()) {
-            listener.onError("消息列表为空", null);
+            listener.onError(I18nUtil.getMessage("llm.messagesEmpty"), null);
             return;
         }
 
@@ -186,16 +188,16 @@ public class OpenAiLlmClient implements LlmClient {
             CacheEntry cached = completionCache.get(prefixKey);
             if (cached != null && !cached.isExpired() && cached.isStreamEntry()) {
                 if (lastContent.equals(cached.lastUserMessage)) {
-                    LOG.info("LRU cache hit (stream) key=" + prefixKey);
+                    LOG.debug("LRU cache hit (stream) key=" + prefixKey);
                     replayStreamCache(cached, listener);
                     return;
                 }
-                LOG.info("LRU cache invalidated (stream) - last message changed, key=" + prefixKey);
+                LOG.debug("LRU cache invalidated (stream) - last message changed, key=" + prefixKey);
                 completionCache.remove(prefixKey);
             }
         }
 
-        LOG.info("LRU cache miss (stream) - calling API, model=" + model + ", messages=" + messages.size()
+        LOG.debug("LRU cache miss (stream) - calling API, model=" + model + ", messages=" + messages.size()
                 + ", tools=" + (tools != null ? tools.size() : 0));
 
         // Wrap listener to accumulate the response for caching on completion
@@ -233,7 +235,7 @@ public class OpenAiLlmClient implements LlmClient {
                     completionCache.put(prefixKey, new CacheEntry(
                             lastContent, contentAccum.toString(), toolCallAccum, usageHolder[0]));
                 }
-                LOG.info("LRU cache stored (stream) key=" + prefixKey);
+                LOG.debug("LRU cache stored (stream) key=" + prefixKey);
                 listener.onComplete();
             }
 
@@ -275,7 +277,7 @@ public class OpenAiLlmClient implements LlmClient {
 
             @Override
             public void onOpen(EventSource eventSource, Response response) {
-                LOG.info("SSE onOpen - HTTP " + response.code() + ", model=" + model);
+                LOG.debug("SSE opened - HTTP " + response.code() + ", model=" + model);
                 currentEventSource = eventSource;
             }
 
@@ -285,7 +287,7 @@ public class OpenAiLlmClient implements LlmClient {
                 chunkCount.incrementAndGet();
 
                 if ("[DONE]".equals(data)) {
-                    LOG.info("chatStream 结束 - model=" + model + ", chunks=" + chunkCount.get());
+                    LOG.debug("chatStream completed - model=" + model + ", chunks=" + chunkCount.get());
                     // 如果有累积的工具调用，回调
                     flushToolCalls(listener);
                     listener.onComplete();
@@ -299,9 +301,9 @@ public class OpenAiLlmClient implements LlmClient {
                     // 检查 API 错误响应（很多 OpenAI 兼容 API 在流式模式下通过 SSE 事件返回错误）
                     if (chunk.has("error") && !chunk.get("error").isJsonNull()) {
                         JsonObject errorObj = chunk.getAsJsonObject("error");
-                        String errorMsg = errorObj.has("message") ? errorObj.get("message").getAsString() : "未知 API 错误";
-                        LOG.warn("SSE 流中收到 API 错误: " + errorMsg);
-                        listener.onError("API 错误: " + errorMsg, null);
+                        String errorMsg = errorObj.has("message") ? errorObj.get("message").getAsString() : I18nUtil.getMessage("llm.unknownApiError");
+                        LOG.warn("SSE API error: " + errorMsg);
+                        listener.onError(I18nUtil.getMessage("llm.apiError", errorMsg), null);
                         // Stop consuming the stream: without this, later chunks / [DONE] would keep
                         // arriving and could fire onComplete after onError on the same listener.
                         eventSource.cancel();
@@ -368,13 +370,13 @@ public class OpenAiLlmClient implements LlmClient {
                 } catch (Exception e) {
                     // A single malformed chunk shouldn't abort the whole stream; skip it.
                     // If nothing useful ever arrives, the caller reports "no content" at [DONE].
-                    LOG.warn("跳过无法解析的流式数据块: " + e.getMessage(), e);
+                    LOG.warn("Skipping malformed streaming chunk: " + e.getMessage());
                 }
             }
 
             @Override
             public void onFailure(EventSource eventSource, Throwable t, Response response) {
-                StringBuilder msg = new StringBuilder("流式请求失败");
+                StringBuilder msg = new StringBuilder(I18nUtil.getMessage("llm.streamFailed"));
                 if (response != null) {
                     msg.append(", HTTP ").append(response.code());
                     try {
@@ -389,9 +391,6 @@ public class OpenAiLlmClient implements LlmClient {
                     msg.append(", error: ").append(t.getMessage());
                 }
                 LOG.warn(msg.toString());
-                if (t != null) {
-                    LOG.warn("流式请求失败异常详情", t);
-                }
                 listener.onError(msg.toString(), t);
             }
 
@@ -606,13 +605,13 @@ public class OpenAiLlmClient implements LlmClient {
             // 检查错误
             if (json.has("error")) {
                 JsonObject error = json.getAsJsonObject("error");
-                String msg = error.has("message") ? error.get("message").getAsString() : "未知错误";
+                String msg = error.has("message") ? error.get("message").getAsString() : I18nUtil.getMessage("tool.error.unknown");
                 return LlmResponse.error(msg);
             }
 
             JsonArray choices = json.getAsJsonArray("choices");
             if (choices == null || choices.size() == 0) {
-                return LlmResponse.error("响应中无 choices 字段");
+                return LlmResponse.error(I18nUtil.getMessage("llm.choicesMissing"));
             }
 
             JsonObject choice = choices.get(0).getAsJsonObject();
@@ -661,7 +660,8 @@ public class OpenAiLlmClient implements LlmClient {
             return response;
 
         } catch (Exception e) {
-            return LlmResponse.error("解析响应失败: " + e.getMessage());
+            LOG.warn("Failed to parse LLM response: " + e.getMessage());
+            return LlmResponse.error(I18nUtil.getMessage("llm.parseFailed", e.getMessage()));
         }
     }
 }

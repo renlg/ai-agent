@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -12,6 +13,8 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiShortNamesCache;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,6 +28,8 @@ import java.util.regex.Pattern;
  * 利用 IntelliJ PSI API 实现高效符号级搜索
  */
 public class FindSymbolTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(FindSymbolTool.class);
 
     private final Project project;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -40,7 +45,7 @@ public class FindSymbolTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "精确搜索项目中指定名称的类、方法或字段的定义位置。使用 IntelliJ PSI API 进行符号级解析，返回包含文件路径、行号、签名和所在类等结构化信息。适用于查找特定类名、方法名或字段名的定义。";
+        return I18nUtil.getMessage("tool.description.findSymbol");
     }
 
     @Override
@@ -74,9 +79,8 @@ public class FindSymbolTool implements Tool {
     @Override
     public String execute(String arguments) {
         if (!com.taiwei.aiagent.util.JavaPluginAvailability.isJavaPluginAvailable()) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("error", "Java plugin is not available in this IDE, symbol search is disabled. Please use the search_code tool instead.");
-            return gson.toJson(error);
+            return ToolError.of("DEPENDENCY_UNAVAILABLE", I18nUtil.getMessage("tool.javaPlugin.unavailable"),
+                    I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
         }
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
@@ -141,9 +145,8 @@ public class FindSymbolTool implements Tool {
             });
 
         } catch (Throwable e) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("error", "符号搜索失败: " + e.getMessage());
-            return gson.toJson(error);
+            return ToolError.unexpected(LOG, "Symbol search failed", e,
+                    I18nUtil.getMessage("tool.symbol.failed", e.getMessage()), I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
         }
     }
 

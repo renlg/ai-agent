@@ -8,6 +8,8 @@ import com.intellij.openapi.project.Project;
 import org.jetbrains.plugins.terminal.ShellTerminalWidget;
 import org.jetbrains.plugins.terminal.TerminalView;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -61,7 +63,7 @@ public class RunCommandTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "在项目根目录下通过 IDEA 终端执行命令并返回输出结果。命令会在 IDEA 终端中可见执行。";
+        return I18nUtil.getMessage("tool.description.runCommand");
     }
 
     @Override
@@ -100,12 +102,12 @@ public class RunCommandTool implements Tool {
 
             // 安全检查：禁止危险命令
             if (isDangerousCommand(command)) {
-                return "安全限制: 不允许执行此命令。禁止执行 rm -rf /、格式化磁盘等危险操作。";
+                return ToolError.of("COMMAND_BLOCKED", I18nUtil.getMessage("tool.command.blocked"), I18nUtil.getMessage("tool.command.blockedHint"));
             }
 
             String basePath = project.getBasePath();
             if (basePath == null) {
-                return "错误: 无法获取项目路径";
+                return ToolError.of("PROJECT_PATH_UNAVAILABLE", I18nUtil.getMessage("tool.project.pathUnavailable"), I18nUtil.getMessage("tool.hint.openProject"));
             }
 
             // 创建临时文件用于捕获输出和完成信号
@@ -142,7 +144,7 @@ public class RunCommandTool implements Tool {
                     widget.executeCommand("sh " + shellEscape(scriptFile.toString()));
                 } catch (Exception e) {
                     LOG.error("创建终端失败", e);
-                    terminalError.set("创建终端失败: " + e.getMessage());
+                    terminalError.set(I18nUtil.getMessage("tool.command.terminalFailed", e.getMessage()));
                 } finally {
                     terminalLatch.countDown();
                 }
@@ -152,7 +154,7 @@ public class RunCommandTool implements Tool {
 
             if (terminalError.get() != null) {
                 cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
-                return terminalError.get();
+                return ToolError.of("TERMINAL_UNAVAILABLE", terminalError.get(), I18nUtil.getMessage("tool.command.terminalHint"));
             }
 
             // 轮询等待 done 标记文件出现（命令执行完成）
@@ -163,17 +165,18 @@ public class RunCommandTool implements Tool {
                 // 检查是否被用户停止
                 if (stopped) {
                     cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
-                    return "[命令已被用户停止]\n\n已捕获的部分输出:\n" + readPartialOutput(outputFile);
+                    return ToolError.of("USER_STOPPED", I18nUtil.getMessage("tool.command.stopped"),
+                            I18nUtil.getMessage("tool.command.partialOutput", readPartialOutput(outputFile)));
                 }
                 if (System.currentTimeMillis() - startTime > timeoutMs) {
                     // 超时时不杀进程，让终端继续运行，只返回已捕获的部分输出
                     String partialOutput = readPartialOutput(outputFile);
                     // 不立即删除临时文件（进程可能仍在写入），但安排后台清理，避免临时目录永久泄漏
                     scheduleOrphanCleanup(tempDir, scriptFile, doneFile, outputFile);
-                    if (partialOutput.isEmpty() || partialOutput.equals("(无输出)")) {
-                        return "命令执行超过 " + timeout + " 秒仍未完成，进程仍在终端中运行。\n\n(暂无输出，请切换到终端查看)";
+                    if (partialOutput.isEmpty() || partialOutput.equals(I18nUtil.getMessage("tool.command.noOutput"))) {
+                        return ToolError.of("COMMAND_TIMEOUT", I18nUtil.getMessage("tool.command.timeout", timeout), I18nUtil.getMessage("tool.command.noOutputHint"));
                     }
-                    return "命令执行超过 " + timeout + " 秒仍未完成，进程仍在终端中运行。\n\n已捕获的部分输出:\n" + partialOutput;
+                    return ToolError.of("COMMAND_TIMEOUT", I18nUtil.getMessage("tool.command.timeout", timeout), I18nUtil.getMessage("tool.command.partialOutput", partialOutput));
                 }
                 Thread.sleep(500);
             }
@@ -195,27 +198,31 @@ public class RunCommandTool implements Tool {
             if (Files.exists(outputFile)) {
                 output = Files.readString(outputFile, StandardCharsets.UTF_8);
                 if (output.length() > 30000) {
-                    output = output.substring(0, 30000) + "\n... [输出过长，已截断]";
+                    output = output.substring(0, 30000) + I18nUtil.getMessage("tool.command.outputTruncated");
                 }
             }
 
             // 清理临时文件
             cleanupTempFiles(tempDir, scriptFile, doneFile, outputFile);
 
-            String hint = exitCode != 0 ? buildFailureHint(command, exitCode, output) : "";
-            return String.format("退出码: %d\n%s\n输出:\n%s", exitCode, hint, output);
+            if (exitCode != 0) {
+                return ToolError.of("COMMAND_FAILED", I18nUtil.getMessage("tool.command.failed", exitCode, output),
+                        buildFailureHint(command, exitCode, output).trim());
+            }
+            return I18nUtil.getMessage("tool.command.success", exitCode, output);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (tempDir != null) {
                 cleanupTempDirBestEffort(tempDir);
             }
-            return "执行命令失败: 等待命令完成时被中断";
+            return ToolError.of("INTERRUPTED", I18nUtil.getMessage("tool.command.interrupted"), I18nUtil.getMessage("tool.hint.retry"));
         } catch (Exception e) {
             if (tempDir != null) {
                 cleanupTempDirBestEffort(tempDir);
             }
-            return "执行命令失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Command execution failed unexpectedly", e,
+                    I18nUtil.getMessage("tool.command.unexpected", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 
@@ -248,7 +255,7 @@ public class RunCommandTool implements Tool {
             }
         } catch (Exception ignored) {
         }
-        return "(无输出)";
+        return I18nUtil.getMessage("tool.command.noOutput");
     }
 
     /**
@@ -314,18 +321,17 @@ public class RunCommandTool implements Tool {
 
         if (lowerOutput.contains("command not found") || lowerOutput.contains("not found") && exitCode == 127) {
             String cmdName = command.trim().split("\\s+")[0];
-            hint.append("提示: 命令 \"").append(cmdName).append("\" 未找到。")
-                .append("请确认该命令已安装，或检查 PATH 环境变量。");
+            hint.append(I18nUtil.getMessage("tool.command.hintNotFound", cmdName));
         } else if (lowerOutput.contains("permission denied") || exitCode == 126) {
-            hint.append("提示: 权限不足。可尝试 chmod +x <文件> 或检查文件权限。");
+            hint.append(I18nUtil.getMessage("tool.command.hintPermission"));
         } else if (lowerOutput.contains("no such file or directory")) {
-            hint.append("提示: 文件或目录不存在。请先用 ls 确认路径是否正确。");
+            hint.append(I18nUtil.getMessage("tool.command.hintMissingPath"));
         } else if ((lowerCmd.contains("gradle") || lowerCmd.contains("mvn")) && exitCode != 0) {
-            hint.append("提示: 构建失败，请检查上方错误信息中的 \"error:\" 行。");
+            hint.append(I18nUtil.getMessage("tool.command.hintBuild"));
         } else if (lowerOutput.contains("out of memory") || lowerOutput.contains("outofmemoryerror")) {
-            hint.append("提示: 内存不足。可在命令中增加 JVM 参数如 -Xmx2g。");
+            hint.append(I18nUtil.getMessage("tool.command.hintMemory"));
         } else if (exitCode != 0) {
-            hint.append("提示: 命令以退出码 ").append(exitCode).append(" 结束，请检查上方输出的错误信息。");
+            hint.append(I18nUtil.getMessage("tool.command.hintExitCode", exitCode));
         }
 
         return hint.length() > 0 ? hint + "\n" : "";

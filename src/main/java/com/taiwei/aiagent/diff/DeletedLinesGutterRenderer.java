@@ -4,6 +4,7 @@ import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.util.IconLoader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import javax.swing.*;
 
@@ -35,14 +36,14 @@ public class DeletedLinesGutterRenderer extends GutterIconRenderer {
     @Override
     public @Nullable String getTooltipText() {
         if (oldLines == null || oldLines.length == 0) {
-            return "删除行";
+            return I18nUtil.getMessage("diff.deletedLine");
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("已删除 ").append(deletedCount).append(" 行:\n");
+        sb.append(I18nUtil.getMessage("diff.deletedLines", deletedCount)).append("\n");
         for (int i = startLine; i <= endLine && i < oldLines.length; i++) {
             sb.append("- ").append(oldLines[i]).append("\n");
             if (i - startLine > 10) {
-                sb.append("... (共 ").append(deletedCount).append(" 行)");
+                sb.append(I18nUtil.getMessage("diff.deletedLinesTotal", deletedCount));
                 break;
             }
         }

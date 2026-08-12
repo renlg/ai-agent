@@ -3,6 +3,7 @@ package com.taiwei.aiagent.memory;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.taiwei.aiagent.util.I18nUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.nio.file.Path;
@@ -293,8 +294,7 @@ public class MemoryManager implements Disposable {
             sb.append(i + 1)
                     .append(". [").append(entry.getCategory().name().toLowerCase(Locale.ROOT)).append("] ")
                     .append(entry.getContent())
-                    .append("（重要度 ").append(entry.getImportance()).append("/10，")
-                    .append(relativeAge(entry.getCreatedAt(), now)).append("）\n");
+                    .append(I18nUtil.getMessage("memory.search.metadata", entry.getImportance(), relativeAge(entry.getCreatedAt(), now))).append("\n");
         }
         return sb.toString().trim();
     }
@@ -393,7 +393,7 @@ public class MemoryManager implements Disposable {
         try {
             return future.get(QUERY_EMBED_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
-            LOG.info("Query embedding not ready within " + QUERY_EMBED_TIMEOUT_MS
+            LOG.debug("Query embedding not ready within " + QUERY_EMBED_TIMEOUT_MS
                     + "ms, falling back to keyword-only search");
             return null;
         } catch (Exception e) {
@@ -419,14 +419,14 @@ public class MemoryManager implements Disposable {
 
     private static String relativeAge(long timestamp, long now) {
         long minutes = Math.max(0, now - timestamp) / (60 * 1000);
-        if (minutes < 1) return "刚刚";
-        if (minutes < 60) return minutes + "分钟前";
+        if (minutes < 1) return I18nUtil.getMessage("memory.age.justNow");
+        if (minutes < 60) return I18nUtil.getMessage("memory.age.minutes", minutes);
         long hours = minutes / 60;
-        if (hours < 24) return hours + "小时前";
+        if (hours < 24) return I18nUtil.getMessage("memory.age.hours", hours);
         long days = hours / 24;
-        if (days < 30) return days + "天前";
-        if (days < 365) return (days / 30) + "个月前";
-        return (days / 365) + "年前";
+        if (days < 30) return I18nUtil.getMessage("memory.age.days", days);
+        if (days < 365) return I18nUtil.getMessage("memory.age.months", days / 30);
+        return I18nUtil.getMessage("memory.age.years", days / 365);
     }
 
     /** Used for automatic prompt injection: finds memories relevant to the current chat message. */
@@ -563,7 +563,7 @@ public class MemoryManager implements Disposable {
             if (store.deleteById(entry.getId())) {
                 storedEmbeddings.remove(entry.getId());
                 remaining--;
-                LOG.info("Forgot memory " + entry.getId()
+                LOG.debug("Forgot memory " + entry.getId()
                         + " (importance=" + entry.getImportance()
                         + ", lastAccessedAt=" + entry.getLastAccessedAt()
                         + "): " + entry.getContent());

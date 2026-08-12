@@ -226,7 +226,7 @@ public class MemoryStore implements AutoCloseable {
                     while (rs.next()) result.add(mapRow(rs));
                 }
             } catch (SQLException e) {
-                LOG.warn("FTS5 search failed, falling back to LIKE: " + e.getMessage());
+                LOG.warn("FTS5 search failed; falling back to LIKE: " + e.getMessage());
                 return searchByKeywordFallback(keyword);
             }
             return result;
@@ -257,7 +257,7 @@ public class MemoryStore implements AutoCloseable {
             ps.setString(3, tags);
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOG.warn("Failed to insert FTS entry for: " + id, e);
+            LOG.warn("Failed to insert FTS entry for " + id + "; base memory was still saved: " + e.getMessage());
         }
     }
 
@@ -267,7 +267,7 @@ public class MemoryStore implements AutoCloseable {
             ps.setString(1, id);
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOG.warn("Failed to delete FTS entry for: " + id, e);
+            LOG.warn("Failed to delete FTS entry for " + id + ": " + e.getMessage());
         }
     }
 
@@ -300,7 +300,7 @@ public class MemoryStore implements AutoCloseable {
                     }
                 }
             } catch (SQLException e) {
-                LOG.warn("Failed to load stored embeddings", e);
+                LOG.warn("Failed to load stored embeddings; semantic search will be unavailable: " + e.getMessage());
             }
             return result;
         }
@@ -391,7 +391,7 @@ public class MemoryStore implements AutoCloseable {
             try {
                 connection.close();
             } catch (SQLException e) {
-                LOG.warn("Failed to close memory store connection", e);
+                LOG.warn("Failed to close memory store connection: " + e.getMessage());
             }
         }
     }

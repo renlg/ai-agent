@@ -12,9 +12,11 @@ import com.taiwei.aiagent.llm.LlmStreamListener;
 import com.taiwei.aiagent.model.ChatMessage;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
 import com.taiwei.aiagent.tool.ToolRegistry;
 import com.taiwei.aiagent.tool.impl.RunCommandTool;
 import com.taiwei.aiagent.util.TokenCounter;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -245,7 +247,7 @@ public class AgentService implements Disposable {
         // 这样系统提示词在整个会话内保持字节完全一致，能持续命中前缀缓存（DeepSeek/通义/OpenAI）
         String memoryContext = ctx.getPromptManager().buildRelevantMemoryContext(augmentedMessage);
         String userContent = (memoryContext != null && !memoryContext.isEmpty())
-                ? augmentedMessage + "\n\n## Memory\n以下是与当前对话相关的长期记忆（本地存储，用户此前要求你记住的内容）：\n\n" + memoryContext
+                ? augmentedMessage + I18nUtil.getMessage("agent.memory.contextHeader") + memoryContext
                 : augmentedMessage;
 
         // 添加用户消息到对话历史（使用增强后的消息，包含 @ 引用的上下文及相关记忆）
@@ -273,9 +275,7 @@ public class AgentService implements Disposable {
     private void handleModeSwitch(AgentContext ctx, AgentMode newMode, AgentListener listener) {
         ctx.setMode(newMode);
         listener.onModeChanged(newMode.toJsValue());
-        String msg = newMode == AgentMode.PLAN
-                ? "已切换到 **Plan 模式**：只读分析，禁止修改文件或执行命令，最终以 Markdown 输出实施计划。"
-                : "已切换到 **Build 模式**：可正常读写文件、执行命令。";
+        String msg = I18nUtil.getMessage(newMode == AgentMode.PLAN ? "agent.mode.plan" : "agent.mode.build");
         listener.onThinking();
         listener.onContent(msg);
         listener.onComplete(msg);
@@ -289,7 +289,7 @@ public class AgentService implements Disposable {
         try {
             String basePath = project.getBasePath();
             if (basePath == null) {
-                listener.onError("无法获取项目根目录，/init 已取消");
+                listener.onError(I18nUtil.getMessage("agent.init.noProjectPath"));
                 return;
             }
 
@@ -299,8 +299,8 @@ public class AgentService implements Disposable {
                 try {
                     existing = java.nio.file.Files.readString(agentsMdPath, java.nio.charset.StandardCharsets.UTF_8);
                 } catch (Exception e) {
-                    LOG.warn("读取已有 AGENTS.md 失败", e);
-                    listener.onContent("\n\n⚠️ 读取已有 AGENTS.md 失败: " + e.getMessage());
+                    LOG.warn("Failed to read existing AGENTS.md: " + e.getMessage());
+                    listener.onContent(I18nUtil.getMessage("agent.init.readExistingFailed", e.getMessage()));
                 }
             }
 
@@ -309,7 +309,7 @@ public class AgentService implements Disposable {
             String initPrompt = ctx.getPromptManager().buildInitPrompt(scanSummary, existing);
 
             List<ChatMessage> request = new ArrayList<>();
-            request.add(ChatMessage.system("你是一名资深软件工程师，严格按照用户指示输出 AGENTS.md 正文内容，不要添加任何多余的解释或前后缀。"));
+            request.add(ChatMessage.system(I18nUtil.getMessage("agent.init.systemPrompt")));
             request.add(ChatMessage.user(initPrompt));
 
             // 在调用 LLM 之前先把用户的 /init 记入历史，确保后续调用失败时该消息不会丢失
@@ -329,9 +329,9 @@ public class AgentService implements Disposable {
             ctx.setActiveLlmClient(null);
 
             if (response == null || !response.isSuccess() || response.getContent() == null || response.getContent().isEmpty()) {
-                String err = response != null ? response.getErrorMessage() : "LLM 未返回内容";
-                ctx.getConversation().addAssistantMessage("[/init 执行失败: " + err + "]");
-                listener.onError("生成 AGENTS.md 失败: " + err);
+                String err = response != null ? response.getErrorMessage() : I18nUtil.getMessage("agent.llm.noContent");
+                ctx.getConversation().addAssistantMessage(I18nUtil.getMessage("agent.init.failureNotice", err));
+                listener.onError(I18nUtil.getMessage("agent.init.generateFailed", err));
                 return;
             }
 
@@ -343,7 +343,7 @@ public class AgentService implements Disposable {
                     com.intellij.openapi.vfs.LocalFileSystem.getInstance()
                             .refreshAndFindFileByIoFile(agentsMdPath.toFile()));
 
-            String summary = (existing != null ? "已更新" : "已生成") + " AGENTS.md（" + agentsMdPath + "）\n\n---\n\n" + agentsMdContent;
+            String summary = I18nUtil.getMessage(existing != null ? "agent.init.updated" : "agent.init.generated", agentsMdPath, agentsMdContent);
             ctx.getConversation().addAssistantMessage(summary);
 
             if (response.getUsage() != null) {
@@ -353,8 +353,8 @@ public class AgentService implements Disposable {
             listener.onComplete(summary);
         } catch (Exception e) {
             LOG.error("/init 执行失败", e);
-            ctx.getConversation().addAssistantMessage("[/init 执行失败: " + e.getMessage() + "]");
-            listener.onError("/init 执行失败: " + e.getMessage());
+            ctx.getConversation().addAssistantMessage(I18nUtil.getMessage("agent.init.failureNotice", e.getMessage()));
+            listener.onError(I18nUtil.getMessage("agent.init.failed", e.getMessage()));
         }
     }
 
@@ -428,7 +428,7 @@ public class AgentService implements Disposable {
     }
 
     private void executeAgentLoopInternal(AgentContext context, AgentListener listener, LlmClient llmClient) {
-        LOG.info("Agent 循环使用模型（流式）: " + llmClient.getModelName() + ", 模式: " + context.getMode());
+        LOG.debug("Agent loop started: model=" + llmClient.getModelName() + ", mode=" + context.getMode());
         ToolRegistry registry = context.getToolRegistry();
         List<Tool> tools = context.getToolsForMode();
         int maxIterations = context.getMaxIterations();
@@ -439,13 +439,13 @@ public class AgentService implements Disposable {
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             if (context.isStopped()) {
-                LOG.info("Agent 循环被用户停止");
+                LOG.debug("Agent loop stopped by user");
                 LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                 if (usage != null) listener.onUsage(usage);
-                listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
+                listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : I18nUtil.getMessage("agent.stopped"));
                 return;
             }
-            LOG.info("Agent 循环第 " + (iteration + 1) + " 次迭代（流式）");
+            LOG.debug("Agent loop iteration " + (iteration + 1));
 
             // 每次调用 LLM 前都通知 UI 进入思考状态（不只是第一次迭代）
             listener.onThinking();
@@ -505,31 +505,30 @@ public class AgentService implements Disposable {
                 // 使用超时等待，防止 onFailure 未被调用导致线程永久阻塞
                 boolean completed = latch.await(180, java.util.concurrent.TimeUnit.SECONDS);
                 if (!completed) {
-                    LOG.warn("Agent 循环第 " + (iteration + 1) + " 次迭代等待 LLM 响应超时（180s）");
+                    LOG.warn("LLM response timed out at iteration " + (iteration + 1) + " (180s)");
                     llmClient.cancel();
-                    recordInterruptedTurn(context, iterContent.toString(), "LLM 响应超时（180秒）");
-                    listener.onError("LLM 响应超时（180秒），请检查网络连接或模型配置");
+                    recordInterruptedTurn(context, iterContent.toString(), I18nUtil.getMessage("agent.llm.timeoutReason"));
+                    listener.onError(I18nUtil.getMessage("agent.llm.timeout"));
                     return;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                recordInterruptedTurn(context, iterContent.toString(), "Agent 循环被中断");
-                listener.onError("Agent 循环被中断");
+                recordInterruptedTurn(context, iterContent.toString(), I18nUtil.getMessage("agent.interrupted"));
+                listener.onError(I18nUtil.getMessage("agent.interrupted"));
                 return;
             }
 
             // 用户点击停止：cancel 会触发 onFailure，但应视为正常结束
             if (context.isStopped()) {
-                LOG.info("Agent 循环被用户停止");
+                LOG.debug("Agent loop stopped by user");
                 LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                 if (usage != null) listener.onUsage(usage);
-                listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
+                listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : I18nUtil.getMessage("agent.stopped"));
                 return;
             }
 
             if (iterError[0] != null) {
-                LOG.warn("流式调用错误: " + iterError[0]);
-                LOG.info("流式调用错误 - 迭代次数: " + (iteration + 1) + ", 模型: " + llmClient.getModelName());
+                LOG.warn("Streaming request failed at iteration " + (iteration + 1) + ": " + iterError[0]);
                 recordInterruptedTurn(context, iterContent.toString(), iterError[0]);
                 listener.onError(iterError[0]);
                 return;
@@ -552,7 +551,7 @@ public class AgentService implements Disposable {
                     String args = toolCall.getFunction().getArguments();
                     String toolCallId = toolCall.getId();
                     listener.onToolCallStart(toolCallId, toolName, args);
-                    LOG.info("调用工具: " + toolName + " 参数: " + args);
+                    LOG.debug("Calling tool: " + toolName);
                 }
 
                 // 异步并行执行所有工具调用
@@ -568,11 +567,11 @@ public class AgentService implements Disposable {
                         // unknown or user-disabled tool sends the LLM into a useless /build retry loop.
                         String err;
                         if (registry.getTool(toolName) == null) {
-                            err = "错误: 未找到工具 '" + toolName + "'，请仅使用工具列表中提供的工具。";
+                            err = ToolError.of("TOOL_NOT_FOUND", I18nUtil.getMessage("agent.tool.notFound", toolName), I18nUtil.getMessage("agent.tool.useAvailable"));
                         } else if (!AiAgentSettings.getInstance().isToolEnabled(toolName)) {
-                            err = "错误: 工具 '" + toolName + "' 已被用户在设置中禁用，请改用其他工具完成任务。";
+                            err = ToolError.of("TOOL_DISABLED", I18nUtil.getMessage("agent.tool.disabled", toolName), I18nUtil.getMessage("agent.tool.useAlternative"));
                         } else {
-                            err = "错误: 当前处于 Plan 模式（只读分析），工具 '" + toolName + "' 已被禁用。请先切换到 Build 模式（/build）再执行修改操作。";
+                            err = ToolError.of("TOOL_NOT_ALLOWED", I18nUtil.getMessage("agent.tool.planDisabled", toolName), I18nUtil.getMessage("agent.tool.switchBuild"));
                         }
                         listener.onToolCallEnd(toolCallId, toolName, err);
                         toolResults.put(toolCallId, err);
@@ -592,22 +591,22 @@ public class AgentService implements Disposable {
                                     try {
                                         result = tool.execute(args);
                                     } catch (Throwable e) {
-                                        LOG.error("工具 " + toolName + " 执行异常", e);
-                                        result = "错误: 工具 '" + toolName + "' 执行异常: " + e.getMessage();
-                                        listener.onContent("\n\n⚠️ 工具 " + toolName + " 执行异常: " + e.getMessage());
+                                        result = ToolError.unexpected(LOG, "Tool " + toolName + " failed", e,
+                                                I18nUtil.getMessage("agent.tool.executionFailed", toolName, e.getMessage()), I18nUtil.getMessage("agent.tool.retryHint"));
+                                        listener.onContent(I18nUtil.getMessage("agent.tool.executionNotice", toolName, e.getMessage()));
                                     }
                                 } else {
-                                    result = "错误: 未找到工具 '" + toolName + "'";
+                                    result = ToolError.of("TOOL_NOT_FOUND", I18nUtil.getMessage("agent.tool.notFound", toolName), I18nUtil.getMessage("agent.tool.useAvailable"));
                                 }
                                 listener.onToolCallEnd(toolCallId, toolName, result);
-                                LOG.info("工具 " + toolName + " 执行完成");
+                                LOG.debug("Tool completed: " + toolName);
                                 toolResults.put(toolCallId, result);
                             } catch (Throwable e) {
                                 // Fix 2: 确保任何异常都有结果记录
-                                LOG.error("工具 " + toolName + " 回调异常", e);
-                                String errResult = "错误: 工具 '" + toolName + "' 内部异常: " + e.getMessage();
+                                LOG.error("Tool callback failed: " + toolName, e);
+                                String errResult = ToolError.of("INTERNAL_ERROR", I18nUtil.getMessage("agent.tool.internalFailed", toolName, e.getMessage()), I18nUtil.getMessage("agent.tool.retryHint"));
                                 listener.onToolCallEnd(toolCallId, toolName, errResult);
-                                listener.onContent("\n\n⚠️ 工具 " + toolName + " 内部异常: " + e.getMessage());
+                                listener.onContent(I18nUtil.getMessage("agent.tool.internalNotice", toolName, e.getMessage()));
                                 toolResults.put(toolCallId, errResult);
                             }
                         }, toolExecutor));
@@ -617,8 +616,8 @@ public class AgentService implements Disposable {
                 try {
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                 } catch (Exception e) {
-                    LOG.error("等待工具异步执行完成时发生异常", e);
-                    listener.onContent("\n\n⚠️ 工具执行异常: " + e.getMessage());
+                    LOG.error("Failed while waiting for asynchronous tools", e);
+                    listener.onContent(I18nUtil.getMessage("agent.tool.batchFailed", e.getMessage()));
                 }
 
                 // Fix 5: 按 LLM 输出的 tool_calls 顺序添加结果
@@ -631,10 +630,10 @@ public class AgentService implements Disposable {
 
                 // 全部工具执行完成后，检查停止标志
                 if (context.isStopped()) {
-                    LOG.info("Agent 循环被用户停止（工具执行后）");
+                    LOG.debug("Agent loop stopped after tool execution");
                     LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
                     if (usage != null) listener.onUsage(usage);
-                    listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : "[已停止生成]");
+                    listener.onComplete(fullResponse.length() > 0 ? fullResponse.toString() : I18nUtil.getMessage("agent.stopped"));
                     return;
                 }
 
@@ -647,20 +646,20 @@ public class AgentService implements Disposable {
                 fullResponse.append(content);
                 context.getConversation().addAssistantMessage(content);
             } else {
-                LOG.warn("Agent 循环第 " + (iteration + 1) + " 次迭代未收到任何内容");
-                listener.onError("LLM 未返回任何内容，请检查模型配置或网络连接");
+                LOG.warn("No content received at agent iteration " + (iteration + 1));
+                listener.onError(I18nUtil.getMessage("agent.llm.noContentHint"));
                 return;
             }
 
             LlmResponse.Usage usage = buildAccumulatedUsage(context, totalUsage);
             if (usage != null) listener.onUsage(usage);
             listener.onComplete(fullResponse.toString());
-            LOG.info("Agent 循环结束，共迭代 " + (iteration + 1) + " 次");
+            LOG.debug("Agent loop completed after " + (iteration + 1) + " iterations");
             return;
         }
 
         // 达到最大迭代次数
-        String msg = "\n\n[Agent 已达到最大迭代次数 (" + maxIterations + ")，停止执行]";
+        String msg = I18nUtil.getMessage("agent.maxIterations", maxIterations);
         listener.onContent(msg);
         fullResponse.append(msg);
         context.getConversation().addAssistantMessage(msg.trim());
@@ -676,8 +675,8 @@ public class AgentService implements Disposable {
      */
     private void recordInterruptedTurn(AgentContext context, String partialContent, String error) {
         String notice = (partialContent != null && !partialContent.isEmpty())
-                ? partialContent + "\n\n[响应中断: " + error + "]"
-                : "[本轮响应失败: " + error + "]";
+                ? partialContent + I18nUtil.getMessage("agent.responseInterrupted", error)
+                : I18nUtil.getMessage("agent.responseFailed", error);
         context.getConversation().addAssistantMessage(notice);
     }
 
@@ -728,7 +727,7 @@ public class AgentService implements Disposable {
         String notice = "\n\n[... truncated — original result was " + totalTokens
                 + " tokens, showing first and last portions ...]\n\n";
 
-        LOG.info("Truncated tool result from " + totalTokens + " to "
+        LOG.debug("Truncated tool result from " + totalTokens + " to "
                 + (TOOL_RESULT_HEAD_TOKENS + TOOL_RESULT_TAIL_TOKENS) + " tokens");
 
         return head + notice + tail;
@@ -765,7 +764,7 @@ public class AgentService implements Disposable {
                     while (elapsed < approvalTimeout) {
                         if (context.isStopped()) {
                             approvalManager.reject(toolCallId);
-                            String err = "命令执行已被用户停止";
+                            String err = ToolError.of("USER_STOPPED", I18nUtil.getMessage("tool.command.stopped"), I18nUtil.getMessage("tool.command.retryHint"));
                             listener.onToolCallEnd(toolCallId, toolName, err);
                             listener.onCommandResult(toolCallId, err);
                             toolResults.put(toolCallId, err);
@@ -777,14 +776,14 @@ public class AgentService implements Disposable {
                     }
                     if (!released) {
                         approvalManager.reject(toolCallId);
-                        String err = "命令审批超时，已取消执行";
+                        String err = ToolError.of("APPROVAL_TIMEOUT", I18nUtil.getMessage("agent.command.approvalTimeout"), I18nUtil.getMessage("agent.command.approvalRetry"));
                         listener.onToolCallEnd(toolCallId, toolName, err);
                         listener.onCommandResult(toolCallId, err);
                         toolResults.put(toolCallId, err);
                         return;
                     }
                     if (!ca.approved) {
-                        String err = "命令执行已被取消";
+                        String err = ToolError.of("USER_DENIED", I18nUtil.getMessage("agent.command.cancelled"), I18nUtil.getMessage("agent.command.alternativeHint"));
                         listener.onToolCallEnd(toolCallId, toolName, err);
                         listener.onCommandResult(toolCallId, err);
                         toolResults.put(toolCallId, err);
@@ -793,7 +792,7 @@ public class AgentService implements Disposable {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     approvalManager.reject(toolCallId);
-                    String err = "等待命令审批被中断";
+                    String err = ToolError.of("INTERRUPTED", I18nUtil.getMessage("agent.command.approvalInterrupted"), I18nUtil.getMessage("tool.hint.retry"));
                     listener.onToolCallEnd(toolCallId, toolName, err);
                     listener.onCommandResult(toolCallId, err);
                     toolResults.put(toolCallId, err);
@@ -803,7 +802,7 @@ public class AgentService implements Disposable {
 
             // 执行前再次检查停止标志
             if (context.isStopped()) {
-                String err = "命令执行已被用户停止";
+                String err = ToolError.of("USER_STOPPED", I18nUtil.getMessage("tool.command.stopped"), I18nUtil.getMessage("tool.command.retryHint"));
                 listener.onToolCallEnd(toolCallId, toolName, err);
                 listener.onCommandResult(toolCallId, err);
                 toolResults.put(toolCallId, err);
@@ -811,12 +810,12 @@ public class AgentService implements Disposable {
             }
 
             // e. 通过 RunCommandTool 在 IDEA 终端中执行命令（安全命令直接执行，危险命令审批后执行）
-            listener.onCommandProgress(toolCallId, "开始在终端执行...");
+            listener.onCommandProgress(toolCallId, I18nUtil.getMessage("agent.command.starting"));
             RunCommandTool runCommandTool = new RunCommandTool(project);
             context.registerRunCommandTool(toolCallId, runCommandTool);
             try {
                 String result = runCommandTool.execute(args);
-                listener.onCommandProgress(toolCallId, "终端执行完成");
+                listener.onCommandProgress(toolCallId, I18nUtil.getMessage("agent.command.completed"));
                 listener.onCommandResult(toolCallId, result);
                 listener.onToolCallEnd(toolCallId, toolName, result);
                 toolResults.put(toolCallId, result);
@@ -825,8 +824,8 @@ public class AgentService implements Disposable {
             }
 
         } catch (Exception e) {
-            LOG.error("处理 run_command 失败", e);
-            String err = "处理命令失败: " + e.getMessage();
+            LOG.error("Failed to process run_command", e);
+            String err = ToolError.of("INTERNAL_ERROR", I18nUtil.getMessage("agent.command.failed", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
             listener.onToolCallEnd(toolCallId, toolName, err);
             listener.onCommandResult(toolCallId, err);
             toolResults.put(toolCallId, err);
@@ -859,12 +858,12 @@ public class AgentService implements Disposable {
         // 始终实时计算 Token 数，确保准确性
         int totalTokens = TokenCounter.countTokens(messages, llmClient.getModelName())
                 + estimateImageTokens(messages);
-        LOG.info("实时计算 Token 数（含图片）: " + totalTokens);
+        LOG.debug("Current context token estimate: " + totalTokens);
 
         int thresholdTokens = (int) (contextWindowSize * threshold / 100.0);
 
         if (totalTokens > thresholdTokens) {
-            LOG.info("Token 数 " + totalTokens + " 超过阈值 " + thresholdTokens + " (" + threshold + "% of " + contextWindowSize + ")，开始压缩");
+            LOG.debug("Context compression threshold exceeded: " + totalTokens + " > " + thresholdTokens);
             compressConversation(context, llmClient, totalTokens, listener);
         }
     }
@@ -920,8 +919,8 @@ public class AgentService implements Disposable {
 
         int recentStart = findRecentMessagesStart(messages);
         if (recentStart <= systemIdx + 1) {
-            LOG.info("没有足够的旧消息可以压缩");
-            notifyCompressionFailed("没有足够的旧消息可以压缩");
+            LOG.warn("Not enough old messages to compress");
+            notifyCompressionFailed(I18nUtil.getMessage("agent.compression.notEnoughMessages"));
             return;
         }
 
@@ -943,7 +942,7 @@ public class AgentService implements Disposable {
             List<ChatMessage> summaryRequest = new ArrayList<>();
             String compressPrompt = context.getPromptManager().buildCompressPrompt(oldContent.toString());
             summaryRequest.add(ChatMessage.system(compressPrompt));
-            summaryRequest.add(ChatMessage.user("请根据上述格式要求输出 JSON 摘要。"));
+            summaryRequest.add(ChatMessage.user(I18nUtil.getMessage("agent.compression.summaryRequest")));
 
             LlmResponse summaryResponse = llmClient.chat(summaryRequest, null);
 
@@ -953,15 +952,15 @@ public class AgentService implements Disposable {
                 String summary = summaryResponse.getContent();
 
                 List<ChatMessage> newMessages = new ArrayList<>();
-                newMessages.add(ChatMessage.system("以下是对之前对话的结构化摘要：\n" + summary));
+                newMessages.add(ChatMessage.system(I18nUtil.getMessage("agent.compression.summaryHeader") + summary));
 
                 // P2: 保留携带图片的历史消息，同时附带原始文本上下文
                 for (ChatMessage older : olderMessages) {
                     if (older.hasImages()) {
                         String originalText = older.getContent();
                         String contextNote = (originalText != null && !originalText.isEmpty())
-                                ? "[用户上传图片时的问题：" + truncateText(originalText, 100) + "]"
-                                : "[用户上传的图片]";
+                                ? I18nUtil.getMessage("agent.compression.imageQuestion", truncateText(originalText, 100))
+                                : I18nUtil.getMessage("agent.compression.imageOnly");
                         ChatMessage imageWithContext = ChatMessage.user(contextNote);
                         imageWithContext.setImageContents(older.getImageContents());
                         newMessages.add(imageWithContext);
@@ -979,23 +978,23 @@ public class AgentService implements Disposable {
                 int thresholdTokens = (int) (contextWindowSize * config.compressionThreshold / 100.0);
 
                 if (afterTokens > thresholdTokens && !olderMessages.isEmpty()) {
-                    LOG.info("压缩后仍超阈值 (" + afterTokens + " > " + thresholdTokens + ")，执行二次压缩");
+                    LOG.debug("Context still exceeds threshold after compression; compressing again");
                     compressConversationInternal(context, llmClient, afterTokens, listener, false);
                     return;
                 }
 
                 int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
-                LOG.info("上下文压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
+                LOG.debug("Context compression completed: " + beforeTokens + " -> " + afterTokens + " tokens (saved " + savedPercent + "%)");
                 notifyCompression(beforeTokens, afterTokens);
             } else {
-                String errMsg = "LLM 摘要失败";
+                String errMsg = I18nUtil.getMessage("agent.compression.summaryFailed");
                 LOG.warn(errMsg);
                 notifyCompressionFailed(errMsg);
                 fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens);
             }
         } catch (Exception e) {
             String errMsg = e.getMessage();
-            LOG.warn("压缩异常: " + errMsg, e);
+            LOG.error("Context compression failed unexpectedly", e);
             notifyCompressionFailed(errMsg);
             fallbackCompress(context, llmClient, olderMessages, recentMessages, beforeTokens);
         } finally {
@@ -1048,7 +1047,7 @@ public class AgentService implements Disposable {
         int afterTokens = TokenCounter.countTokens(context.getConversation().getMessages(), llmClient.getModelName());
         int savedPercent = beforeTokens > 0 ? (int) ((1.0 - (double) afterTokens / beforeTokens) * 100) : 0;
 
-        LOG.info("回退压缩完成: " + beforeTokens + " -> " + afterTokens + " tokens (节省 " + savedPercent + "%)");
+        LOG.debug("Fallback compression completed: " + beforeTokens + " -> " + afterTokens + " tokens (saved " + savedPercent + "%)");
         notifyCompression(beforeTokens, afterTokens);
     }
 
@@ -1148,7 +1147,7 @@ public class AgentService implements Disposable {
     public void manualCompress() {
         AgentContext ctx = getContext();
         if (ctx == null) {
-            notifyCompressionFailed("无可用会话");
+            notifyCompressionFailed(I18nUtil.getMessage("agent.compression.noSession"));
             return;
         }
 
@@ -1160,11 +1159,11 @@ public class AgentService implements Disposable {
         try {
             compressConversation(ctx, llmClient, beforeTokens, new AgentListener() {
                 @Override public void onThinking() {}
-                @Override public void onContent(String content) { LOG.info("压缩通知: " + content); }
+                @Override public void onContent(String content) { LOG.debug("Compression notice: " + content); }
                 @Override public void onToolCallStart(String toolCallId, String toolName, String arguments) {}
                 @Override public void onToolCallEnd(String toolCallId, String toolName, String result) {}
                 @Override public void onComplete(String fullResponse) {}
-                @Override public void onError(String error) { LOG.warn("手动压缩: " + error); }
+                @Override public void onError(String error) { LOG.warn("Manual compression failed: " + error); }
             });
         } finally {
             ctx.endLlmRequest();

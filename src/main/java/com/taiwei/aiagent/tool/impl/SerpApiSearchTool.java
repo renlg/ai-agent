@@ -9,6 +9,8 @@ import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.settings.IqsSettings;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 import okhttp3.*;
 
 import java.io.IOException;
@@ -38,7 +40,7 @@ public class SerpApiSearchTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "搜索互联网信息，获取最新的网络内容。当需要实时信息、最新新闻、技术文档、或本地知识库未覆盖的内容时，使用此工具搜索网络。";
+        return I18nUtil.getMessage("tool.description.webSearch");
     }
 
     @Override
@@ -64,17 +66,17 @@ public class SerpApiSearchTool implements Tool {
             IqsSettings settings = IqsSettings.getInstance();
             String apiKey = settings.getSerpApiKey();
             if (apiKey == null || apiKey.isBlank()) {
-                return "【提示】SerpAPI 搜索功能尚未配置。请前往 Settings → Tools → 太微 → 网络搜索 页面配置 SerpAPI Key。可在 https://serpapi.com 注册获取。";
+                return ToolError.of("NOT_CONFIGURED", I18nUtil.getMessage("tool.serp.notConfigured"), I18nUtil.getMessage("tool.serp.configureHint"));
             }
 
             // 2. 解析参数
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String query = args.get("query").getAsString();
             if (query == null || query.trim().isEmpty()) {
-                return "错误: 搜索关键词不能为空";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.search.queryEmpty"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
 
-            LOG.info("调用 SerpAPI 搜索: query=" + query);
+            LOG.debug("Calling SerpAPI search");
 
             // 3. 构建请求
             HttpUrl url = HttpUrl.parse(API_URL).newBuilder()
@@ -94,12 +96,12 @@ public class SerpApiSearchTool implements Tool {
                 if (!response.isSuccessful()) {
                     String body = response.body() != null ? response.body().string() : "";
                     if (response.code() == 401) {
-                        return "【搜索失败】SerpAPI Key 无效，请检查 Settings → Tools → 太微 → 网络搜索 中的配置。";
+                        return ToolError.of("AUTHENTICATION_FAILED", I18nUtil.getMessage("tool.serp.invalidKey"), I18nUtil.getMessage("tool.serp.configureHint"));
                     }
                     if (response.code() == 429) {
-                        return "【搜索失败】SerpAPI 请求次数已达上限，请稍后重试或升级套餐。";
+                        return ToolError.of("RATE_LIMITED", I18nUtil.getMessage("tool.serp.rateLimited"), I18nUtil.getMessage("tool.serp.rateLimitHint"));
                     }
-                    return "【搜索失败】HTTP " + response.code() + ": " + body;
+                    return ToolError.of("HTTP_ERROR", I18nUtil.getMessage("tool.search.httpFailedWithBody", response.code(), body), I18nUtil.getMessage("tool.search.retryHint"));
                 }
 
                 String responseBody = response.body() != null ? response.body().string() : "";
@@ -107,11 +109,11 @@ public class SerpApiSearchTool implements Tool {
             }
 
         } catch (IOException e) {
-            LOG.error("SerpAPI 搜索失败", e);
-            return "【搜索失败】网络请求失败: " + e.getMessage();
+            LOG.warn("SerpAPI request failed: " + e.getMessage());
+            return ToolError.of("NETWORK_ERROR", I18nUtil.getMessage("tool.search.networkFailed", e.getMessage()), I18nUtil.getMessage("tool.search.networkHint"));
         } catch (Exception e) {
-            LOG.error("SerpAPI 搜索异常", e);
-            return "【搜索失败】" + e.getMessage();
+            return ToolError.unexpected(LOG, "SerpAPI search failed unexpectedly", e,
+                    I18nUtil.getMessage("tool.search.failed", e.getMessage()), I18nUtil.getMessage("tool.search.retryHint"));
         }
     }
 
@@ -120,7 +122,7 @@ public class SerpApiSearchTool implements Tool {
      */
     private String parseResults(String responseBody) {
         if (responseBody == null || responseBody.isBlank()) {
-            return "搜索未返回结果";
+            return I18nUtil.getMessage("tool.search.noResults");
         }
 
         try {
@@ -141,7 +143,7 @@ public class SerpApiSearchTool implements Tool {
                         return GSON.toJson(result);
                     }
                 }
-                return "搜索未返回结果，请尝试更换关键词";
+                return I18nUtil.getMessage("tool.search.noResultsRetry");
             }
 
             JsonArray results = new JsonArray();
@@ -171,8 +173,8 @@ public class SerpApiSearchTool implements Tool {
             return GSON.toJson(wrapper);
 
         } catch (Exception e) {
-            LOG.error("解析 SerpAPI 结果失败", e);
-            return "【搜索失败】解析搜索结果失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to parse SerpAPI response", e,
+                    I18nUtil.getMessage("tool.search.parseFailed", e.getMessage()), I18nUtil.getMessage("tool.search.retryHint"));
         }
     }
 

@@ -12,6 +12,8 @@ import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.settings.IqsSettings;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 /**
  * 网络搜索工具
@@ -29,7 +31,7 @@ public class WebSearchTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "搜索互联网信息，获取最新的网络内容。当需要实时信息、最新新闻、技术文档、或本地知识库未覆盖的内容时，使用此工具搜索网络。支持指定时间范围过滤搜索结果。";
+        return I18nUtil.getMessage("tool.description.webSearchAdvanced");
     }
 
     @Override
@@ -62,7 +64,7 @@ public class WebSearchTool implements Tool {
             // 1. 检查配置
             IqsSettings settings = IqsSettings.getInstance();
             if (!settings.isConfigured()) {
-                return "【提示】网络搜索功能尚未配置。请前往 Settings → Tools → 太微 → 网络搜索 页面配置阿里云 AccessKey ID 和 AccessKey Secret，并确保已开通阿里云 IQS 服务。";
+                return ToolError.of("NOT_CONFIGURED", I18nUtil.getMessage("tool.iqs.notConfigured"), I18nUtil.getMessage("tool.iqs.configureHint"));
             }
 
             // 2. 解析参数
@@ -72,7 +74,7 @@ public class WebSearchTool implements Tool {
             String categories = args.has("categories") ? args.get("categories").getAsString() : null;
 
             if (query == null || query.trim().isEmpty()) {
-                return "错误: 搜索关键词不能为空";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.search.queryEmpty"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
 
             // 3. 创建 IQS 客户端
@@ -96,33 +98,33 @@ public class WebSearchTool implements Tool {
             request.setBody(input);
 
             // 5. 调用搜索
-            LOG.info("调用阿里云 IQS 搜索: query=" + query + ", timeRange=" + timeRange);
+            LOG.debug("Calling Aliyun IQS search");
             UnifiedSearchResponse response = client.unifiedSearch(request);
 
             // 6. 将结果转换为 JSON 字符串返回
             if (response == null || response.getBody() == null) {
-                return "搜索未返回结果";
+                return I18nUtil.getMessage("tool.search.noResults");
             }
 
             return GSON.toJson(response.getBody());
 
         } catch (com.aliyun.tea.TeaException e) {
-            LOG.error("IQS 搜索失败", e);
+            LOG.warn("IQS request failed: " + e.getMessage());
             String message = e.getMessage();
             if (message != null && message.contains("InvalidAccessKeyId")) {
-                return "【搜索失败】AccessKey ID 无效，请检查 Settings → Tools → 太微 → 网络搜索 中的配置是否正确。";
+                return ToolError.of("AUTHENTICATION_FAILED", I18nUtil.getMessage("tool.iqs.invalidId"), I18nUtil.getMessage("tool.iqs.configureHint"));
             } else if (message != null && message.contains("SignatureDoesNotMatch")) {
-                return "【搜索失败】AccessKey Secret 错误，请检查 Settings → Tools → 太微 → 网络搜索 中的配置是否正确。";
+                return ToolError.of("AUTHENTICATION_FAILED", I18nUtil.getMessage("tool.iqs.invalidSecret"), I18nUtil.getMessage("tool.iqs.configureHint"));
             } else if (message != null && message.contains("Forbidden")) {
-                return "【搜索失败】当前 AccessKey 无权限访问 IQS 服务，请确保已开通阿里云 IQS 服务并授予 AliyunIQSFullAccess 权限。";
+                return ToolError.of("PERMISSION_DENIED", I18nUtil.getMessage("tool.iqs.forbidden"), I18nUtil.getMessage("tool.iqs.permissionHint"));
             } else if (message != null && (message.contains("Timeout") || message.contains("timed out"))) {
-                return "【搜索失败】网络请求超时，请检查网络连接后重试。";
+                return ToolError.of("NETWORK_TIMEOUT", I18nUtil.getMessage("tool.search.timeout"), I18nUtil.getMessage("tool.search.networkHint"));
             }
-            return "【搜索失败】" + (message != null ? message : "未知错误，请稍后重试");
+            return ToolError.of("API_ERROR", message != null ? message : I18nUtil.getMessage("tool.error.unknown"), I18nUtil.getMessage("tool.search.retryHint"));
 
         } catch (Exception e) {
-            LOG.error("IQS 搜索异常", e);
-            return "【搜索失败】" + e.getMessage();
+            return ToolError.unexpected(LOG, "IQS search failed unexpectedly", e,
+                    I18nUtil.getMessage("tool.search.failed", e.getMessage()), I18nUtil.getMessage("tool.search.retryHint"));
         }
     }
 }

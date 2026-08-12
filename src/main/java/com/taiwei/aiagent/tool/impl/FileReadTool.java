@@ -2,10 +2,13 @@ package com.taiwei.aiagent.tool.impl;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,6 +21,8 @@ import java.util.stream.Collectors;
  * Agent 可以通过此工具读取项目中的文件内容
  */
 public class FileReadTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(FileReadTool.class);
 
     private final Project project;
 
@@ -32,7 +37,7 @@ public class FileReadTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "读取指定路径的文件内容。路径可以是绝对路径或相对于项目根目录的相对路径。";
+        return I18nUtil.getMessage("tool.description.readFile");
     }
 
     @Override
@@ -63,6 +68,10 @@ public class FileReadTool implements Tool {
     public String execute(String arguments) {
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
+            if (!args.has("path") || args.get("path").getAsString().isBlank()) {
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.error.pathRequired"),
+                        I18nUtil.getMessage("tool.hint.provideValidArguments"));
+            }
             String filePath = args.get("path").getAsString();
 
             Path resolved = resolvePath(filePath);
@@ -70,7 +79,9 @@ public class FileReadTool implements Tool {
                 return buildFileNotFoundError(resolved);
             }
             if (Files.isDirectory(resolved)) {
-                return "错误: 路径是目录而非文件 - " + resolved;
+                return ToolError.of("PATH_IS_DIRECTORY",
+                        I18nUtil.getMessage("tool.read.pathIsDirectory", resolved),
+                        I18nUtil.getMessage("tool.hint.provideFilePath"));
             }
 
             // 读取全部内容
@@ -94,19 +105,21 @@ public class FileReadTool implements Tool {
 
             // 大文件截断提示
             if (content.length() > 50000) {
-                return content.substring(0, 50000) + "\n\n... [文件过大，已截断。请使用 start_line/end_line 参数指定行范围]";
+                return content.substring(0, 50000) + I18nUtil.getMessage("tool.read.truncated");
             }
 
             return content;
 
         } catch (Exception e) {
-            return "读取文件失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to read file", e,
+                    I18nUtil.getMessage("tool.read.failed", e.getMessage()),
+                    I18nUtil.getMessage("tool.hint.verifyPathAndRetry"));
         }
     }
 
     private String buildFileNotFoundError(Path resolved) {
         StringBuilder msg = new StringBuilder();
-        msg.append("错误: 文件不存在 - ").append(resolved).append("\n");
+        msg.append(I18nUtil.getMessage("tool.read.notFound", resolved)).append("\n");
 
         Path parent = resolved.getParent();
         if (parent != null && Files.isDirectory(parent)) {
@@ -127,7 +140,7 @@ public class FileReadTool implements Tool {
                         .collect(Collectors.toList());
 
                 if (!similar.isEmpty()) {
-                    msg.append("同目录下相似文件:\n");
+                    msg.append(I18nUtil.getMessage("tool.read.similarFiles")).append("\n");
                     for (String name : similar) {
                         msg.append("  ").append(parent).append("/").append(name).append("\n");
                     }
@@ -139,14 +152,15 @@ public class FileReadTool implements Tool {
                             .limit(20)
                             .collect(Collectors.toList());
                     if (!all.isEmpty()) {
-                        msg.append("父目录 ").append(parent).append(" 中的文件:\n");
+                        msg.append(I18nUtil.getMessage("tool.read.parentFiles", parent)).append("\n");
                         all.forEach(f -> msg.append("  ").append(f).append("\n"));
                     }
                 }
             } catch (Exception ignored) {
             }
         }
-        return msg.toString();
+        return ToolError.of("FILE_NOT_FOUND", I18nUtil.getMessage("tool.read.notFound", resolved),
+                msg.toString().trim());
     }
 
     private Path resolvePath(String filePath) {

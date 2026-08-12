@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 import okhttp3.*;
 
 import java.io.IOException;
@@ -37,7 +39,7 @@ public class DdgSearchTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "搜索互联网信息，获取最新的网络内容。当需要实时信息、最新新闻、技术文档、或本地知识库未覆盖的内容时，使用此工具搜索网络。";
+        return I18nUtil.getMessage("tool.description.webSearch");
     }
 
     @Override
@@ -62,10 +64,10 @@ public class DdgSearchTool implements Tool {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             String query = args.get("query").getAsString();
             if (query == null || query.trim().isEmpty()) {
-                return "错误: 搜索关键词不能为空";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.search.queryEmpty"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
 
-            LOG.info("调用 DuckDuckGo Lite 搜索: query=" + query);
+            LOG.debug("Calling DuckDuckGo Lite search");
 
             RequestBody formBody = new FormBody.Builder()
                     .add("q", query)
@@ -81,18 +83,18 @@ public class DdgSearchTool implements Tool {
 
             try (Response response = httpClient.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    return "【搜索失败】HTTP " + response.code();
+                    return ToolError.of("HTTP_ERROR", I18nUtil.getMessage("tool.search.httpFailed", response.code()), I18nUtil.getMessage("tool.search.retryHint"));
                 }
                 String html = response.body() != null ? response.body().string() : "";
                 return parseLiteResults(html);
             }
 
         } catch (IOException e) {
-            LOG.error("DuckDuckGo 搜索失败", e);
-            return "【搜索失败】网络请求失败: " + e.getMessage();
+            LOG.warn("DuckDuckGo request failed: " + e.getMessage());
+            return ToolError.of("NETWORK_ERROR", I18nUtil.getMessage("tool.search.networkFailed", e.getMessage()), I18nUtil.getMessage("tool.search.networkHint"));
         } catch (Exception e) {
-            LOG.error("DuckDuckGo 搜索异常", e);
-            return "【搜索失败】" + e.getMessage();
+            return ToolError.unexpected(LOG, "DuckDuckGo search failed unexpectedly", e,
+                    I18nUtil.getMessage("tool.search.failed", e.getMessage()), I18nUtil.getMessage("tool.search.retryHint"));
         }
     }
 
@@ -133,7 +135,7 @@ public class DdgSearchTool implements Tool {
         }
 
         if (results.isEmpty()) {
-            return "搜索未返回结果，请尝试更换关键词";
+            return I18nUtil.getMessage("tool.search.noResultsRetry");
         }
 
         JsonArray array = new JsonArray();

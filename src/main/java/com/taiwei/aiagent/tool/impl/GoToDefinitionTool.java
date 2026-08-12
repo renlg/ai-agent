@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -12,6 +13,8 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiShortNamesCache;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -23,6 +26,8 @@ import java.util.Map;
  * 使用 IntelliJ PSI 索引查找符号声明，返回文件路径、行号和完整声明源码
  */
 public class GoToDefinitionTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(GoToDefinitionTool.class);
 
     private final Project project;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -38,7 +43,7 @@ public class GoToDefinitionTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "跳转到符号定义。通过 IntelliJ PSI 索引查找类、方法或字段的声明位置，返回文件路径、行号和完整声明源码。可传入 file_hint 在多个匹配中优先选择指定文件中的定义。";
+        return I18nUtil.getMessage("tool.description.goToDefinition");
     }
 
     @Override
@@ -68,9 +73,8 @@ public class GoToDefinitionTool implements Tool {
     @Override
     public String execute(String arguments) {
         if (!com.taiwei.aiagent.util.JavaPluginAvailability.isJavaPluginAvailable()) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("error", "Java plugin is not available in this IDE, symbol search is disabled. Please use the search_code tool instead.");
-            return gson.toJson(err);
+            return ToolError.of("DEPENDENCY_UNAVAILABLE", I18nUtil.getMessage("tool.javaPlugin.unavailable"),
+                    I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
         }
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
@@ -102,10 +106,8 @@ public class GoToDefinitionTool implements Tool {
                 }
 
                 if (candidates.isEmpty()) {
-                    Map<String, Object> err = new LinkedHashMap<>();
-                    err.put("error", "未找到符号 \"" + symbol + "\" 的定义");
-                    err.put("hint", "请检查符号名称拼写，或使用 search_code 进行文本搜索");
-                    return gson.toJson(err);
+                    return ToolError.of("SYMBOL_NOT_FOUND", I18nUtil.getMessage("tool.definition.notFound", symbol),
+                            I18nUtil.getMessage("tool.definition.notFoundHint"));
                 }
 
                 // Prefer the candidate in the hinted file when hint is provided
@@ -125,9 +127,8 @@ public class GoToDefinitionTool implements Tool {
 
                 PsiFile psiFile = best.getContainingFile();
                 if (psiFile == null) {
-                    Map<String, Object> err = new LinkedHashMap<>();
-                    err.put("error", "无法获取定义所在文件");
-                    return gson.toJson(err);
+                    return ToolError.of("DEFINITION_FILE_UNAVAILABLE", I18nUtil.getMessage("tool.definition.fileUnavailable"),
+                            I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
                 }
 
                 VirtualFile vFile = psiFile.getVirtualFile();
@@ -167,9 +168,8 @@ public class GoToDefinitionTool implements Tool {
             });
 
         } catch (Throwable e) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("error", "go_to_definition 失败: " + e.getMessage());
-            return gson.toJson(err);
+            return ToolError.unexpected(LOG, "Go to definition failed", e,
+                    I18nUtil.getMessage("tool.definition.failed", e.getMessage()), I18nUtil.getMessage("tool.javaPlugin.useSearchCode"));
         }
     }
 }

@@ -3,14 +3,19 @@ package com.taiwei.aiagent.tool.impl;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.diagnostic.Logger;
 import com.taiwei.aiagent.memory.MemoryManager;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 /**
  * 记忆搜索工具
  * 混合检索（关键词 + 向量语义 RRF 融合）已保存的长期记忆
  */
 public class MemorySearchTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(MemorySearchTool.class);
 
     private static final int DEFAULT_LIMIT = 5;
     private static final int MAX_LIMIT = 20;
@@ -29,7 +34,7 @@ public class MemorySearchTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "搜索已保存的记忆（地址/位置/偏好/事实等），用户询问个人信息时立即调用";
+        return I18nUtil.getMessage("tool.description.searchMemory");
     }
 
     @Override
@@ -66,11 +71,13 @@ public class MemorySearchTool implements Tool {
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
             if (!args.has("query")) {
-                return "错误: 缺少必填参数 query";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.search.queryRequired"),
+                        I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
             String query = args.get("query").getAsString().trim();
             if (query.isEmpty()) {
-                return "错误: query 不能为空";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.search.queryEmpty"),
+                        I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
             String category = args.has("category") ? args.get("category").getAsString() : null;
             int limit = args.has("limit") ? args.get("limit").getAsInt() : DEFAULT_LIMIT;
@@ -79,10 +86,12 @@ public class MemorySearchTool implements Tool {
             minRelevance = Math.max(0.0, Math.min(minRelevance, 1.0));
 
             String result = MemoryManager.getInstance(project).hybridSearch(query, category, limit, minRelevance);
-            return result.isBlank() ? "未找到相关记忆" : result;
+            return result.isBlank() ? I18nUtil.getMessage("tool.memory.noResults") : result;
 
         } catch (Exception e) {
-            return "搜索记忆失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to search memory", e,
+                    I18nUtil.getMessage("tool.memory.searchFailed", e.getMessage()),
+                    I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 

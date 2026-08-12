@@ -6,10 +6,15 @@ import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.skill.Skill;
 import com.taiwei.aiagent.skill.SkillManager;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
+import com.intellij.openapi.diagnostic.Logger;
 
 import java.util.Optional;
 
 public class LoadSkillTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(LoadSkillTool.class);
 
     private final Project project;
 
@@ -24,7 +29,7 @@ public class LoadSkillTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "加载指定 Skill 的完整内容。当你需要某个技能的详细指令时，使用此工具按需加载。可用的 Skill 列表见系统提示词的「可用的 Skill」部分。";
+        return I18nUtil.getMessage("tool.description.loadSkill");
     }
 
     @Override
@@ -51,11 +56,14 @@ public class LoadSkillTool implements Tool {
 
             Optional<Skill> skill = SkillManager.getInstance(project).getSkill(name);
             if (skill.isEmpty()) {
-                return "未找到名为「" + name + "」的 Skill。";
+                return ToolError.of("SKILL_NOT_FOUND", I18nUtil.getMessage("tool.skill.notFound", name),
+                        I18nUtil.getMessage("tool.skill.notFoundHint"));
             }
             return skill.get().getContent();
         } catch (Exception e) {
-            return "加载 Skill 失败：" + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to load skill", e,
+                    I18nUtil.getMessage("tool.skill.failed", e.getMessage()),
+                    I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 

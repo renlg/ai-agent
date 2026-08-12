@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import com.intellij.openapi.diagnostic.Logger;
+import com.taiwei.aiagent.tool.ToolError;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -88,7 +89,7 @@ public class HttpSseMcpClient implements McpClient {
             connected = true;
             return result;
         } catch (Exception e) {
-            LOG.warn("Failed to initialize SSE MCP server '" + config.name + "'", e);
+            LOG.warn("Failed to initialize SSE MCP server '" + config.name + "': " + e.getMessage());
             return McpInitResult.failure("Failed to connect to MCP server: " + e.getMessage());
         }
     }
@@ -124,28 +125,28 @@ public class HttpSseMcpClient implements McpClient {
             }
             return McpToolListParser.parse(response.getAsJsonObject("result"));
         } catch (Exception e) {
-            LOG.warn("Failed to list tools for '" + config.name + "'", e);
+            LOG.warn("Failed to list tools for '" + config.name + "': " + e.getMessage());
             return Collections.emptyList();
         }
     }
 
     @Override
     public String callTool(String toolName, String argumentsJson) {
-        if (!connected) return "Error: MCP server '" + config.name + "' is not connected";
+        if (!connected) return ToolError.of("MCP_NOT_CONNECTED", "MCP server '" + config.name + "' is not connected", "Reconnect or enable the MCP server, then retry.");
         try {
             JsonObject params = McpToolListParser.buildCallParams(gson, toolName, argumentsJson);
-            if (params == null) return "Error: invalid tool arguments JSON";
+            if (params == null) return ToolError.of("INVALID_ARGUMENT", "Invalid MCP tool arguments JSON", "Provide arguments matching the MCP tool schema.");
 
             JsonObject response = sendRequest("tools/call", params);
             if (response == null) {
-                return "Error: MCP server '" + config.name + "' timed out calling tool '" + toolName + "'";
+                return ToolError.of("MCP_TIMEOUT", "MCP server '" + config.name + "' timed out calling tool '" + toolName + "'", "Retry or increase the MCP server timeout.");
             }
             String err = McpJsonRpc.extractError(response);
-            if (err != null) return "Error: " + err;
+            if (err != null) return ToolError.of("MCP_ERROR", err, "Correct the arguments or inspect the MCP server, then retry.");
             return McpJsonRpc.extractToolResultText(response.getAsJsonObject("result"));
         } catch (Exception e) {
-            LOG.warn("Failed to call tool '" + toolName + "' on '" + config.name + "'", e);
-            return "Error calling MCP tool: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to call MCP tool '" + toolName + "' on '" + config.name + "'", e,
+                    "MCP tool call failed: " + e.getMessage(), "Inspect the MCP server connection and retry.");
         }
     }
 
@@ -192,7 +193,7 @@ public class HttpSseMcpClient implements McpClient {
         eventSource = factory.newEventSource(builder.build(), new EventSourceListener() {
             @Override
             public void onOpen(EventSource es, Response response) {
-                LOG.info("SSE connection opened for MCP server '" + config.name + "'");
+                LOG.debug("SSE connection opened for MCP server '" + config.name + "'");
             }
 
             @Override
@@ -231,7 +232,7 @@ public class HttpSseMcpClient implements McpClient {
         failAllPending("MCP SSE connection lost for '" + config.name + "', reconnecting");
         CompletableFuture.delayedExecutor(RECONNECT_DELAY_SECONDS, TimeUnit.SECONDS).execute(() -> {
             if (closed) return;
-            LOG.info("Reconnecting SSE for MCP server '" + config.name + "'");
+            LOG.debug("Reconnecting SSE for MCP server '" + config.name + "'");
             endpointFuture = new CompletableFuture<>();
             connectSse();
             reinitializeAfterReconnect();
@@ -272,9 +273,9 @@ public class HttpSseMcpClient implements McpClient {
             }
             sendNotificationAsync("notifications/initialized", new JsonObject());
             connected = true;
-            LOG.info("MCP server '" + config.name + "' re-initialized after reconnect");
+            LOG.debug("MCP server '" + config.name + "' re-initialized after reconnect");
         } catch (Exception e) {
-            LOG.warn("Failed to re-initialize MCP server '" + config.name + "' after reconnect", e);
+            LOG.warn("Failed to re-initialize MCP server '" + config.name + "' after reconnect: " + e.getMessage());
         }
     }
 
@@ -333,7 +334,7 @@ public class HttpSseMcpClient implements McpClient {
             Thread.currentThread().interrupt();
             return null;
         } catch (ExecutionException e) {
-            LOG.warn("MCP SSE request failed: method=" + method, e);
+            LOG.warn("MCP SSE request failed: method=" + method + ", error=" + e.getMessage());
             return null;
         } finally {
             pending.remove(id);
@@ -344,7 +345,7 @@ public class HttpSseMcpClient implements McpClient {
         try {
             postMessage(McpJsonRpc.buildNotification(method, params));
         } catch (IOException e) {
-            LOG.warn("Failed to send notification '" + method + "' to '" + config.name + "'", e);
+            LOG.warn("Failed to send notification '" + method + "' to '" + config.name + "': " + e.getMessage());
         }
     }
 

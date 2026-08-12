@@ -1,5 +1,6 @@
 package com.taiwei.aiagent.util;
 
+import java.text.MessageFormat;
 import java.util.Locale;
 import java.util.ResourceBundle;
 
@@ -32,5 +33,12 @@ public class I18nUtil {
         } catch (Exception e) {
             return key; // 如果找不到，返回 key 本身
         }
+    }
+
+    /**
+     * 获取带占位参数的国际化消息。
+     */
+    public static String getMessage(String key, Object... arguments) {
+        return MessageFormat.format(getMessage(key), arguments);
     }
 }

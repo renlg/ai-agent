@@ -94,10 +94,10 @@ public class SessionStore {
                     writeIndex(indexEntries);
                 }
                 Files.deleteIfExists(source);
-                LOG.info("已迁移旧存储文件 " + source.getFileName() + " 到分文件存储");
+                LOG.debug("Migrated legacy session store " + source.getFileName());
             }
         } catch (IOException e) {
-            LOG.warn("迁移旧存储文件失败: " + e.getMessage(), e);
+            LOG.error("Failed to migrate legacy session store", e);
         }
     }
 
@@ -149,9 +149,9 @@ public class SessionStore {
             }
 
             writeIndex(indexEntries);
-            LOG.info("已保存 " + data.size() + " 个会话到分文件存储");
+            LOG.debug("Saved " + data.size() + " sessions");
         } catch (IOException e) {
-            LOG.warn("保存会话失败失败: " + e.getMessage(), e);
+            LOG.error("Failed to save sessions", e);
         }
     }
 
@@ -167,7 +167,7 @@ public class SessionStore {
 
     public List<SessionData> load() {
         if (!Files.exists(indexPath)) {
-            LOG.info("会话索引文件不存在，返回空列表");
+            LOG.debug("Session index does not exist; returning an empty list");
             return Collections.emptyList();
         }
 
@@ -190,10 +190,10 @@ public class SessionStore {
                     sessions.add(sd);
                 }
             }
-            LOG.info("从分文件存储加载了 " + sessions.size() + " 个会话");
+            LOG.debug("Loaded " + sessions.size() + " sessions");
             return sessions;
         } catch (IOException e) {
-            LOG.warn("加载会话失败: " + e.getMessage(), e);
+            LOG.error("Failed to load sessions", e);
             return Collections.emptyList();
         }
     }
@@ -213,7 +213,7 @@ public class SessionStore {
                 }
             }
         } catch (IOException e) {
-            LOG.warn("删除会话失败: " + e.getMessage(), e);
+            LOG.error("Failed to delete session", e);
         }
     }
 
@@ -243,9 +243,9 @@ public class SessionStore {
                 }
                 Files.deleteIfExists(sessionsDir);
             }
-            LOG.info("已删除会话存储: " + storeDir);
+            LOG.debug("Deleted session store: " + storeDir);
         } catch (IOException e) {
-            LOG.warn("删除存储文件失败: " + e.getMessage(), e);
+            LOG.error("Failed to delete session store", e);
         }
     }
 

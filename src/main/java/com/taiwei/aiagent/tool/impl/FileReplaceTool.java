@@ -6,12 +6,15 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.diff.DiffEntry;
 import com.taiwei.aiagent.diff.DiffReviewService;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -23,6 +26,8 @@ import java.nio.file.Paths;
  * 支持三种模式：str_replace（文本替换）、line_replace（行范围替换）、insert_after（行后插入）
  */
 public class FileReplaceTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(FileReplaceTool.class);
 
     private final Project project;
     private final Gson gson = new Gson();
@@ -38,8 +43,7 @@ public class FileReplaceTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "精确替换文件中的指定文本。三种模式：str_replace（按文本内容替换）、line_replace（按行号范围替换）、insert_after（在指定行后插入）。"
-                + "str_replace 当 old_string 仅出现一次时直接替换；出现多次时需设置 replace_all=true。";
+        return I18nUtil.getMessage("tool.description.replaceFile");
     }
 
     @Override
@@ -97,7 +101,8 @@ public class FileReplaceTool implements Tool {
         try {
             ReplaceArgs args = gson.fromJson(arguments, ReplaceArgs.class);
             if (args.file_path == null) {
-                return "错误: 缺少必要参数 file_path";
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.pathRequired"),
+                        I18nUtil.getMessage("tool.hint.provideValidArguments"));
             }
 
             ExecuteContext ctx = prepareExecute(args.file_path);
@@ -109,14 +114,17 @@ public class FileReplaceTool implements Tool {
                 default -> executeStrReplace(ctx.resolved, ctx.oldContent, args);
             };
 
+        } catch (IllegalArgumentException e) {
+            return ToolError.of("INVALID_PATH", e.getMessage(), I18nUtil.getMessage("tool.hint.verifyPathAndRetry"));
         } catch (Exception e) {
-            return "文件替换失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to replace file content", e,
+                    I18nUtil.getMessage("tool.replace.failed", e.getMessage()), I18nUtil.getMessage("tool.hint.retry"));
         }
     }
 
     private String executeStrReplace(Path resolved, String oldContent, ReplaceArgs args) throws Exception {
         if (args.old_string == null || args.old_string.isEmpty()) {
-            return "错误: str_replace 模式需要非空的 old_string";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.oldStringRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
 
         int count = countOccurrences(oldContent, args.old_string);
@@ -130,7 +138,7 @@ public class FileReplaceTool implements Tool {
         if (count == 1) {
             newContent = replaceFirst(oldContent, args.old_string, replacement);
         } else if (!args.replace_all) {
-            return "错误: 找到 " + count + " 处匹配，请确认是否使用 replace_all=true 批量替换";
+            return ToolError.of("AMBIGUOUS_MATCH", I18nUtil.getMessage("tool.replace.multipleMatches", count), I18nUtil.getMessage("tool.replace.multipleMatchesHint"));
         } else {
             newContent = oldContent.replace(args.old_string, replacement);
         }
@@ -138,25 +146,25 @@ public class FileReplaceTool implements Tool {
         writeAndRecordDiff(resolved, oldContent, newContent);
 
         int replacedCount = args.replace_all ? count : 1;
-        return "替换成功: 共替换 " + replacedCount + " 处 - " + resolved;
+        return I18nUtil.getMessage("tool.replace.successCount", replacedCount, resolved);
     }
 
     private String executeLineReplace(Path resolved, String oldContent, ReplaceArgs args) throws Exception {
         if (args.start_line == null || args.end_line == null) {
-            return "错误: line_replace 模式需要 start_line 和 end_line 参数";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.lineRangeRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
 
         String[] lines = oldContent.split("\n", -1);
         int totalLines = lines.length;
 
         if (args.start_line < 1 || args.start_line > totalLines) {
-            return "错误: start_line 超出范围 [1, " + totalLines + "]，当前值: " + args.start_line;
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.startOutOfRange", totalLines, args.start_line), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
         if (args.end_line < 1 || args.end_line > totalLines) {
-            return "错误: end_line 超出范围 [1, " + totalLines + "]，当前值: " + args.end_line;
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.endOutOfRange", totalLines, args.end_line), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
         if (args.start_line > args.end_line) {
-            return "错误: start_line (" + args.start_line + ") 不能大于 end_line (" + args.end_line + ")";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.invalidRange", args.start_line, args.end_line), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
 
         // Bug 3: stripTrailing new_string to avoid trailing newlines causing blank lines
@@ -184,19 +192,19 @@ public class FileReplaceTool implements Tool {
         String newContent = sb.toString();
         writeAndRecordDiff(resolved, oldContent, newContent);
 
-        return "替换成功: 已替换第 " + args.start_line + "~" + args.end_line + " 行 - " + resolved;
+        return I18nUtil.getMessage("tool.replace.successLines", args.start_line, args.end_line, resolved);
     }
 
     private String executeInsertAfter(Path resolved, String oldContent, ReplaceArgs args) throws Exception {
         if (args.insert_line == null) {
-            return "错误: insert_after 模式需要 insert_line 参数";
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.insertLineRequired"), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
 
         String[] lines = oldContent.split("\n", -1);
         int totalLines = lines.length;
 
         if (args.insert_line < 0 || args.insert_line > totalLines) {
-            return "错误: insert_line 超出范围 [0, " + totalLines + "]，当前值: " + args.insert_line;
+            return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.replace.insertOutOfRange", totalLines, args.insert_line), I18nUtil.getMessage("tool.hint.provideValidArguments"));
         }
 
         String newString = args.new_string == null ? "" : args.new_string;
@@ -221,19 +229,19 @@ public class FileReplaceTool implements Tool {
 
         writeAndRecordDiff(resolved, oldContent, newContent);
 
-        return "插入成功: 已在第 " + args.insert_line + " 行后插入内容 - " + resolved;
+        return I18nUtil.getMessage("tool.replace.insertSuccess", args.insert_line, resolved);
     }
 
     private ExecuteContext prepareExecute(String filePath) throws Exception {
         Path resolved = resolvePath(filePath);
         if (!isPathAllowed(resolved)) {
-            throw new Exception("用户拒绝了项目目录之外的写入操作 - " + resolved);
+            throw new IllegalArgumentException(I18nUtil.getMessage("tool.write.outsideDenied", resolved));
         }
         if (!Files.exists(resolved)) {
-            throw new Exception("文件不存在 - " + resolved);
+            throw new IllegalArgumentException(I18nUtil.getMessage("tool.read.notFound", resolved));
         }
         if (Files.isDirectory(resolved)) {
-            throw new Exception("路径是目录而非文件 - " + resolved);
+            throw new IllegalArgumentException(I18nUtil.getMessage("tool.read.pathIsDirectory", resolved));
         }
         // Prefer the in-editor Document text: the replacement result is written back via
         // document.setText(), so basing it on stale on-disk content would silently discard
@@ -259,12 +267,12 @@ public class FileReplaceTool implements Tool {
         ApplicationManager.getApplication().invokeAndWait(() -> {
             VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
             if (vFile == null) {
-                error[0] = "无法定位虚拟文件 - " + resolved;
+                error[0] = I18nUtil.getMessage("tool.write.virtualFileMissing", resolved);
                 return;
             }
             Document document = FileDocumentManager.getInstance().getDocument(vFile);
             if (document == null) {
-                error[0] = "无法获取文档 - " + resolved;
+                error[0] = I18nUtil.getMessage("tool.write.documentMissing", resolved);
                 return;
             }
             WriteCommandAction.runWriteCommandAction(project, () -> document.setText(newContent));
@@ -283,10 +291,10 @@ public class FileReplaceTool implements Tool {
      */
     private String buildStrReplaceNotFoundError(String content, String oldString, String filePath) {
         StringBuilder msg = new StringBuilder();
-        msg.append("错误: str_replace 未找到匹配内容\n");
-        msg.append("文件: ").append(filePath).append("\n");
-        msg.append("搜索内容 (前 120 字符): ").append(truncate(oldString, 120)).append("\n");
-        msg.append("建议: 用 read_file 重新读取文件，核实内容后重新构造 old_string\n");
+        msg.append(I18nUtil.getMessage("tool.replace.notFound")).append("\n");
+        msg.append(I18nUtil.getMessage("tool.replace.fileLabel", filePath)).append("\n");
+        msg.append(I18nUtil.getMessage("tool.replace.searchPreview", truncate(oldString, 120))).append("\n");
+        msg.append(I18nUtil.getMessage("tool.replace.notFoundHint")).append("\n");
 
         // Find the first non-blank line of old_string and search for a partial match
         String[] targetLines = oldString.split("\n");
@@ -317,18 +325,18 @@ public class FileReplaceTool implements Tool {
             }
 
             if (bestLine >= 0) {
-                msg.append("\n最接近的部分匹配位于第 ").append(bestLine + 1).append(" 行，上下文:\n");
+                msg.append("\n").append(I18nUtil.getMessage("tool.replace.closestMatch", bestLine + 1)).append("\n");
                 int start = Math.max(0, bestLine - 4);
                 int end = Math.min(contentLines.length, bestLine + 6);
                 for (int i = start; i < end; i++) {
                     msg.append(String.format("%4d | %s\n", i + 1, contentLines[i]));
                 }
             } else {
-                msg.append("(文件中未找到与 old_string 相似的内容)\n");
+                msg.append(I18nUtil.getMessage("tool.replace.noSimilarContent")).append("\n");
             }
         }
 
-        return msg.toString();
+        return ToolError.of("CONTENT_NOT_FOUND", I18nUtil.getMessage("tool.replace.notFound"), msg.toString().trim());
     }
 
     private int countOccurrences(String content, String target) {
@@ -384,8 +392,8 @@ public class FileReplaceTool implements Tool {
         ApplicationManager.getApplication().invokeAndWait(() -> {
             int result = Messages.showYesNoDialog(
                     project,
-                    "文件 " + normalizedResolved + " 位于项目目录之外，是否允许写入？",
-                    "路径超出项目范围",
+                    I18nUtil.getMessage("tool.write.outsidePrompt", normalizedResolved),
+                    I18nUtil.getMessage("tool.write.outsideTitle"),
                     Messages.getWarningIcon()
             );
             allowed[0] = result == Messages.YES;

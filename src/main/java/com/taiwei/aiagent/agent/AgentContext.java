@@ -128,7 +128,7 @@ public class AgentContext {
         String apiKey = settings.getApiKey();
         String model = settings.getModel();
         int activeIndex = settings.getActiveModelIndex();
-        LOG.info("创建 LLM 客户端 - activeIndex=" + activeIndex
+        LOG.debug("Creating LLM client - activeIndex=" + activeIndex
                 + ", baseUrl=" + baseUrl + ", model=" + model);
 
         retireClient(cachedClient);

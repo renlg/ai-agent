@@ -130,7 +130,7 @@ public class McpManager implements Disposable {
         try {
             return client.initialize();
         } catch (Exception e) {
-            LOG.warn("MCP testConnection failed for '" + config.name + "'", e);
+            LOG.warn("MCP testConnection failed for '" + config.name + "': " + e.getMessage());
             return McpInitResult.failure("Failed to connect: " + e.getMessage());
         } finally {
             try {
@@ -168,7 +168,7 @@ public class McpManager implements Disposable {
         try {
             result = client.initialize();
         } catch (Exception e) {
-            LOG.warn("Failed to initialize MCP server '" + config.name + "'", e);
+            LOG.warn("Failed to initialize MCP server '" + config.name + "': " + e.getMessage());
             result = McpInitResult.failure("Failed to connect: " + e.getMessage());
         }
         if (!result.isSuccess()) {
@@ -184,7 +184,7 @@ public class McpManager implements Disposable {
         try {
             toolInfos = client.listTools();
         } catch (Exception e) {
-            LOG.warn("Failed to list tools for MCP server '" + config.name + "'", e);
+            LOG.warn("Failed to list tools for MCP server '" + config.name + "': " + e.getMessage());
             toolInfos = Collections.emptyList();
         }
 
@@ -196,7 +196,7 @@ public class McpManager implements Disposable {
         }
 
         connections.put(config.name, new Connection(client, adapters));
-        LOG.info("MCP server '" + config.name + "' connected with " + adapters.size() + " tool(s)");
+        LOG.debug("MCP server '" + config.name + "' connected with " + adapters.size() + " tool(s)");
         return result;
     }
 
@@ -206,7 +206,7 @@ public class McpManager implements Disposable {
             try {
                 conn.client.close();
             } catch (Exception e) {
-                LOG.warn("Error closing MCP connection '" + name + "'", e);
+                LOG.warn("Error closing MCP connection '" + name + "': " + e.getMessage());
             }
         }
     }

@@ -195,7 +195,7 @@ public final class EmbeddingService {
         for (String candidate : CANDIDATE_MODELS) {
             List<float[]> vectors = callEmbeddings(url, apiKey, candidate, texts);
             if (vectors != null) {
-                LOG.info("Resolved embedding model '" + candidate + "' at " + url);
+                LOG.debug("Resolved embedding model '" + candidate + "' at " + url);
                 workingModel = candidate;
                 return vectors;
             }

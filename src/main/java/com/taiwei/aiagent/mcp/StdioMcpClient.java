@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import com.intellij.openapi.diagnostic.Logger;
+import com.taiwei.aiagent.tool.ToolError;
 import com.taiwei.aiagent.settings.AiAgentSettings;
 
 import java.io.BufferedReader;
@@ -95,7 +96,7 @@ public class StdioMcpClient implements McpClient {
             connected = true;
             return result;
         } catch (Exception e) {
-            LOG.warn("Failed to initialize stdio MCP server '" + config.name + "'", e);
+            LOG.warn("Failed to initialize stdio MCP server '" + config.name + "': " + e.getMessage());
             // Same reasoning as above: clean up any process/threads that were already started
             // before the exception was thrown, so a failed initialize() never leaks a subprocess.
             close();
@@ -134,30 +135,30 @@ public class StdioMcpClient implements McpClient {
             }
             return McpToolListParser.parse(response.getAsJsonObject("result"));
         } catch (Exception e) {
-            LOG.warn("Failed to list tools for '" + config.name + "'", e);
+            LOG.warn("Failed to list tools for '" + config.name + "': " + e.getMessage());
             return Collections.emptyList();
         }
     }
 
     @Override
     public String callTool(String toolName, String argumentsJson) {
-        if (!connected) return "Error: MCP server '" + config.name + "' is not connected";
+        if (!connected) return ToolError.of("MCP_NOT_CONNECTED", "MCP server '" + config.name + "' is not connected", "Reconnect or enable the MCP server, then retry.");
         try {
             JsonObject params = McpToolListParser.buildCallParams(gson, toolName, argumentsJson);
-            if (params == null) return "Error: invalid tool arguments JSON";
+            if (params == null) return ToolError.of("INVALID_ARGUMENT", "Invalid MCP tool arguments JSON", "Provide arguments matching the MCP tool schema.");
 
             JsonObject response = sendRequest("tools/call", params);
             if (response == null) {
-                return "Error: MCP server '" + config.name + "' timed out calling tool '" + toolName + "'";
+                return ToolError.of("MCP_TIMEOUT", "MCP server '" + config.name + "' timed out calling tool '" + toolName + "'", "Retry or increase the MCP server timeout.");
             }
             String err = McpJsonRpc.extractError(response);
             if (err != null) {
-                return "Error: " + err;
+                return ToolError.of("MCP_ERROR", err, "Correct the arguments or inspect the MCP server, then retry.");
             }
             return McpJsonRpc.extractToolResultText(response.getAsJsonObject("result"));
         } catch (Exception e) {
-            LOG.warn("Failed to call tool '" + toolName + "' on '" + config.name + "'", e);
-            return "Error calling MCP tool: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to call MCP tool '" + toolName + "' on '" + config.name + "'", e,
+                    "MCP tool call failed: " + e.getMessage(), "Inspect the MCP server connection and retry.");
         }
     }
 
@@ -229,7 +230,7 @@ public class StdioMcpClient implements McpClient {
             Thread.currentThread().interrupt();
             return null;
         } catch (ExecutionException e) {
-            LOG.warn("MCP request failed: method=" + method, e);
+            LOG.warn("MCP request failed: method=" + method + ", error=" + e.getMessage());
             return null;
         } finally {
             pending.remove(id);
@@ -280,7 +281,7 @@ public class StdioMcpClient implements McpClient {
                 new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while (!closed && (line = reader.readLine()) != null) {
-                LOG.info("[mcp:" + config.name + " stderr] " + line);
+                LOG.debug("[mcp:" + config.name + " stderr] " + line);
             }
         } catch (IOException ignored) {
         }

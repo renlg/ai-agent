@@ -2,8 +2,11 @@ package com.taiwei.aiagent.tool.impl;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -22,6 +25,8 @@ import java.util.Set;
  * Agent 可以通过此工具探索项目目录布局，避免盲猜文件路径
  */
 public class ListDirectoryTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(ListDirectoryTool.class);
 
     private static final int DEFAULT_MAX_DEPTH = 3;
     private static final int MAX_MAX_DEPTH = 8;
@@ -46,8 +51,7 @@ public class ListDirectoryTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "列出指定目录的文件和子目录结构（树形文本）。用于探索项目布局、确认文件路径。"
-                + "默认从项目根目录开始，深度 3 层。会自动跳过 .git、build、node_modules 等目录。";
+        return I18nUtil.getMessage("tool.description.listDirectory");
     }
 
     @Override
@@ -82,10 +86,12 @@ public class ListDirectoryTool implements Tool {
 
             Path resolved = resolvePath(dirPath);
             if (!Files.exists(resolved)) {
-                return "错误: 目录不存在 - " + resolved;
+                return ToolError.of("DIRECTORY_NOT_FOUND", I18nUtil.getMessage("tool.list.notFound", resolved),
+                        I18nUtil.getMessage("tool.hint.verifyPathAndRetry"));
             }
             if (!Files.isDirectory(resolved)) {
-                return "错误: 路径不是目录 - " + resolved;
+                return ToolError.of("PATH_IS_NOT_DIRECTORY", I18nUtil.getMessage("tool.list.notDirectory", resolved),
+                        I18nUtil.getMessage("tool.hint.provideDirectoryPath"));
             }
 
             StringBuilder sb = new StringBuilder();
@@ -93,12 +99,14 @@ public class ListDirectoryTool implements Tool {
             int[] count = {0};
             listRecursive(resolved, "", 1, maxDepth, sb, count);
             if (count[0] >= MAX_ENTRIES) {
-                sb.append("\n... [条目过多，已截断至 ").append(MAX_ENTRIES).append(" 条，请指定更深层的子目录查看]");
+                sb.append(I18nUtil.getMessage("tool.list.truncated", MAX_ENTRIES));
             }
             return sb.toString();
 
         } catch (Exception e) {
-            return "列出目录失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to list directory", e,
+                    I18nUtil.getMessage("tool.list.failed", e.getMessage()),
+                    I18nUtil.getMessage("tool.hint.verifyPathAndRetry"));
         }
     }
 

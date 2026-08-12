@@ -44,7 +44,7 @@ public class SessionManager {
     public void loadFromDisk() {
         List<SessionStore.SessionData> savedSessions = sessionStore.load();
         if (savedSessions.isEmpty()) {
-            LOG.info("没有可恢复的历史会话");
+            LOG.debug("No sessions to restore");
             return;
         }
 
@@ -77,7 +77,7 @@ public class SessionManager {
             }
         }
 
-        LOG.info("从磁盘恢复了 " + sessions.size() + " 个历史会话");
+        LOG.debug("Restored " + sessions.size() + " sessions from disk");
     }
 
     /**

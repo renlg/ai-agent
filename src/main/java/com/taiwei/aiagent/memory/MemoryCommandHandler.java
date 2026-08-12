@@ -1,5 +1,7 @@
 package com.taiwei.aiagent.memory;
 
+import com.taiwei.aiagent.util.I18nUtil;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -65,11 +67,11 @@ public class MemoryCommandHandler {
 
     private String handleRemember(String content) {
         if (content.isEmpty()) {
-            return "好的，不过我没听清要记住的内容，请再说一次。";
+            return I18nUtil.getMessage("memory.command.rememberEmpty");
         }
         List<String> tags = generateTags(content);
         memoryManager.remember(content, MemoryCategory.FACT, tags, 5);
-        return "已记住：" + content + "（标签: " + String.join(", ", tags) + "）";
+        return I18nUtil.getMessage("memory.command.remembered", content, String.join(", ", tags));
     }
 
     /**
@@ -91,23 +93,23 @@ public class MemoryCommandHandler {
 
     private String handleForget(String query) {
         if (query.isEmpty()) {
-            return "好的，不过我不确定要忘记什么，请说明关键词。";
+            return I18nUtil.getMessage("memory.command.forgetEmpty");
         }
         int deleted = memoryManager.forgetByQuery(query);
         return deleted > 0
-                ? "已忘记 " + deleted + " 条与\"" + query + "\"相关的记忆。"
-                : "没有找到与\"" + query + "\"相关的记忆。";
+                ? I18nUtil.getMessage("memory.command.forgotten", deleted, query)
+                : I18nUtil.getMessage("memory.command.forgetNotFound", query);
     }
 
     private String handleRecall(String query) {
         if (query.isEmpty()) {
-            return "你想让我回忆什么？";
+            return I18nUtil.getMessage("memory.command.recallEmpty");
         }
         List<MemoryEntry> matches = memoryManager.recall(query, 5);
         if (matches.isEmpty()) {
-            return "我没有关于\"" + query + "\"的记忆。";
+            return I18nUtil.getMessage("memory.command.recallNotFound", query);
         }
-        StringBuilder sb = new StringBuilder("关于\"").append(query).append("\"，我记得：\n");
+        StringBuilder sb = new StringBuilder(I18nUtil.getMessage("memory.command.recallHeader", query));
         for (MemoryEntry entry : matches) {
             sb.append("- ").append(entry.getContent()).append("\n");
         }

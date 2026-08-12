@@ -7,6 +7,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
+import com.taiwei.aiagent.util.I18nUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import org.jetbrains.annotations.NotNull;
@@ -199,7 +200,7 @@ public class DiffReviewService {
                 }
             }
         } catch (Exception e) {
-            LOG.error("Revert diff 失败: " + entry.getFilePath(), e);
+            LOG.error("Failed to revert diff: " + entry.getFilePath(), e);
         }
 
         // Clear highlights for this file
@@ -234,8 +235,8 @@ public class DiffReviewService {
         }
         return Messages.showYesNoDialog(
                 project,
-                "The AI-changed region in " + filePath + " has been modified by you. Revert anyway?",
-                "Region Modified",
+                I18nUtil.getMessage("diff.revertModifiedPrompt", filePath),
+                I18nUtil.getMessage("diff.revertModifiedTitle"),
                 null
         ) == Messages.YES;
     }

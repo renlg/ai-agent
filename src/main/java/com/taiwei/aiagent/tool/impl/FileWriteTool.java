@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.application.ApplicationManager;
@@ -13,6 +14,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.taiwei.aiagent.diff.DiffEntry;
 import com.taiwei.aiagent.diff.DiffReviewService;
 import com.taiwei.aiagent.tool.Tool;
+import com.taiwei.aiagent.tool.ToolError;
+import com.taiwei.aiagent.util.I18nUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,6 +27,8 @@ import java.nio.file.Paths;
  * Agent 可以通过此工具创建新文件或修改已有文件
  */
 public class FileWriteTool implements Tool {
+
+    private static final Logger LOG = Logger.getInstance(FileWriteTool.class);
 
     private final Project project;
 
@@ -38,7 +43,7 @@ public class FileWriteTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "将内容写入指定路径的文件。如果文件不存在则创建，如果存在则覆盖。支持创建目录结构。";
+        return I18nUtil.getMessage("tool.description.writeFile");
     }
 
     @Override
@@ -70,13 +75,18 @@ public class FileWriteTool implements Tool {
     public String execute(String arguments) {
         try {
             JsonObject args = JsonParser.parseString(arguments).getAsJsonObject();
+            if (!args.has("path") || !args.has("content")) {
+                return ToolError.of("INVALID_ARGUMENT", I18nUtil.getMessage("tool.write.argumentsRequired"),
+                        I18nUtil.getMessage("tool.hint.provideValidArguments"));
+            }
             String filePath = args.get("path").getAsString();
             String content = args.get("content").getAsString();
 
             Path resolved = resolvePath(filePath);
 
             if (!isPathAllowed(resolved)) {
-                return "写入文件失败: 用户拒绝了项目目录之外的写入操作 - " + resolved;
+                return ToolError.of("USER_DENIED", I18nUtil.getMessage("tool.write.outsideDenied", resolved),
+                        I18nUtil.getMessage("tool.hint.chooseProjectPath"));
             }
 
             // 确保父目录存在
@@ -104,12 +114,12 @@ public class FileWriteTool implements Tool {
             ApplicationManager.getApplication().invokeAndWait(() -> {
                 VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(resolved.toFile());
                 if (vFile == null) {
-                    error[0] = "无法定位虚拟文件 - " + resolved;
+                    error[0] = I18nUtil.getMessage("tool.write.virtualFileMissing", resolved);
                     return;
                 }
                 Document document = FileDocumentManager.getInstance().getDocument(vFile);
                 if (document == null) {
-                    error[0] = "无法获取文档 - " + resolved;
+                    error[0] = I18nUtil.getMessage("tool.write.documentMissing", resolved);
                     return;
                 }
                 WriteCommandAction.runWriteCommandAction(project, () -> document.setText(content));
@@ -117,13 +127,16 @@ public class FileWriteTool implements Tool {
             });
 
             if (error[0] != null) {
-                return "写入文件失败: " + error[0];
+                return ToolError.unexpected(LOG, "IDE failed to expose the written file", new IllegalStateException(error[0]),
+                        I18nUtil.getMessage("tool.write.failed", error[0]), I18nUtil.getMessage("tool.hint.retry"));
             }
 
-            return "文件写入成功: " + resolved;
+            return I18nUtil.getMessage("tool.write.success", resolved);
 
         } catch (Exception e) {
-            return "写入文件失败: " + e.getMessage();
+            return ToolError.unexpected(LOG, "Failed to write file", e,
+                    I18nUtil.getMessage("tool.write.failed", e.getMessage()),
+                    I18nUtil.getMessage("tool.hint.verifyPathAndRetry"));
         }
     }
 
@@ -157,8 +170,8 @@ public class FileWriteTool implements Tool {
         ApplicationManager.getApplication().invokeAndWait(() -> {
             int result = Messages.showYesNoDialog(
                     project,
-                    "文件 " + normalizedResolved + " 位于项目目录之外，是否允许写入？",
-                    "路径超出项目范围",
+                    I18nUtil.getMessage("tool.write.outsidePrompt", normalizedResolved),
+                    I18nUtil.getMessage("tool.write.outsideTitle"),
                     Messages.getWarningIcon()
             );
             allowed[0] = result == Messages.YES;
