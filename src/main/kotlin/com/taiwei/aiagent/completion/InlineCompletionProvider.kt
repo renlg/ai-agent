@@ -21,6 +21,7 @@ import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.util.PsiTreeUtil
 import com.taiwei.aiagent.settings.AiAgentSettings
+import com.taiwei.aiagent.util.JavaPluginAvailability
 import kotlinx.coroutines.flow.flowOf
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -171,9 +172,10 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
                     ?: return@compute ""
 
                 val sb = StringBuilder()
+                val isJavaPluginAvailable = JavaPluginAvailability.isJavaPluginAvailable()
 
                 // Collect import statements (Java)
-                if (psiFile is PsiJavaFile) {
+                if (isJavaPluginAvailable && psiFile is PsiJavaFile) {
                     val importList = psiFile.importList
                     if (importList != null && importList.allImportStatements.isNotEmpty()) {
                         importList.allImportStatements.forEach { sb.append(it.text).append("\n") }
@@ -182,7 +184,7 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
                 }
 
                 // Collect imports for other file types by scanning leading lines (Kotlin, etc.)
-                if (psiFile !is PsiJavaFile) {
+                if (!isJavaPluginAvailable || psiFile !is PsiJavaFile) {
                     val text = psiFile.text
                     val lines = text.lines()
                     val importLines = lines.takeWhile { it.isBlank() || it.startsWith("import ") || it.startsWith("package ") }
@@ -194,7 +196,7 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
 
                 // Find enclosing PSI elements at the cursor
                 val element = psiFile.findElementAt(minOf(offset, psiFile.textLength - 1).coerceAtLeast(0))
-                if (element != null) {
+                if (isJavaPluginAvailable && element != null) {
                     val enclosingClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)
                     val enclosingMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
 
@@ -223,7 +225,7 @@ class InlineCompletionProvider : DebouncedInlineCompletionProvider() {
 
                 sb.toString()
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             ""
         }
     }
